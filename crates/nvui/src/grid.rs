@@ -1,11 +1,18 @@
 #![allow(dead_code)]
 
-use nvim::GridCell as NvimGridCell;
+use nvim::{CellText, GridCell as NvimGridCell};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridCell {
-	pub ch: char,
+	pub text: CellText,
 	pub hl_id: Option<u32>,
+}
+
+impl GridCell {
+	/// An empty cell, shown as a space
+	pub fn blank() -> Self {
+		Self { text: CellText::from(" ").expect("a space fits in a cell"), hl_id: None }
+	}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,14 +35,12 @@ impl Grid {
 	pub fn resize(&mut self, width: usize, height: usize) {
 		self.width = width;
 		self.height = height;
-		self.cells.resize(self.cell_count(), GridCell { ch: ' ', hl_id: None });
+		self.cells.resize(self.cell_count(), GridCell::blank());
 		self.clear();
 	}
 
 	pub fn clear(&mut self) {
-		for cell in &mut self.cells {
-			*cell = GridCell { ch: ' ', hl_id: None };
-		}
+		self.cells.fill(GridCell::blank());
 		self.cursor_row = 0;
 		self.cursor_col = 0;
 	}
@@ -54,7 +59,7 @@ impl Grid {
 					return;
 				}
 				let index = self.cell_index(row, col);
-				self.cells[index] = GridCell { ch: cell.text, hl_id: cell.hl_id };
+				self.cells[index] = GridCell { text: cell.text, hl_id: cell.hl_id };
 				col += 1;
 			}
 		}
@@ -80,7 +85,7 @@ impl Grid {
 #[cfg(test)]
 mod tests {
 	use super::{Grid, GridCell};
-	use nvim::GridCell as NvimGridCell;
+	use nvim::{CellText, GridCell as NvimGridCell};
 
 	#[test]
 	fn new_grid() {
@@ -89,42 +94,42 @@ mod tests {
 		assert_eq!(grid.width, 3);
 		assert_eq!(grid.height, 2);
 		assert_eq!(grid.cells.len(), 6);
-		assert!(grid.cells.iter().all(|cell| *cell == GridCell { ch: ' ', hl_id: None }));
+		assert!(grid.cells.iter().all(|cell| *cell == GridCell::blank()));
 	}
 
 	#[test]
 	fn clear() {
 		let mut grid = Grid::new(2, 2);
 
-		grid.cells[0] = GridCell { ch: 'x', hl_id: Some(1) };
-		grid.cells[3] = GridCell { ch: 'y', hl_id: Some(2) };
+		grid.cells[0] = GridCell { text: CellText::from("x").unwrap(), hl_id: Some(1) };
+		grid.cells[3] = GridCell { text: CellText::from("y").unwrap(), hl_id: Some(2) };
 		grid.clear();
 
-		assert!(grid.cells.iter().all(|cell| *cell == GridCell { ch: ' ', hl_id: None }));
+		assert!(grid.cells.iter().all(|cell| *cell == GridCell::blank()));
 	}
 
 	#[test]
 	fn set_line() {
 		let mut grid = Grid::new(5, 2);
 		let cells = vec![
-			NvimGridCell { text: 'a', hl_id: Some(1), repeat: Some(2) },
-			NvimGridCell { text: 'b', hl_id: None, repeat: None },
-			NvimGridCell { text: 'c', hl_id: Some(3), repeat: Some(10) },
+			NvimGridCell { text: CellText::from("a").unwrap(), hl_id: Some(1), repeat: Some(2) },
+			NvimGridCell { text: CellText::from("b").unwrap(), hl_id: None, repeat: None },
+			NvimGridCell { text: CellText::from("c").unwrap(), hl_id: Some(3), repeat: Some(10) },
 		];
 
 		grid.set_line(1, 1, &cells);
 
 		let expected = vec![
-			GridCell { ch: ' ', hl_id: None },
-			GridCell { ch: ' ', hl_id: None },
-			GridCell { ch: ' ', hl_id: None },
-			GridCell { ch: ' ', hl_id: None },
-			GridCell { ch: ' ', hl_id: None },
-			GridCell { ch: ' ', hl_id: None },
-			GridCell { ch: 'a', hl_id: Some(1) },
-			GridCell { ch: 'a', hl_id: Some(1) },
-			GridCell { ch: 'b', hl_id: None },
-			GridCell { ch: 'c', hl_id: Some(3) },
+			GridCell::blank(),
+			GridCell::blank(),
+			GridCell::blank(),
+			GridCell::blank(),
+			GridCell::blank(),
+			GridCell::blank(),
+			GridCell { text: CellText::from("a").unwrap(), hl_id: Some(1) },
+			GridCell { text: CellText::from("a").unwrap(), hl_id: Some(1) },
+			GridCell { text: CellText::from("b").unwrap(), hl_id: None },
+			GridCell { text: CellText::from("c").unwrap(), hl_id: Some(3) },
 		];
 
 		assert_eq!(grid.cells, expected);

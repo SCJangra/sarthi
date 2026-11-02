@@ -9,6 +9,7 @@ members = [
 resolver = "3"
 
 [workspace.dependencies]
+arrayvec = { version = "0.7", features = ["serde"] }
 renderer = { package = "nvui-renderer", path = "crates/renderer" }
 nvim = { package = "nvui-nvim-client", path = "crates/nvim-client" }
 rmp = "0.8"

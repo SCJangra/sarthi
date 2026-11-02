@@ -298,13 +298,13 @@ mod tests {
 	/// delivered and nothing else is reported in its place.
 	#[test]
 	fn deliver_messages_after_one_that_fails_to_deserialize() {
-		// [2, "redraw", [["grid_line", [1, 0, 0, [[""]], false]]]]: "" doesn't fit `GridCell::text`
+		// [2, "redraw", [["grid_line", ["x", 0, 0, [["a"]], false]]]]: the grid id must be an integer
 		let bad_notification = [
 			&[0x93, 0x02, 0xA6][..],
 			b"redraw",
 			&[0x91, 0x92, 0xA9],
 			b"grid_line",
-			&[0x95, 0x01, 0x00, 0x00, 0x91, 0x91, 0xA0, 0xC2],
+			&[0x95, 0xA1, b'x', 0x00, 0x00, 0x91, 0x91, 0xA1, b'a', 0xC2],
 		]
 		.concat();
 
