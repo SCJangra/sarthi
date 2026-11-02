@@ -15,7 +15,7 @@ use renderer::{Renderer, RendererConfig, RendererError};
 use crate::error::Error;
 use crate::grid::Grid;
 use crate::highlight::HighlightState;
-use crate::windows::WindowConfig;
+use crate::windows::{GridSize, WindowConfig};
 
 pub struct App {
 	pub config: WindowConfig,
@@ -25,6 +25,10 @@ pub struct App {
 	pub grid_window: DashMap<u32, WindowId>,
 	pub highlight_state: HighlightState,
 	pub nvim: Nvim,
+
+	/// Grid size last sent to Neovim, so resizes that don't change it aren't sent again
+	pub ui_size: GridSize,
+
 	pub error: Option<Error>,
 }
 
@@ -53,6 +57,7 @@ impl App {
 			grid_window: DashMap::new(),
 			highlight_state: HighlightState::new(),
 			nvim,
+			ui_size: GridSize { width: 0, height: 0 },
 			error: None,
 		})
 	}
@@ -87,23 +92,34 @@ impl App {
 		Ok(())
 	}
 
+	/// Number of grid cells that fit in `window`
+	fn grid_size(&self, window: &Window) -> GridSize {
+		let cell_size = self.config.cell_size.to_physical(window.scale_factor());
+		GridSize::fit(window.inner_size(), cell_size)
+	}
+
 	fn attach_ui(&mut self, window: &Window) -> Result<(), Error> {
-		let size = window.inner_size();
+		let size = self.grid_size(window);
 
 		let params = NvimUiAttachParams { width: size.width, height: size.height, options: NvimUiOptions::all() };
 
 		smol::block_on(self.nvim.ui_attach(params))?;
+		self.ui_size = size;
 		self.grid.insert(1, Grid::new(0, 0));
 		self.grid_window.insert(1, window.id());
 		Ok(())
 	}
 
-	fn resize_nvim_ui(&self, window: &Window) -> Result<(), Error> {
-		let size = window.inner_size();
+	fn resize_nvim_ui(&mut self, window: &Window) -> Result<(), Error> {
+		let size = self.grid_size(window);
+		if size == self.ui_size {
+			return Ok(());
+		}
 
 		let params = NvimUiTryResizeParams { width: size.width, height: size.height };
 
 		smol::block_on(self.nvim.ui_try_resize(params))?;
+		self.ui_size = size;
 		Ok(())
 	}
 
