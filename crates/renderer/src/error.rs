@@ -21,6 +21,10 @@ pub enum RendererError {
 	#[error("NoAlphaMode")]
 	NoAlphaMode,
 
-	#[error("Surface({0})")]
-	Surface(#[from] wgpu::SurfaceError),
+	/// The surface must be recreated, e.g. with a new [`crate::Renderer`]
+	#[error("SurfaceLost")]
+	SurfaceLost,
+
+	#[error("SurfaceValidation")]
+	SurfaceValidation,
 }

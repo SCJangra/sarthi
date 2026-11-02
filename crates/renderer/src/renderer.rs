@@ -35,6 +35,8 @@ impl Renderer {
 				power_preference: renderer_config.power_preference,
 				compatible_surface: Some(&surface),
 				force_fallback_adapter: false,
+				// Only needed when exposing wgpu to untrusted content, e.g. in a web browser.
+				apply_limit_buckets: false,
 			})
 			.await
 			.map_err(|_| RendererError::NoAdapter)?;
@@ -90,6 +92,7 @@ impl Renderer {
 			present_mode,
 			alpha_mode,
 			view_formats: vec![],
+			color_space: wgpu::SurfaceColorSpace::Auto,
 			desired_maximum_frame_latency: renderer_config.desired_maximum_frame_latency.max(1),
 		};
 
@@ -108,8 +111,21 @@ impl Renderer {
 		self.clear_color = clear_color;
 	}
 
-	pub fn render_clear(&mut self) -> Result<(), RendererError> {
-		let frame = self.surface.get_current_texture()?;
+	pub fn render_clear(&mut self) -> Result<Frame, RendererError> {
+		let (frame, suboptimal) = match self.surface.get_current_texture() {
+			wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+			wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+			wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+				return Ok(Frame::Skipped);
+			},
+			wgpu::CurrentSurfaceTexture::Outdated => {
+				self.surface.configure(&self.device, &self.config);
+				return Ok(Frame::Reconfigured);
+			},
+			wgpu::CurrentSurfaceTexture::Lost => return Err(RendererError::SurfaceLost),
+			wgpu::CurrentSurfaceTexture::Validation => return Err(RendererError::SurfaceValidation),
+		};
+
 		let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
 		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -136,8 +152,26 @@ impl Renderer {
 		}
 
 		self.queue.submit(Some(encoder.finish()));
-		frame.present();
+		self.queue.present(frame);
 
-		Ok(())
+		// The frame was still shown, but the next ones should use a surface that matches again.
+		if suboptimal {
+			self.surface.configure(&self.device, &self.config);
+		}
+
+		Ok(Frame::Presented)
 	}
+}
+
+/// What happened when rendering a frame
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Frame {
+	/// The frame was drawn and shown
+	Presented,
+
+	/// Nothing could be drawn right now (e.g. the window is hidden); try again on a later redraw
+	Skipped,
+
+	/// The surface was out of date and has been reconfigured; draw again
+	Reconfigured,
 }

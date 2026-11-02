@@ -22,7 +22,7 @@ flume = "0.12"
 arc-swap = "1"
 serde_tuple = "1"
 winit = "0.30"
-wgpu = "28"
+wgpu = "30"
 smol = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -10,7 +10,7 @@ use winit::event_loop::EventLoopProxy;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use nvim::{Nvim, NvimNotification, NvimUiAttachParams, NvimUiOptions, NvimUiTryResizeParams, RedrawNotification};
-use renderer::{Renderer, RendererConfig, RendererError};
+use renderer::{Frame, Renderer, RendererConfig, RendererError};
 
 use crate::error::Error;
 use crate::grid::Grid;
@@ -237,17 +237,19 @@ impl App {
 		Ok(())
 	}
 
-	fn redraw_renderer(&mut self, id: WindowId, window: &Window) -> Result<(), Error> {
+	fn redraw_renderer(&mut self, id: WindowId, window: &Arc<Window>) -> Result<(), Error> {
 		let Some(mut renderer) = self.renderer.get_mut(&id) else { return Ok(()) };
+		let frame = renderer.render_clear();
+		drop(renderer);
 
-		let Err(err) = renderer.render_clear() else { return Ok(()) };
-
-		match err {
-			RendererError::Surface(wgpu::SurfaceError::Lost) | RendererError::Surface(wgpu::SurfaceError::Outdated) => {
+		match frame {
+			Ok(Frame::Presented | Frame::Skipped) => (),
+			Ok(Frame::Reconfigured) => window.request_redraw(),
+			Err(RendererError::SurfaceLost) => {
+				self.create_renderer(window)?;
 				window.request_redraw();
 			},
-			RendererError::Surface(wgpu::SurfaceError::OutOfMemory) => return Err(err.into()),
-			_ => tracing::error!("Redraw renderer error: {err:?}"),
+			Err(err) => tracing::error!("Redraw renderer error: {err:?}"),
 		}
 
 		Ok(())
