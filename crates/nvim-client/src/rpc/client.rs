@@ -61,20 +61,15 @@ impl RpcClientInner {
 		let write_handle = thread::spawn(move || {
 			let mut writer = io::BufWriter::new(writer);
 
-			loop {
-				if !self_clone.running.load(Ordering::SeqCst) {
+			// Runs until every sender is gone (the client was stopped or dropped) or the server can't
+			// be written to anymore. Exiting drops the writer, which closes the server's input.
+			while self_clone.running.load(Ordering::SeqCst) {
+				let Ok(request) = request.recv() else { break };
+
+				if let Err(err) = Self::send_request(request, &mut writer) {
+					tracing::error!("Failed to send request: {err}");
 					break;
 				}
-
-				#[rustfmt::skip]
-				let Ok(request) = request
-					.recv()
-					.inspect_err(|err| tracing::error!("Receiving request on channel failed: {err}"))
-					 else { continue };
-
-				#[rustfmt::skip]
-				let Err(err) = Self::send_request(request, &mut writer) else { continue; };
-				tracing::error!("Failed to send request: {err}");
 			}
 		});
 
@@ -104,9 +99,19 @@ impl RpcClientInner {
 					tracing::error!("Failed to process message: {err}");
 				}
 			}
+
+			self.disconnect();
 		});
 
 		(read_handle, write_handle)
+	}
+
+	/// Marks the client as stopped once no more messages can arrive, and wakes everyone waiting on
+	/// one: pending calls fail and the notification subscription ends.
+	fn disconnect(&self) {
+		self.running.store(false, Ordering::SeqCst);
+		self.pending.clear();
+		self.subscription.store(Arc::new(None));
 	}
 
 	fn send_request<W>(request: Vec<u8>, writer: &mut W) -> Result<(), RpcError>
@@ -181,13 +186,20 @@ impl RpcClient {
 
 		self.inner.pending.insert(id, sender);
 
+		// If the connection already closed, nothing will answer or clear this call.
+		if !self.inner.running.load(Ordering::SeqCst) {
+			return Err(RpcError::RequestDropped);
+		}
+
 		let req =
 			OutgoingRpcMessage::Request(RpcRequest { id, method: M::METHOD.to_string(), params });
 		let req = rmp_serde::to_vec_named(&req)?;
 
 		self.request.send(req).map_err(|_| RpcError::SendRequest)?;
 
-		let response = receiver.recv_async().await?.result.map_err(RpcError::Response)?;
+		// The sender is dropped without a response when the connection closes.
+		let response = receiver.recv_async().await.map_err(|_| RpcError::RequestDropped)?;
+		let response = response.result.map_err(RpcError::Response)?;
 
 		let response: M::Response = rmpv::ext::from_value(response)?;
 		Ok(response)
@@ -230,12 +242,12 @@ impl RpcClient {
 
 #[cfg(test)]
 mod tests {
-	use std::io::{self, Write};
+	use std::io::{self, Read, Write};
 	use std::time::Duration;
 
 	use crate::{
 		GridCursorGotoEvent, NvimEval, NvimNotification, NvimUiAttach, NvimUiAttachParams, NvimUiOptions,
-		RedrawNotification, RpcClient,
+		RedrawNotification, RpcClient, RpcError,
 	};
 
 	#[test]
@@ -382,6 +394,60 @@ mod tests {
 		}])]);
 		assert_eq!(notifications.try_recv().unwrap(), expected);
 		assert!(notifications.try_recv().is_err());
+
+		client.stop();
+	}
+
+	#[test]
+	fn writer_exits_when_client_is_dropped() {
+		// Keep the client's input open, so only the writer side can end.
+		let (reader, _input) = io::pipe().unwrap();
+		let (mut output, writer) = io::pipe().unwrap();
+
+		drop(RpcClient::start(reader, writer));
+
+		// The writer thread drops its end of the pipe when it exits, which ends this read.
+		let (done, finished) = flume::bounded(1);
+		std::thread::spawn(move || {
+			let _ = output.read_to_end(&mut Vec::new());
+			let _ = done.send(());
+		});
+
+		assert!(finished.recv_timeout(Duration::from_secs(5)).is_ok(), "writer thread is still running");
+	}
+
+	/// Writer that closes the client's input pipe as soon as the first request is written.
+	struct CloseOnWrite(Option<io::PipeWriter>);
+
+	impl Write for CloseOnWrite {
+		fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+			self.0.take();
+			Ok(buf.len())
+		}
+
+		fn flush(&mut self) -> io::Result<()> {
+			Ok(())
+		}
+	}
+
+	#[test]
+	fn fail_pending_call_when_connection_closes() {
+		let (reader, pipe) = io::pipe().unwrap();
+		let client = RpcClient::start(reader, CloseOnWrite(Some(pipe)));
+		let notifications = client.subscribe().unwrap();
+
+		let call = async { Some(client.call::<NvimEval>(["1 + 1".into()]).await) };
+		let timeout = async {
+			smol::Timer::after(Duration::from_secs(5)).await;
+			None
+		};
+		let response = smol::block_on(smol::future::or(call, timeout)).expect("pending call hung after disconnect");
+
+		assert!(matches!(response, Err(RpcError::RequestDropped)), "unexpected response: {response:?}");
+		assert!(matches!(
+			notifications.recv_timeout(Duration::from_secs(5)),
+			Err(flume::RecvTimeoutError::Disconnected)
+		));
 
 		client.stop();
 	}
