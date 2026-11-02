@@ -32,6 +32,9 @@
           libxkbcommon
           vulkan-loader
         ];
+
+        # Use Vulkan drivers from this flake's mesa instead of the system's.
+        env.VK_DRIVER_FILES = "${pkgs.mesa}/share/vulkan/icd.d";
       };
     });
 }
