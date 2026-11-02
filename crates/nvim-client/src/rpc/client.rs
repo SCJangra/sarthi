@@ -250,14 +250,19 @@ mod tests {
 		RedrawNotification, RpcClient, RpcError,
 	};
 
-	#[test]
-	fn call() {
-		let mut nvim = std::process::Command::new("nvim")
-			.arg("--embed")
+	/// Starts an embedded Neovim that doesn't touch the user's config or ShaDa.
+	fn spawn_nvim() -> std::process::Child {
+		std::process::Command::new("nvim")
+			.args(["--embed", "--clean", "-i", "NONE"])
 			.stdin(std::process::Stdio::piped())
 			.stdout(std::process::Stdio::piped())
 			.spawn()
-			.unwrap();
+			.unwrap()
+	}
+
+	#[test]
+	fn call() {
+		let mut nvim = spawn_nvim();
 
 		let stdin = nvim.stdin.take().unwrap();
 		let stdout = nvim.stdout.take().unwrap();
@@ -276,12 +281,7 @@ mod tests {
 
 	#[test]
 	fn reply_error_to_unsupported_request() {
-		let mut nvim = std::process::Command::new("nvim")
-			.arg("--embed")
-			.stdin(std::process::Stdio::piped())
-			.stdout(std::process::Stdio::piped())
-			.spawn()
-			.unwrap();
+		let mut nvim = spawn_nvim();
 
 		let stdin = nvim.stdin.take().unwrap();
 		let stdout = nvim.stdout.take().unwrap();
@@ -306,12 +306,7 @@ mod tests {
 
 	#[test]
 	fn call_nvim_ui_attach() {
-		let mut nvim = std::process::Command::new("nvim")
-			.arg("--embed")
-			.stdin(std::process::Stdio::piped())
-			.stdout(std::process::Stdio::piped())
-			.spawn()
-			.unwrap();
+		let mut nvim = spawn_nvim();
 
 		let stdin = nvim.stdin.take().unwrap();
 		let stdout = nvim.stdout.take().unwrap();
