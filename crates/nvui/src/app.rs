@@ -211,7 +211,7 @@ impl App {
 		Ok(())
 	}
 
-	fn redraw_renderer(&mut self, event_loop: &ActiveEventLoop, id: WindowId, window: &Window) -> Result<(), Error> {
+	fn redraw_renderer(&mut self, id: WindowId, window: &Window) -> Result<(), Error> {
 		let Some(mut renderer) = self.renderer.get_mut(&id) else { return Ok(()) };
 
 		let Err(err) = renderer.render_clear() else { return Ok(()) };
@@ -220,14 +220,18 @@ impl App {
 			RendererError::Surface(wgpu::SurfaceError::Lost) | RendererError::Surface(wgpu::SurfaceError::Outdated) => {
 				window.request_redraw();
 			},
-			RendererError::Surface(wgpu::SurfaceError::OutOfMemory) => {
-				self.error = Some(err.into());
-				event_loop.exit();
-			},
+			RendererError::Surface(wgpu::SurfaceError::OutOfMemory) => return Err(err.into()),
 			_ => tracing::error!("Redraw renderer error: {err:?}"),
 		}
 
 		Ok(())
+	}
+
+	/// Records `error` and exits. Only the first error is kept, so a later failure can't hide the
+	/// original cause.
+	fn exit_with_error(&mut self, event_loop: &ActiveEventLoop, error: Error) {
+		self.error.get_or_insert(error);
+		event_loop.exit();
 	}
 
 	fn close_window(&mut self, event_loop: &ActiveEventLoop, id: WindowId) {
@@ -252,21 +256,18 @@ impl ApplicationHandler<AppEvent> for App {
 		let window = match self.create_window(event_loop, &config) {
 			Ok(window) => window,
 			Err(error) => {
-				self.error = Some(error);
-				event_loop.exit();
+				self.exit_with_error(event_loop, error);
 				return;
 			},
 		};
 
 		if let Err(error) = self.create_renderer(&window) {
-			self.error = Some(error);
-			event_loop.exit();
+			self.exit_with_error(event_loop, error);
 			return;
 		}
 
 		if let Err(error) = self.attach_ui(&window) {
-			self.error = Some(error);
-			event_loop.exit();
+			self.exit_with_error(event_loop, error);
 			return;
 		}
 
@@ -274,6 +275,10 @@ impl ApplicationHandler<AppEvent> for App {
 	}
 
 	fn window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
+		if event_loop.exiting() {
+			return;
+		}
+
 		#[rustfmt::skip]
 		let Some(window) = self
 			.window
@@ -287,30 +292,25 @@ impl ApplicationHandler<AppEvent> for App {
 			},
 			WindowEvent::Resized(_) => {
 				if let Err(error) = self.resize_renderer(window_id, &window) {
-					self.error = Some(error);
-					event_loop.exit();
+					self.exit_with_error(event_loop, error);
 					return;
 				}
 				if let Err(error) = self.resize_nvim_ui(&window) {
-					self.error = Some(error);
-					event_loop.exit();
+					self.exit_with_error(event_loop, error);
 				}
 			},
 			WindowEvent::ScaleFactorChanged { .. } => {
 				if let Err(error) = self.resize_renderer(window_id, &window) {
-					self.error = Some(error);
-					event_loop.exit();
+					self.exit_with_error(event_loop, error);
 					return;
 				}
 				if let Err(error) = self.resize_nvim_ui(&window) {
-					self.error = Some(error);
-					event_loop.exit();
+					self.exit_with_error(event_loop, error);
 				}
 			},
 			WindowEvent::RedrawRequested => {
-				if let Err(error) = self.redraw_renderer(event_loop, window_id, &window) {
-					self.error = Some(error);
-					event_loop.exit();
+				if let Err(error) = self.redraw_renderer(window_id, &window) {
+					self.exit_with_error(event_loop, error);
 				}
 			},
 			_ => (),
