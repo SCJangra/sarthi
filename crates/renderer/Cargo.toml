@@ -6,5 +6,3 @@ edition = { workspace = true }
 [dependencies]
 thiserror = { workspace = true }
 wgpu = { workspace = true }
-raw-window-handle = { workspace = true }
-winit = { workspace = true }

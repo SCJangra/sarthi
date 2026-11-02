@@ -1,8 +1,5 @@
 #[derive(Debug, thiserror::Error)]
 pub enum RendererError {
-	#[error("Handle({0})")]
-	Handle(#[from] raw_window_handle::HandleError),
-
 	#[error("CreateSurface({0})")]
 	CreateSurface(#[from] wgpu::CreateSurfaceError),
 

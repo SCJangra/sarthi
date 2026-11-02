@@ -1,5 +1,4 @@
 use crate::{RendererConfig, RendererError};
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 
 pub struct Renderer {
 	surface: wgpu::Surface<'static>,
@@ -10,56 +9,26 @@ pub struct Renderer {
 }
 
 impl Renderer {
+	/// Creates a renderer that draws to `target`.
+	///
+	/// The surface takes ownership of `target` (e.g. an `Arc<Window>`), which keeps the window
+	/// alive for as long as the renderer exists.
 	pub async fn new(
-		window: &winit::window::Window,
+		target: impl Into<wgpu::SurfaceTarget<'static>>,
 		width: u32,
 		height: u32,
 	) -> Result<Self, RendererError> {
-		Self::with_config(window, width, height, RendererConfig::default()).await
+		Self::with_config(target, width, height, RendererConfig::default()).await
 	}
 
 	pub async fn with_config(
-		window: &winit::window::Window,
-		width: u32,
-		height: u32,
-		renderer_config: RendererConfig,
-	) -> Result<Self, RendererError> {
-		let raw_display_handle = window.display_handle()?.as_raw();
-		let raw_window_handle = window.window_handle()?.as_raw();
-
-		unsafe {
-			Self::with_raw_handles(
-				raw_display_handle,
-				raw_window_handle,
-				width,
-				height,
-				renderer_config,
-			)
-			.await
-		}
-	}
-
-	/// # Safety
-	///
-	/// The provided raw display and window handles must remain valid for the
-	/// lifetime of the returned surface and must refer to the same live window.
-	/// Passing invalid, stale, or mismatched handles is undefined behavior in the
-	/// underlying windowing/graphics stack.
-	pub async unsafe fn with_raw_handles(
-		raw_display_handle: RawDisplayHandle,
-		raw_window_handle: RawWindowHandle,
+		target: impl Into<wgpu::SurfaceTarget<'static>>,
 		width: u32,
 		height: u32,
 		renderer_config: RendererConfig,
 	) -> Result<Self, RendererError> {
 		let instance = wgpu::Instance::default();
-
-		let surface = unsafe {
-			instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
-				raw_display_handle,
-				raw_window_handle,
-			})?
-		};
+		let surface = instance.create_surface(target)?;
 
 		let adapter = instance
 			.request_adapter(&wgpu::RequestAdapterOptions {

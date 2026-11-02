@@ -72,13 +72,17 @@ impl App {
 		Ok(window)
 	}
 
-	fn create_renderer(&mut self, id: WindowId, window: &Window) -> Result<(), Error> {
+	fn create_renderer(&mut self, window: &Arc<Window>) -> Result<(), Error> {
 		let size = window.inner_size();
 
-		let renderer =
-			smol::block_on(Renderer::with_config(window, size.width, size.height, RendererConfig::default()))?;
+		let renderer = smol::block_on(Renderer::with_config(
+			window.clone(),
+			size.width,
+			size.height,
+			RendererConfig::default(),
+		))?;
 
-		self.renderer.insert(id, renderer);
+		self.renderer.insert(window.id(), renderer);
 
 		Ok(())
 	}
@@ -254,7 +258,7 @@ impl ApplicationHandler<AppEvent> for App {
 			},
 		};
 
-		if let Err(error) = self.create_renderer(window.id(), &window) {
+		if let Err(error) = self.create_renderer(&window) {
 			self.error = Some(error);
 			event_loop.exit();
 			return;
