@@ -5,13 +5,14 @@ use nvim::{CellText, GridCell as NvimGridCell};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridCell {
 	pub text: CellText,
-	pub hl_id: Option<u32>,
+	/// Highlight from `hl_attr_define`; 0 is the default highlight
+	pub hl_id: u32,
 }
 
 impl GridCell {
 	/// An empty cell, shown as a space
 	pub fn blank() -> Self {
-		Self { text: CellText::from(" ").expect("a space fits in a cell"), hl_id: None }
+		Self { text: CellText::from(" ").expect("a space fits in a cell"), hl_id: 0 }
 	}
 }
 
@@ -52,14 +53,19 @@ impl Grid {
 
 		let mut col = col_start;
 
+		// Cells only carry `hl_id` when it changes; the rest reuse the last one seen.
+		let mut hl_id = 0;
+
 		for cell in cells {
+			hl_id = cell.hl_id.unwrap_or(hl_id);
+
 			let repeat = cell.repeat.unwrap_or(1) as usize;
 			for _ in 0..repeat {
 				if col >= self.width {
 					return;
 				}
 				let index = self.cell_index(row, col);
-				self.cells[index] = GridCell { text: cell.text, hl_id: cell.hl_id };
+				self.cells[index] = GridCell { text: cell.text, hl_id };
 				col += 1;
 			}
 		}
@@ -101,8 +107,8 @@ mod tests {
 	fn clear() {
 		let mut grid = Grid::new(2, 2);
 
-		grid.cells[0] = GridCell { text: CellText::from("x").unwrap(), hl_id: Some(1) };
-		grid.cells[3] = GridCell { text: CellText::from("y").unwrap(), hl_id: Some(2) };
+		grid.cells[0] = GridCell { text: CellText::from("x").unwrap(), hl_id: 1 };
+		grid.cells[3] = GridCell { text: CellText::from("y").unwrap(), hl_id: 2 };
 		grid.clear();
 
 		assert!(grid.cells.iter().all(|cell| *cell == GridCell::blank()));
@@ -126,13 +132,30 @@ mod tests {
 			GridCell::blank(),
 			GridCell::blank(),
 			GridCell::blank(),
-			GridCell { text: CellText::from("a").unwrap(), hl_id: Some(1) },
-			GridCell { text: CellText::from("a").unwrap(), hl_id: Some(1) },
-			GridCell { text: CellText::from("b").unwrap(), hl_id: None },
-			GridCell { text: CellText::from("c").unwrap(), hl_id: Some(3) },
+			GridCell { text: CellText::from("a").unwrap(), hl_id: 1 },
+			GridCell { text: CellText::from("a").unwrap(), hl_id: 1 },
+			GridCell { text: CellText::from("b").unwrap(), hl_id: 1 },
+			GridCell { text: CellText::from("c").unwrap(), hl_id: 3 },
 		];
 
 		assert_eq!(grid.cells, expected);
+	}
+
+	#[test]
+	fn set_line_reuses_last_hl_id() {
+		let mut grid = Grid::new(6, 1);
+		let cells = vec![
+			NvimGridCell { text: CellText::from("a").unwrap(), hl_id: Some(4), repeat: None },
+			NvimGridCell { text: CellText::from("b").unwrap(), hl_id: None, repeat: Some(2) },
+			NvimGridCell { text: CellText::from("c").unwrap(), hl_id: None, repeat: None },
+			NvimGridCell { text: CellText::from("d").unwrap(), hl_id: Some(0), repeat: None },
+			NvimGridCell { text: CellText::from("e").unwrap(), hl_id: None, repeat: None },
+		];
+
+		grid.set_line(0, 0, &cells);
+
+		let hl_ids: Vec<u32> = grid.cells.iter().map(|cell| cell.hl_id).collect();
+		assert_eq!(hl_ids, [4, 4, 4, 4, 0, 0]);
 	}
 
 	#[test]
