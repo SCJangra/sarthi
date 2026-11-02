@@ -35,6 +35,9 @@ pub struct App {
 #[derive(Debug)]
 pub enum AppEvent {
 	Nvim(NvimNotification),
+
+	/// The connection to Neovim closed, e.g. after `:q`
+	NvimExited,
 }
 
 impl App {
@@ -47,6 +50,9 @@ impl App {
 			for notification in notifications.iter() {
 				let _ = proxy.send_event(AppEvent::Nvim(notification));
 			}
+
+			// The notification stream only ends once the connection to Neovim is closed.
+			let _ = proxy.send_event(AppEvent::NvimExited);
 		});
 
 		Ok(Self {
@@ -337,9 +343,10 @@ impl ApplicationHandler<AppEvent> for App {
 		}
 	}
 
-	fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
+	fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
 		match event {
 			AppEvent::Nvim(notification) => self.handle_nvim_notification(notification),
+			AppEvent::NvimExited => event_loop.exit(),
 		}
 	}
 }
