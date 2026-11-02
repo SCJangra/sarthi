@@ -4,7 +4,7 @@ use std::{io, thread};
 
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
-use flume::{Receiver, Sender};
+use flume::{Receiver, Sender, WeakSender};
 
 use crate::rpc::frame::FrameReader;
 use crate::{
@@ -38,6 +38,10 @@ struct RpcClientInner {
 
 	/// All the subscriptions to [`NvimNotification`]s
 	subscription: ArcSwap<Option<Sender<NvimNotification>>>,
+
+	/// Sends replies to the server's requests through the writer thread. Weak, so that it doesn't
+	/// keep the writer running once [`RpcClient`] is stopped.
+	replies: WeakSender<Vec<u8>>,
 }
 
 impl RpcClientInner {
@@ -118,8 +122,18 @@ impl RpcClientInner {
 	fn process_msg(&self, msg: IncomingRpcMessage<rmpv::Value>) -> Result<(), RpcError> {
 		match msg {
 			IncomingRpcMessage::Request(req) => {
-				tracing::info!("Received unhandled RPC request: {req:?}");
-				return Ok(());
+				// No requests are handled yet. Reply with an error, so the caller's `rpcrequest()`
+				// fails instead of blocking Neovim while it waits for a response.
+				tracing::warn!("Received unsupported RPC request: {}", req.method);
+
+				let reply = OutgoingRpcMessage::<()>::ErrorResponse {
+					id: req.id,
+					message: format!("Unknown method: {}", req.method),
+				};
+				let reply = rmp_serde::to_vec_named(&reply)?;
+
+				let Some(replies) = self.replies.upgrade() else { return Ok(()) };
+				replies.send(reply).map_err(|_| RpcError::SendRequest)?;
 			},
 			IncomingRpcMessage::Notification(notification) => {
 				let sub = self.subscription.load();
@@ -151,6 +165,7 @@ impl RpcClient {
 			running: AtomicBool::new(false),
 			pending: DashMap::new(),
 			subscription: ArcSwap::new(Arc::new(None)),
+			replies: sender.downgrade(),
 		});
 
 		let (read_handle, write_handle) = inner.clone().start(reader, writer, receiver);
@@ -241,6 +256,36 @@ mod tests {
 		let response = smol::block_on(future).unwrap();
 
 		assert_eq!(response, rmpv::Value::from(2));
+
+		client.stop();
+		nvim.kill().unwrap();
+		nvim.wait().unwrap();
+	}
+
+	#[test]
+	fn reply_error_to_unsupported_request() {
+		let mut nvim = std::process::Command::new("nvim")
+			.arg("--embed")
+			.stdin(std::process::Stdio::piped())
+			.stdout(std::process::Stdio::piped())
+			.spawn()
+			.unwrap();
+
+		let stdin = nvim.stdin.take().unwrap();
+		let stdout = nvim.stdout.take().unwrap();
+
+		let client = RpcClient::start(stdout, stdin);
+
+		// While evaluating this, Neovim sends us a request on our channel (1) and blocks until we reply.
+		let call = async { Some(client.call::<NvimEval>(["rpcrequest(1, 'nvui_test')".into()]).await) };
+		let timeout = async {
+			smol::Timer::after(Duration::from_secs(5)).await;
+			None
+		};
+		let response = smol::block_on(smol::future::or(call, timeout)).expect("Neovim is blocked on our reply");
+
+		let err = response.unwrap_err();
+		assert!(err.to_string().contains("Unknown method: nvui_test"), "unexpected error: {err}");
 
 		client.stop();
 		nvim.kill().unwrap();

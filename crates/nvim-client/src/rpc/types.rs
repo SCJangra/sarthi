@@ -4,6 +4,9 @@ use super::NvimNotification;
 #[cfg_attr(test, derive(PartialEq))]
 pub enum OutgoingRpcMessage<T> {
 	Request(RpcRequest<T>),
+
+	/// Failed response to a request from the server
+	ErrorResponse { id: u32, message: String },
 }
 
 #[derive(Debug)]
@@ -55,6 +58,15 @@ mod ser_de {
 					tuple.serialize_element(&req.id)?;
 					tuple.serialize_element(&req.method)?;
 					tuple.serialize_element(&req.params)?;
+					tuple.end()
+				},
+				Self::ErrorResponse { id, message } => {
+					// Errors use Neovim's `[type, message]` shape, with type 0 (Exception).
+					let mut tuple = serializer.serialize_tuple(4)?;
+					tuple.serialize_element(&1)?;
+					tuple.serialize_element(id)?;
+					tuple.serialize_element(&(0, message))?;
+					tuple.serialize_element(&())?;
 					tuple.end()
 				},
 			}
@@ -175,6 +187,16 @@ mod tests {
 			},
 			_ => unreachable!(),
 		};
+	}
+
+	#[test]
+	fn ser_error_response() {
+		let response = OutgoingRpcMessage::<()>::ErrorResponse { id: 3, message: String::from("x") };
+
+		// [1, 3, [0, "x"], nil]
+		let expected = vec![0x94, 0x01, 0x03, 0x92, 0x00, 0xA1, b'x', 0xC0];
+
+		assert_eq!(rmp_serde::to_vec_named(&response).unwrap(), expected);
 	}
 
 	#[test]
