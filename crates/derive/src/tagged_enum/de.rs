@@ -19,6 +19,11 @@ impl TaggedEnum {
 		let mut variant_arms = Vec::new();
 		let mut fallback_arm = None;
 
+		let has_flattened_known_fields = self.variants.iter().any(|variant| {
+			variant.ident != "Other" && variant.fields.fields.iter().any(|field| field.flatten.is_some())
+		});
+		let ignore_trailing = has_flattened_known_fields.then(gen_ignore_trailing);
+
 		for variant in self.variants {
 			if variant.ident == "Other" {
 				fallback_arm = Some(variant.gen_unknown_de_arm(&ident));
@@ -35,6 +40,8 @@ impl TaggedEnum {
 				where
 					D: ::serde::Deserializer<'de>,
 				{
+					#ignore_trailing
+
 					struct #visitor;
 
 					impl<'de> ::serde::de::Visitor<'de> for #visitor {
@@ -64,6 +71,49 @@ impl TaggedEnum {
 
 					deserializer.deserialize_seq(#visitor)
 				}
+			}
+		}
+	}
+}
+
+/// Generates `IgnoreTrailing<T>`, which deserializes `T` from the start of a sequence and skips any
+/// elements after the ones `T` reads. Neovim adds trailing parameters to events over time, and
+/// rmp_serde rejects a sequence that isn't read to the end.
+fn gen_ignore_trailing() -> TokenStream {
+	quote! {
+		struct IgnoreTrailing<T>(T);
+
+		impl<'de, T> ::serde::Deserialize<'de> for IgnoreTrailing<T>
+		where
+			T: ::serde::Deserialize<'de>,
+		{
+			fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+			where
+				D: ::serde::Deserializer<'de>,
+			{
+				struct IgnoreTrailingVisitor<T>(::std::marker::PhantomData<T>);
+
+				impl<'de, T> ::serde::de::Visitor<'de> for IgnoreTrailingVisitor<T>
+				where
+					T: ::serde::Deserialize<'de>,
+				{
+					type Value = IgnoreTrailing<T>;
+
+					fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+						formatter.write_str("a sequence of arguments")
+					}
+
+					fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+					where
+						A: ::serde::de::SeqAccess<'de>,
+					{
+						let value = T::deserialize(::serde::de::value::SeqAccessDeserializer::new(&mut seq))?;
+						while seq.next_element::<::serde::de::IgnoredAny>()?.is_some() {}
+						Ok(IgnoreTrailing(value))
+					}
+				}
+
+				deserializer.deserialize_seq(IgnoreTrailingVisitor(::std::marker::PhantomData))
 			}
 		}
 	}
@@ -156,10 +206,18 @@ impl EnumVariantField {
 			};
 		}
 
+		// Known variants tolerate trailing arguments in each element. `Other` keeps its elements as
+		// they are, since they aren't necessarily sequences.
 		if let Some(element_ty) = self.flatten {
+			let next_element = if inject_method_from_tag {
+				quote! { seq.next_element::<#element_ty>()? }
+			} else {
+				quote! { seq.next_element::<IgnoreTrailing<#element_ty>>()?.map(|IgnoreTrailing(value)| value) }
+			};
+
 			return quote! {
 				let mut #var = ::std::vec::Vec::new();
-				while let Some(value) = seq.next_element::<#element_ty>()? {
+				while let Some(value) = #next_element {
 					#var.push(value);
 				}
 			};
