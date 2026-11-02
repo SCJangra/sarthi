@@ -5,8 +5,8 @@ use std::{io, thread};
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use flume::{Receiver, Sender};
-use serde::Deserialize;
 
+use crate::rpc::frame::FrameReader;
 use crate::{
 	IncomingRpcMessage, NvimNotification, OutgoingRpcMessage, RpcError, RpcMethod, RpcRequest,
 	RpcResponse,
@@ -75,21 +75,30 @@ impl RpcClientInner {
 		});
 
 		let read_handle = thread::spawn(move || {
-			let mut deserializer = rmp_serde::Deserializer::new(io::BufReader::new(reader));
+			let mut frames = FrameReader::new(reader);
 
-			loop {
-				if !self.running.load(Ordering::SeqCst) {
-					break;
+			while self.running.load(Ordering::SeqCst) {
+				let frame = match frames.next_frame() {
+					Ok(frame) => frame,
+					Err(err) => {
+						tracing::error!("RPC stream closed: {err}");
+						break;
+					},
+				};
+
+				// Each message is framed before it is parsed, so one that doesn't match our types
+				// is skipped without losing our place in the stream.
+				let msg = match rmp_serde::from_slice::<IncomingRpcMessage<rmpv::Value>>(frame) {
+					Ok(msg) => msg,
+					Err(err) => {
+						tracing::error!("Skipping RPC message that failed to deserialize: {err}");
+						continue;
+					},
+				};
+
+				if let Err(err) = self.process_msg(msg) {
+					tracing::error!("Failed to process message: {err}");
 				}
-
-				#[rustfmt::skip]
-				let Ok(msg) = IncomingRpcMessage::<rmpv::Value>::deserialize(&mut deserializer)
-					.inspect_err(|err| tracing::error!("Failed to deserialize incoming RPC message: {err}"))
-					 else { continue };
-
-				#[rustfmt::skip]
-				let Err(err) = self.pricess_msg(msg) else { continue; };
-				tracing::error!("Failed to process message: {err}");
 			}
 		});
 
@@ -106,7 +115,7 @@ impl RpcClientInner {
 		Ok(())
 	}
 
-	fn pricess_msg(&self, msg: IncomingRpcMessage<rmpv::Value>) -> Result<(), RpcError> {
+	fn process_msg(&self, msg: IncomingRpcMessage<rmpv::Value>) -> Result<(), RpcError> {
 		match msg {
 			IncomingRpcMessage::Request(req) => {
 				tracing::info!("Received unhandled RPC request: {req:?}");
@@ -121,7 +130,7 @@ impl RpcClientInner {
 			},
 			IncomingRpcMessage::Response(response) => {
 				#[rustfmt::skip]
-                let Some(req) = self.pending.get(&response.id) else { return Ok(()) };
+				let Some(req) = self.pending.get(&response.id) else { return Ok(()) };
 				req.send(response).map_err(|_| RpcError::SendResponse)?;
 			},
 		}
@@ -206,7 +215,13 @@ impl RpcClient {
 
 #[cfg(test)]
 mod tests {
-	use crate::{NvimEval, NvimUiAttach, NvimUiAttachParams, NvimUiOptions, RpcClient};
+	use std::io::{self, Write};
+	use std::time::Duration;
+
+	use crate::{
+		GridCursorGotoEvent, NvimEval, NvimNotification, NvimUiAttach, NvimUiAttachParams, NvimUiOptions,
+		RedrawNotification, RpcClient,
+	};
 
 	#[test]
 	fn call() {
@@ -258,5 +273,71 @@ mod tests {
 		client.stop();
 		nvim.kill().unwrap();
 		nvim.wait().unwrap();
+	}
+
+	/// Writer that answers the first request by writing `reply` into the client's input pipe.
+	struct Responder {
+		pipe: io::PipeWriter,
+		reply: Option<Vec<u8>>,
+	}
+
+	impl Write for Responder {
+		fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+			if let Some(reply) = self.reply.take() {
+				self.pipe.write_all(&reply)?;
+			}
+			Ok(buf.len())
+		}
+
+		fn flush(&mut self) -> io::Result<()> {
+			Ok(())
+		}
+	}
+
+	/// A message that doesn't match our types is skipped on its own: the messages after it are still
+	/// delivered and nothing else is reported in its place.
+	#[test]
+	fn deliver_messages_after_one_that_fails_to_deserialize() {
+		// [2, "redraw", [["grid_line", [1, 0, 0, [[""]], false]]]]: "" doesn't fit `GridCell::text`
+		let bad_notification = [
+			&[0x93, 0x02, 0xA6][..],
+			b"redraw",
+			&[0x91, 0x92, 0xA9],
+			b"grid_line",
+			&[0x95, 0x01, 0x00, 0x00, 0x91, 0x91, 0xA0, 0xC2],
+		]
+		.concat();
+
+		// [2, "redraw", [["grid_cursor_goto", [1, 2, 3]]]]
+		let notification =
+			[&[0x93, 0x02, 0xA6][..], b"redraw", &[0x91, 0x92, 0xB0], b"grid_cursor_goto", &[0x93, 0x01, 0x02, 0x03]]
+				.concat();
+
+		// [1, 0, nil, 2]: response to the first request
+		let response = [0x94, 0x01, 0x00, 0xC0, 0x02];
+
+		let (reader, pipe) = io::pipe().unwrap();
+		let reply = [&bad_notification[..], &notification, &response].concat();
+		let client = RpcClient::start(reader, Responder { pipe, reply: Some(reply) });
+		let notifications = client.subscribe().unwrap();
+
+		let call = async { Some(client.call::<NvimEval>(["1 + 1".into()]).await) };
+		let timeout = async {
+			smol::Timer::after(Duration::from_secs(5)).await;
+			None
+		};
+		let response = smol::block_on(smol::future::or(call, timeout)).expect("response after bad message was lost");
+
+		assert_eq!(response.unwrap(), rmpv::Value::from(2));
+
+		let expected = NvimNotification::Redraw(vec![RedrawNotification::GridCursorGoto(vec![GridCursorGotoEvent {
+			grid: 1,
+			row: 2,
+			col: 3,
+		}])]);
+		assert_eq!(notifications.try_recv().unwrap(), expected);
+		assert!(notifications.try_recv().is_err());
+
+		client.stop();
 	}
 }

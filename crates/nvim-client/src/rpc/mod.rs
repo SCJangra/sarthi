@@ -1,5 +1,6 @@
 mod client;
 mod error;
+mod frame;
 mod method;
 mod notification;
 mod traits;
