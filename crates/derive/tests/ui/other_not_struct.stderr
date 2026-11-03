@@ -1,0 +1,5 @@
+error: `Other` must be a struct variant: `Other { method: String, value: T }`
+ --> tests/ui/other_not_struct.rs:5:2
+  |
+5 |     Other(String, rmpv::Value),
+  |     ^^^^^

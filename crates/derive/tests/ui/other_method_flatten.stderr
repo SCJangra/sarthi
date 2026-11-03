@@ -1,0 +1,5 @@
+error: `Other.method` must have type `String`
+ --> tests/ui/other_method_flatten.rs:7:11
+  |
+7 |         method: Vec<String>,
+  |                 ^^^

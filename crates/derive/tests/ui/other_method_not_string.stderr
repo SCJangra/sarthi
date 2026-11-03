@@ -1,0 +1,5 @@
+error: `Other.method` must have type `String`
+ --> tests/ui/other_method_not_string.rs:5:18
+  |
+5 |     Other { method: u32, value: rmpv::Value },
+  |                     ^^^

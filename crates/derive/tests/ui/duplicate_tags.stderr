@@ -1,0 +1,5 @@
+error: `Grid_Line` has the same tag as `GridLine` (`grid_line`), so it could never be selected; rename one of them
+ --> tests/ui/duplicate_tags.rs:7:2
+  |
+7 |     Grid_Line,
+  |     ^^^^^^^^^

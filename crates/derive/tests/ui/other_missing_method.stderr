@@ -1,0 +1,5 @@
+error: `Other` must have a `method: String` field, which receives the tag
+ --> tests/ui/other_missing_method.rs:5:2
+  |
+5 |     Other { name: String, value: rmpv::Value },
+  |     ^^^^^

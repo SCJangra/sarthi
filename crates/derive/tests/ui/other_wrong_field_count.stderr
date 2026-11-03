@@ -1,0 +1,5 @@
+error: `Other` must have exactly two fields, `method: String` and `value`, but has 3
+ --> tests/ui/other_wrong_field_count.rs:5:2
+  |
+5 |     Other { method: String, value: rmpv::Value, extra: u32 },
+  |     ^^^^^

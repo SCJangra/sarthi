@@ -1,0 +1,5 @@
+error: `Other` must have a `value` field, which receives the data after the tag
+ --> tests/ui/other_missing_value.rs:5:2
+  |
+5 |     Other { method: String, data: rmpv::Value },
+  |     ^^^^^

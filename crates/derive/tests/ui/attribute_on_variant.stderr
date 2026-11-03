@@ -1,0 +1,5 @@
+error: `#[tagged_enum(flatten)]` goes on a field, not on a variant
+ --> tests/ui/attribute_on_variant.rs:5:16
+  |
+5 |     #[tagged_enum(flatten)]
+  |                   ^^^^^^^

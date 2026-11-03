@@ -1,0 +1,5 @@
+error: `#[tagged_enum(flatten)]` goes on a field, not on the enum
+ --> tests/ui/attribute_on_enum.rs:4:15
+  |
+4 | #[tagged_enum(flatten)]
+  |               ^^^^^^^

@@ -1,0 +1,5 @@
+error: `#[tagged_enum(flatten)]` field must be a `Vec<T>`, since it collects the remaining elements
+ --> tests/ui/flatten_not_vec.rs:5:31
+  |
+5 |     Grid(#[tagged_enum(flatten)] Option<u32>),
+  |                                  ^^^^^^

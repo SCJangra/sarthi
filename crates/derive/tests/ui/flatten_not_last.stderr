@@ -1,0 +1,5 @@
+error: `#[tagged_enum(flatten)]` field must be the last field, since it collects the remaining elements
+ --> tests/ui/flatten_not_last.rs:5:31
+  |
+5 |     Grid(#[tagged_enum(flatten)] Vec<u32>, String),
+  |                                  ^^^

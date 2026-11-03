@@ -1,0 +1,7 @@
+error: Unions are not supported
+ --> tests/ui/union_input.rs:3:10
+  |
+3 | #[derive(DeserializeTaggedEnum)]
+  |          ^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the derive macro `DeserializeTaggedEnum` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -1,0 +1,5 @@
+error: tagged enum must have a fallback variant `Other { method: String, value: T }`, which receives unknown tags
+ --> tests/ui/missing_other.rs:4:6
+  |
+4 | enum Event {
+  |      ^^^^^
