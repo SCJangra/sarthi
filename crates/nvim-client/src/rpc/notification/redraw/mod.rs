@@ -37,10 +37,12 @@ pub enum RedrawNotification {
 
 	ModeInfoSet(#[tagged_enum(flatten)] Vec<ModeInfoSetEvent>),
 
+	/// An event nvui doesn't handle. Its arguments are skipped without being decoded; `value` only keeps
+	/// one placeholder per occurrence of the event.
 	Other {
 		method: String,
 		#[tagged_enum(flatten)]
-		value: Vec<rmpv::Value>,
+		value: Vec<serde::de::IgnoredAny>,
 	},
 }
 
@@ -52,13 +54,7 @@ mod tests {
 	fn de_other() {
 		let expected = RedrawNotification::Other {
 			method: String::from("unknown"),
-			value: vec![
-				rmpv::Value::from("simple_string"),
-				rmpv::Value::from(vec![
-					rmpv::Value::from("array_string_1"),
-					rmpv::Value::from("array_string_2"),
-				]),
-			],
+			value: vec![serde::de::IgnoredAny, serde::de::IgnoredAny],
 		};
 
 		let event = vec![
