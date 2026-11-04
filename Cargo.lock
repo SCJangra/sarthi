@@ -1177,13 +1177,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nvui-common"
-version = "0.1.0"
-dependencies = [
- "wgpu",
-]
-
-[[package]]
 name = "nvui-derive"
 version = "0.1.0"
 dependencies = [

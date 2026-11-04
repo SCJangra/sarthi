@@ -1,7 +1,0 @@
-[package]
-name = "nvui-common"
-version = { workspace = true }
-edition = { workspace = true }
-
-[dependencies]
-wgpu = { workspace = true }

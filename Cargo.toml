@@ -2,7 +2,6 @@
 members = [
 	"crates/derive",
 	"crates/nvim-client",
-	"crates/nvui-common",
 	"crates/nvui",
 	"crates/renderer",
 ]
