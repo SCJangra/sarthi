@@ -37,6 +37,9 @@ pub enum RedrawNotification {
 
 	ModeInfoSet(#[tagged_enum(flatten)] Vec<ModeInfoSetEvent>),
 
+	/// Neovim is done redrawing the screen, so this is the time to show the result (`:help ui-global`)
+	Flush,
+
 	/// An event nvui doesn't handle. Its arguments are skipped without being decoded; `value` only keeps
 	/// one placeholder per occurrence of the event.
 	Other {
@@ -67,6 +70,16 @@ mod tests {
 		let deserialized: RedrawNotification = rmp_serde::from_slice(&event).unwrap();
 
 		assert_eq!(deserialized, expected)
+	}
+
+	#[test]
+	fn de_flush() {
+		// ["flush", []]: Neovim sends one empty argument list for events without parameters.
+		let event = vec![0x92, 0xA5, 0x66, 0x6C, 0x75, 0x73, 0x68, 0x90];
+
+		let deserialized: RedrawNotification = rmp_serde::from_slice(&event).unwrap();
+
+		assert_eq!(deserialized, RedrawNotification::Flush)
 	}
 
 	#[test]
