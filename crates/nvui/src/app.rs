@@ -11,7 +11,7 @@ use winit::event_loop::EventLoopProxy;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use nvim::{Nvim, NvimNotification, NvimUiAttachParams, NvimUiOptions, NvimUiTryResizeParams, RedrawNotification};
-use renderer::{Frame, Renderer, RendererConfig, RendererError};
+use renderer::{Fonts, Frame, Renderer, RendererConfig, RendererError};
 
 use crate::error::Error;
 use crate::grid::Grid;
@@ -25,6 +25,7 @@ pub struct App {
 	pub grid: DashMap<u32, Grid>,
 	pub grid_window: DashMap<u32, WindowId>,
 	pub highlight_state: HighlightState,
+	pub fonts: Fonts,
 	pub nvim: Nvim,
 
 	/// Grid size last sent to Neovim, so resizes that don't change it aren't sent again
@@ -67,6 +68,7 @@ impl App {
 			grid: DashMap::new(),
 			grid_window: DashMap::new(),
 			highlight_state: HighlightState::new(),
+			fonts: Fonts::new(),
 			nvim,
 			ui_size: GridSize { width: 0, height: 0 },
 			stale_windows: HashSet::new(),
@@ -106,7 +108,7 @@ impl App {
 
 	/// Number of grid cells that fit in `window`
 	fn grid_size(&self, window: &Window) -> GridSize {
-		let cell_size = self.config.cell_size.to_physical(window.scale_factor());
+		let cell_size = self.fonts.cell_size(self.config.font_size * window.scale_factor() as f32);
 		GridSize::fit(window.inner_size(), cell_size)
 	}
 

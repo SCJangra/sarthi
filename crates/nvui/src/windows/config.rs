@@ -1,5 +1,3 @@
-use winit::dpi::LogicalSize;
-
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
 	pub title: String,
@@ -7,11 +5,8 @@ pub struct WindowConfig {
 	pub height: u32,
 	pub resizable: bool,
 
-	/// Size of one grid cell, in logical pixels.
-	///
-	/// TODO: Derive this from the font's metrics once text rendering exists. Until then it is a
-	/// fixed size, used to tell Neovim how many columns and rows fit in the window.
-	pub cell_size: LogicalSize<f64>,
+	/// Font size, in logical pixels
+	pub font_size: f32,
 }
 
 impl Default for WindowConfig {
@@ -21,7 +16,7 @@ impl Default for WindowConfig {
 			width: 1280,
 			height: 720,
 			resizable: true,
-			cell_size: LogicalSize::new(9.0, 18.0),
+			font_size: 14.0,
 		}
 	}
 }
@@ -38,6 +33,6 @@ mod tests {
 		assert_eq!(config.width, 1280);
 		assert_eq!(config.height, 720);
 		assert!(config.resizable);
-		assert_eq!(config.cell_size, LogicalSize::new(9.0, 18.0));
+		assert_eq!(config.font_size, 14.0);
 	}
 }

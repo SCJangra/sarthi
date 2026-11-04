@@ -4,5 +4,7 @@ version = { workspace = true }
 edition = { workspace = true }
 
 [dependencies]
+cosmic-text = { workspace = true }
+glyphon = { workspace = true }
 thiserror = { workspace = true }
 wgpu = { workspace = true }

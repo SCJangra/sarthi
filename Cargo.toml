@@ -22,6 +22,9 @@ arc-swap = "1"
 serde_tuple = "1"
 winit = "0.30"
 wgpu = "30"
+glyphon = "0.12"
+# glyphon's cosmic-text, with the shaping cache: without it, laying out a full screen takes ~20× longer.
+cosmic-text = { version = "0.19", features = ["shape-run-cache"] }
 smol = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
