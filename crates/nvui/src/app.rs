@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::thread;
 
@@ -28,6 +29,10 @@ pub struct App {
 
 	/// Grid size last sent to Neovim, so resizes that don't change it aren't sent again
 	pub ui_size: GridSize,
+
+	/// Windows showing stale content: their grids changed since the last `flush`, and they're redrawn on the
+	/// next one
+	pub stale_windows: HashSet<WindowId>,
 
 	pub error: Option<Error>,
 }
@@ -64,6 +69,7 @@ impl App {
 			highlight_state: HighlightState::new(),
 			nvim,
 			ui_size: GridSize { width: 0, height: 0 },
+			stale_windows: HashSet::new(),
 			error: None,
 		})
 	}
@@ -150,15 +156,8 @@ impl App {
 							continue;
 						};
 						grid.resize(resize.width as usize, resize.height as usize);
-						let Some(window_id) = self.grid_window.get(&resize.grid) else {
-							tracing::error!("GridResize: Unknown grid_window for grid {}", resize.grid);
-							continue;
-						};
-						let Some(window) = self.window.get(window_id.value()) else {
-							tracing::error!("GridResize: Unknown window for window_id {window_id:?}");
-							continue;
-						};
-						window.value().request_redraw();
+						drop(grid);
+						self.mark_stale(resize.grid);
 					}
 				},
 				RedrawNotification::GridClear(clears) => {
@@ -168,15 +167,8 @@ impl App {
 							continue;
 						};
 						grid.clear();
-						let Some(window_id) = self.grid_window.get(&clear.grid) else {
-							tracing::error!("GridClear: Unknown grid_window for grid {}", clear.grid);
-							continue;
-						};
-						let Some(window) = self.window.get(window_id.value()) else {
-							tracing::error!("GridClear: Unknown window for window_id {window_id:?}");
-							continue;
-						};
-						window.value().request_redraw();
+						drop(grid);
+						self.mark_stale(clear.grid);
 					}
 				},
 				RedrawNotification::GridLine(lines) => {
@@ -186,15 +178,8 @@ impl App {
 							continue;
 						};
 						grid.set_line(line.row as usize, line.col_start as usize, &line.cells);
-						let Some(window_id) = self.grid_window.get(&line.grid) else {
-							tracing::error!("GridLine: Unknown grid_window for grid {}", line.grid);
-							continue;
-						};
-						let Some(window) = self.window.get(window_id.value()) else {
-							tracing::error!("GridLine: Unknown window for window_id {window_id:?}");
-							continue;
-						};
-						window.value().request_redraw();
+						drop(grid);
+						self.mark_stale(line.grid);
 					}
 				},
 				RedrawNotification::GridCursorGoto(cursors) => {
@@ -204,27 +189,46 @@ impl App {
 							continue;
 						};
 						grid.set_cursor(cursor.row as usize, cursor.col as usize);
-						let Some(window_id) = self.grid_window.get(&cursor.grid) else {
-							tracing::error!("GridCursorGoto: Unknown grid_window for grid {}", cursor.grid);
-							continue;
-						};
-						let Some(window) = self.window.get(window_id.value()) else {
-							tracing::error!("GridCursorGoto: Unknown window for window_id {window_id:?}");
-							continue;
-						};
-						window.value().request_redraw();
+						drop(grid);
+						self.mark_stale(cursor.grid);
 					}
 				},
 				RedrawNotification::HlAttrDefine(attrs) => {
 					self.highlight_state.set_attrs(attrs);
+					self.mark_all_stale();
 				},
 				RedrawNotification::DefaultColorsSet(colors) => {
 					self.highlight_state.set_default_colors(colors);
+					self.mark_all_stale();
 				},
 				RedrawNotification::HlGroupSet(groups) => {
 					self.highlight_state.set_hl_groups(groups);
 				},
+				RedrawNotification::Flush => self.flush(),
 				_ => (),
+			}
+		}
+	}
+
+	/// Marks the window showing `grid` as stale, so it's redrawn on the next `flush`
+	fn mark_stale(&mut self, grid: u32) {
+		let Some(window_id) = self.grid_window.get(&grid).map(|entry| *entry.value()) else {
+			tracing::error!("Unknown window for grid {grid}");
+			return;
+		};
+		self.stale_windows.insert(window_id);
+	}
+
+	/// Marks every window as stale, e.g. after highlights changed
+	fn mark_all_stale(&mut self) {
+		self.stale_windows.extend(self.window.iter().map(|entry| *entry.key()));
+	}
+
+	/// Neovim is done redrawing, so its state is consistent: redraw the windows that changed.
+	fn flush(&mut self) {
+		for window_id in self.stale_windows.drain() {
+			if let Some(window) = self.window.get(&window_id) {
+				window.request_redraw();
 			}
 		}
 	}
@@ -265,6 +269,7 @@ impl App {
 	fn close_window(&mut self, event_loop: &ActiveEventLoop, id: WindowId) {
 		self.renderer.remove(&id);
 		self.window.remove(&id);
+		self.stale_windows.remove(&id);
 
 		if self.window.is_empty() {
 			self.grid.clear();
