@@ -44,7 +44,6 @@ impl HighlightState {
 		Self { attrs: HashMap::new(), defaults: INITIAL_DEFAULT_COLORS, groups: HashMap::new() }
 	}
 
-	#[cfg_attr(not(test), expect(dead_code, reason = "used once the window background follows Neovim's colors"))]
 	pub fn defaults(&self) -> DefaultColors {
 		self.defaults
 	}

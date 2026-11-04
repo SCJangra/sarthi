@@ -1,6 +1,8 @@
 #[derive(Debug, Clone)]
 pub struct RendererConfig {
-	pub clear_color: wgpu::Color,
+	/// Color the window is cleared to, as `0xRRGGBB` in sRGB, until [`crate::Renderer::set_clear_color`]
+	/// changes it
+	pub background: u32,
 	pub power_preference: wgpu::PowerPreference,
 	pub present_mode: Option<wgpu::PresentMode>,
 	pub prefer_srgb_surface_format: bool,
@@ -10,7 +12,7 @@ pub struct RendererConfig {
 impl Default for RendererConfig {
 	fn default() -> Self {
 		Self {
-			clear_color: wgpu::Color { r: 0.08, g: 0.08, b: 0.10, a: 1.0 },
+			background: 0x000000,
 			power_preference: wgpu::PowerPreference::default(),
 			present_mode: Some(wgpu::PresentMode::Fifo),
 			prefer_srgb_surface_format: true,
@@ -27,10 +29,7 @@ mod tests {
 	fn default_values() {
 		let config = RendererConfig::default();
 
-		assert_eq!(config.clear_color.r, 0.08);
-		assert_eq!(config.clear_color.g, 0.08);
-		assert_eq!(config.clear_color.b, 0.10);
-		assert_eq!(config.clear_color.a, 1.0);
+		assert_eq!(config.background, 0x000000);
 		assert_eq!(config.power_preference, wgpu::PowerPreference::default());
 		assert_eq!(config.present_mode, Some(wgpu::PresentMode::Fifo));
 		assert!(config.prefer_srgb_surface_format);

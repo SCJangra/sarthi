@@ -96,7 +96,7 @@ impl App {
 			window.clone(),
 			size.width,
 			size.height,
-			RendererConfig::default(),
+			RendererConfig { background: self.highlight_state.defaults().background, ..RendererConfig::default() },
 		))?;
 
 		self.renderer.insert(window.id(), renderer);
@@ -199,6 +199,10 @@ impl App {
 				},
 				RedrawNotification::DefaultColorsSet(colors) => {
 					self.highlight_state.set_default_colors(colors);
+					let background = self.highlight_state.defaults().background;
+					for mut renderer in self.renderer.iter_mut() {
+						renderer.set_clear_color(background);
+					}
 					self.mark_all_stale();
 				},
 				RedrawNotification::HlGroupSet(groups) => {

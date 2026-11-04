@@ -1,3 +1,4 @@
+use crate::color::wgpu_color;
 use crate::{RendererConfig, RendererError};
 
 pub struct Renderer {
@@ -98,7 +99,9 @@ impl Renderer {
 
 		surface.configure(&device, &config);
 
-		Ok(Self { surface, device, queue, config, clear_color: renderer_config.clear_color })
+		let clear_color = wgpu_color(renderer_config.background, config.format.is_srgb());
+
+		Ok(Self { surface, device, queue, config, clear_color })
 	}
 
 	pub fn resize(&mut self, width: u32, height: u32) {
@@ -107,8 +110,9 @@ impl Renderer {
 		self.surface.configure(&self.device, &self.config);
 	}
 
-	pub fn set_clear_color(&mut self, clear_color: wgpu::Color) {
-		self.clear_color = clear_color;
+	/// Sets the color the window is cleared to, as `0xRRGGBB` in sRGB (the format Neovim uses)
+	pub fn set_clear_color(&mut self, rgb: u32) {
+		self.clear_color = wgpu_color(rgb, self.config.format.is_srgb());
 	}
 
 	pub fn render_clear(&mut self) -> Result<Frame, RendererError> {
