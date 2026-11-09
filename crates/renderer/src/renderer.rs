@@ -1,7 +1,10 @@
+use std::ops::Range;
+
 use crate::color::wgpu_color;
-use crate::quad::{Quad, QuadPipeline, bar_cursors, cell_backgrounds, cell_decorations};
+use crate::font::LineMetrics;
+use crate::quad::{Quad, QuadPipeline, bar_cursor, cell_backgrounds, cell_decorations};
 use crate::text::TextPipeline;
-use crate::{Fonts, Layer, RendererConfig, RendererError};
+use crate::{CellLayer, CellSize, Fonts, Layer, RendererConfig, RendererError};
 
 pub struct Renderer {
 	surface: wgpu::Surface<'static>,
@@ -12,9 +15,9 @@ pub struct Renderer {
 	quads: QuadPipeline,
 	text: TextPipeline,
 
-	/// Quads of the current frame, kept to reuse the allocation: cell backgrounds, then the decorations and bar
-	/// cursors drawn over the text
+	/// Quads of the current frame, layer by layer, and each layer's ranges of them; kept to reuse the allocations
 	frame_quads: Vec<Quad>,
+	layer_quads: Vec<LayerQuads>,
 }
 
 impl Renderer {
@@ -112,7 +115,17 @@ impl Renderer {
 		let quads = QuadPipeline::new(&device, config.format);
 		let text = TextPipeline::new(&device, &queue, config.format);
 
-		Ok(Self { surface, device, queue, config, clear_color, quads, text, frame_quads: Vec::new() })
+		Ok(Self {
+			surface,
+			device,
+			queue,
+			config,
+			clear_color,
+			quads,
+			text,
+			frame_quads: Vec::new(),
+			layer_quads: Vec::new(),
+		})
 	}
 
 	pub fn resize(&mut self, width: u32, height: u32) {
@@ -156,13 +169,14 @@ impl Renderer {
 		self.text
 			.prepare(&self.device, &self.queue, resolution, fonts, layers, font_size)?;
 
-		let (cell, srgb) = (fonts.cell_size(font_size), self.config.format.is_srgb());
+		let (cell, lines, srgb) =
+			(fonts.cell_size(font_size), fonts.line_metrics(font_size), self.config.format.is_srgb());
 		self.frame_quads.clear();
-		cell_backgrounds(&mut self.frame_quads, layers, cell, srgb);
-		let backgrounds = 0..self.frame_quads.len() as u32;
-		cell_decorations(&mut self.frame_quads, layers, cell, fonts.line_metrics(font_size), srgb);
-		bar_cursors(&mut self.frame_quads, layers, cell, srgb);
-		let over_text = backgrounds.end..self.frame_quads.len() as u32;
+		self.layer_quads.clear();
+		for Layer::Cells(layer) in layers {
+			self.layer_quads
+				.push(layer_quads(&mut self.frame_quads, layer, cell, lines, srgb));
+		}
 		self.quads
 			.prepare(&self.device, &self.queue, self.config.width, self.config.height, &self.frame_quads);
 
@@ -189,9 +203,7 @@ impl Renderer {
 				timestamp_writes: None,
 				multiview_mask: None,
 			});
-			self.quads.render(&mut pass, backgrounds);
-			self.text.render(&mut pass)?;
-			self.quads.render(&mut pass, over_text);
+			draw_layers(&mut pass, &self.quads, &self.text, &self.layer_quads)?;
 		}
 
 		self.queue.submit(Some(encoder.finish()));
@@ -219,4 +231,150 @@ pub enum Frame {
 
 	/// The surface was out of date and has been reconfigured; draw again
 	Reconfigured,
+}
+
+/// A layer's ranges of the frame's quads: its backgrounds, drawn under its text, and its decorations and bar cursor,
+/// drawn over it
+struct LayerQuads {
+	under_text: Range<u32>,
+	over_text: Range<u32>,
+}
+
+/// Adds the quads of `layer` to `quads`
+fn layer_quads(quads: &mut Vec<Quad>, layer: &CellLayer, cell: CellSize, lines: LineMetrics, srgb: bool) -> LayerQuads {
+	let start = quads.len() as u32;
+	cell_backgrounds(quads, layer, cell, srgb);
+	let middle = quads.len() as u32;
+	cell_decorations(quads, layer, cell, lines, srgb);
+	bar_cursor(quads, layer, cell, srgb);
+	LayerQuads { under_text: start..middle, over_text: middle..quads.len() as u32 }
+}
+
+/// Draws the layers one after another, each with its backgrounds, text, then decorations and cursor, so a later
+/// layer (e.g. a floating window) covers everything of the earlier ones
+fn draw_layers(
+	pass: &mut wgpu::RenderPass<'_>,
+	quads: &QuadPipeline,
+	text: &TextPipeline,
+	layers: &[LayerQuads],
+) -> Result<(), RendererError> {
+	for (index, layer) in layers.iter().enumerate() {
+		quads.render(pass, layer.under_text.clone());
+		text.render(pass, index)?;
+		quads.render(pass, layer.over_text.clone());
+	}
+	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use arrayvec::ArrayString;
+
+	use super::{draw_layers, layer_quads};
+	use crate::quad::QuadPipeline;
+	use crate::text::TextPipeline;
+	use crate::{CellLayer, Decoration, Fonts, Layer, RenderCell, TextStyle};
+
+	/// A one-cell layer at the top-left corner showing `text` in white on `background`
+	fn cell(id: u64, text: &str, background: u32) -> Layer {
+		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
+		let cell =
+			RenderCell { text: ArrayString::from(text).unwrap(), style, background, decoration: Decoration::default() };
+		Layer::Cells(CellLayer { id, row: 0, col: 0, width: 1, height: 1, cells: vec![cell], cursor: None })
+	}
+
+	/// Draws `layers` like the renderer does, into an 8×19 texture, and returns the pixel in the middle of the cell, or
+	/// `None` without a GPU
+	fn middle_pixel(layers: &[Layer]) -> Option<[u8; 4]> {
+		let (width, height) = (64, 19);
+		smol::block_on(async {
+			let instance = wgpu::Instance::default();
+			let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await.ok()?;
+			let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.ok()?;
+			let format = wgpu::TextureFormat::Rgba8Unorm;
+			let extent = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+			let texture = device.create_texture(&wgpu::TextureDescriptor {
+				label: None,
+				size: extent,
+				mip_level_count: 1,
+				sample_count: 1,
+				dimension: wgpu::TextureDimension::D2,
+				format,
+				usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+				view_formats: &[],
+			});
+
+			let mut fonts = Fonts::new();
+			let font_size = 14.0;
+			let (cell, lines) = (fonts.cell_size(font_size), fonts.line_metrics(font_size));
+			let mut text = TextPipeline::new(&device, &queue, format);
+			let resolution = glyphon::Resolution { width, height };
+			text.prepare(&device, &queue, resolution, &mut fonts, layers, font_size)
+				.unwrap();
+
+			let mut quads = Vec::new();
+			let ranges: Vec<_> = layers
+				.iter()
+				.map(|Layer::Cells(layer)| layer_quads(&mut quads, layer, cell, lines, false))
+				.collect();
+			let mut pipeline = QuadPipeline::new(&device, format);
+			pipeline.prepare(&device, &queue, width, height, &quads);
+
+			let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+			let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+			{
+				let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+					label: None,
+					color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+						view: &view,
+						resolve_target: None,
+						depth_slice: None,
+						ops: wgpu::Operations {
+							load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+							store: wgpu::StoreOp::Store,
+						},
+					})],
+					depth_stencil_attachment: None,
+					occlusion_query_set: None,
+					timestamp_writes: None,
+					multiview_mask: None,
+				});
+				draw_layers(&mut pass, &pipeline, &text, &ranges).unwrap();
+			}
+
+			let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+				label: None,
+				size: u64::from(width * height * 4),
+				usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+				mapped_at_creation: false,
+			});
+			let layout =
+				wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: None };
+			encoder.copy_texture_to_buffer(
+				texture.as_image_copy(),
+				wgpu::TexelCopyBufferInfo { buffer: &buffer, layout },
+				extent,
+			);
+			queue.submit(Some(encoder.finish()));
+			buffer.map_async(wgpu::MapMode::Read, .., |result| result.unwrap());
+			device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+
+			let pixels = buffer.get_mapped_range(..).unwrap().as_chunks::<4>().0.to_vec();
+			Some(pixels[(9 * width + cell.width / 2) as usize])
+		})
+	}
+
+	#[test]
+	fn gpu_later_layers_cover_earlier_ones() {
+		// A full block in the lower layer, a red background in the upper one: the red covers the block's text.
+		let Some(upper_on_top) = middle_pixel(&[cell(1, "█", 0x000000), cell(2, " ", 0xFF0000)]) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		assert_eq!(upper_on_top, [255, 0, 0, 255]);
+
+		// The other way around, the block covers the red.
+		let block_on_top = middle_pixel(&[cell(2, " ", 0xFF0000), cell(1, "█", 0x000000)]).unwrap();
+		assert_eq!(block_on_top, [255, 255, 255, 255]);
+	}
 }

@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::color::rgba;
 use crate::font::LineMetrics;
-use crate::{BarOrientation, CellSize, Decoration, Layer, RenderCell, Underline};
+use crate::{BarOrientation, CellLayer, CellSize, Decoration, RenderCell, Underline};
 
 /// A rectangle in physical pixels, with optional rounded corners and border
 #[repr(C)]
@@ -163,39 +163,34 @@ fn instance_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
 	})
 }
 
-/// Adds a quad for each run of cells with the same background in `layers`, in layer order. Default backgrounds are
-/// drawn too, so a layer covers whatever is below it.
-pub(crate) fn cell_backgrounds(quads: &mut Vec<Quad>, layers: &[Layer], cell: CellSize, srgb_surface: bool) {
+/// Adds a quad for each run of cells in `layer` with the same background. Default backgrounds are drawn too, so a
+/// layer covers whatever is below it.
+pub(crate) fn cell_backgrounds(quads: &mut Vec<Quad>, layer: &CellLayer, cell: CellSize, srgb_surface: bool) {
 	let (width, height) = (cell.width as f32, cell.height as f32);
 
-	for Layer::Cells(layer) in layers {
-		for (row, cells) in (layer.row..).zip(layer.cells.chunks_exact((layer.width as usize).max(1))) {
-			for (col, len, color) in background_runs(cells) {
-				let rect = [(layer.col + col) as f32 * width, row as f32 * height, len as f32 * width, height];
-				quads.push(Quad::fill(rect, rgba(color, srgb_surface)));
-			}
+	for (row, cells) in (layer.row..).zip(layer.cells.chunks_exact((layer.width as usize).max(1))) {
+		for (col, len, color) in background_runs(cells) {
+			let rect = [(layer.col + col) as f32 * width, row as f32 * height, len as f32 * width, height];
+			quads.push(Quad::fill(rect, rgba(color, srgb_surface)));
 		}
 	}
 }
 
-/// Adds quads for the underlines, strikethroughs and overlines in `layers`, in layer order: one per line and run of
-/// neighbouring cells with the same decoration and text color
+/// Adds quads for the underlines, strikethroughs and overlines in `layer`: one per line and run of neighbouring cells
+/// with the same decoration and text color
 pub(crate) fn cell_decorations(
 	quads: &mut Vec<Quad>,
-	layers: &[Layer],
+	layer: &CellLayer,
 	cell: CellSize,
 	lines: LineMetrics,
 	srgb_surface: bool,
 ) {
-	for Layer::Cells(layer) in layers {
-		for (row, cells) in (layer.row..).zip(layer.cells.chunks_exact((layer.width as usize).max(1))) {
-			let mut col = layer.col;
-			for run in cells.chunk_by(|a, b| (a.decoration, a.style.foreground) == (b.decoration, b.style.foreground)) {
-				let rect =
-					[(col * cell.width) as f32, (row * cell.height) as f32, (run.len() as u32 * cell.width) as f32];
-				decoration_quads(quads, &run[0], rect, cell, lines, srgb_surface);
-				col += run.len() as u32;
-			}
+	for (row, cells) in (layer.row..).zip(layer.cells.chunks_exact((layer.width as usize).max(1))) {
+		let mut col = layer.col;
+		for run in cells.chunk_by(|a, b| (a.decoration, a.style.foreground) == (b.decoration, b.style.foreground)) {
+			let rect = [(col * cell.width) as f32, (row * cell.height) as f32, (run.len() as u32 * cell.width) as f32];
+			decoration_quads(quads, &run[0], rect, cell, lines, srgb_surface);
+			col += run.len() as u32;
 		}
 	}
 }
@@ -247,22 +242,20 @@ fn decoration_quads(
 	}
 }
 
-/// Adds a quad for each bar cursor in `layers`, in layer order
-pub(crate) fn bar_cursors(quads: &mut Vec<Quad>, layers: &[Layer], cell: CellSize, srgb_surface: bool) {
-	for Layer::Cells(layer) in layers {
-		let Some(cursor) = layer.cursor else { continue };
+/// Adds a quad for the bar cursor of `layer`, if it has one
+pub(crate) fn bar_cursor(quads: &mut Vec<Quad>, layer: &CellLayer, cell: CellSize, srgb_surface: bool) {
+	let Some(cursor) = layer.cursor else { return };
 
-		let (left, top) = ((layer.col + cursor.col) * cell.width, (layer.row + cursor.row) * cell.height);
-		let thickness = |size: u32| (size * cursor.percentage).div_ceil(100).clamp(1, size);
-		let rect = match cursor.orientation {
-			BarOrientation::Vertical => [left, top, thickness(cell.width), cell.height],
-			BarOrientation::Horizontal => {
-				let height = thickness(cell.height);
-				[left, top + cell.height - height, cursor.width * cell.width, height]
-			},
-		};
-		quads.push(Quad::fill(rect.map(|value| value as f32), rgba(cursor.color, srgb_surface)));
-	}
+	let (left, top) = ((layer.col + cursor.col) * cell.width, (layer.row + cursor.row) * cell.height);
+	let thickness = |size: u32| (size * cursor.percentage).div_ceil(100).clamp(1, size);
+	let rect = match cursor.orientation {
+		BarOrientation::Vertical => [left, top, thickness(cell.width), cell.height],
+		BarOrientation::Horizontal => {
+			let height = thickness(cell.height);
+			[left, top + cell.height - height, cursor.width * cell.width, height]
+		},
+	};
+	quads.push(Quad::fill(rect.map(|value| value as f32), rgba(cursor.color, srgb_surface)));
 }
 
 /// Runs of neighbouring cells with the same background, as (first column, length, color)
@@ -278,9 +271,9 @@ fn background_runs(cells: &[RenderCell]) -> impl Iterator<Item = (u32, u32, u32)
 mod tests {
 	use arrayvec::ArrayString;
 
-	use super::{DASHES, DOTS, Quad, QuadPipeline, WAVE, background_runs, bar_cursors, cell_decorations};
+	use super::{DASHES, DOTS, Quad, QuadPipeline, WAVE, background_runs, bar_cursor, cell_decorations};
 	use crate::font::LineMetrics;
-	use crate::{BarCursor, BarOrientation, CellLayer, CellSize, Decoration, Layer, RenderCell, TextStyle, Underline};
+	use crate::{BarCursor, BarOrientation, CellLayer, CellSize, Decoration, RenderCell, TextStyle, Underline};
 
 	fn cells(backgrounds: &[u32]) -> Vec<RenderCell> {
 		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
@@ -319,7 +312,7 @@ mod tests {
 		let cursor = BarCursor { row: 2, col: 3, width, orientation, percentage, color: 0xFFFFFF };
 		let layer = CellLayer { id: 1, row: 1, col: 1, width: 10, height: 5, cells: Vec::new(), cursor: Some(cursor) };
 		let mut quads = Vec::new();
-		bar_cursors(&mut quads, &[Layer::Cells(layer)], CellSize { width: 8, height: 19 }, false);
+		bar_cursor(&mut quads, &layer, CellSize { width: 8, height: 19 }, false);
 		quads[0].rect
 	}
 
@@ -340,7 +333,7 @@ mod tests {
 		let layer = CellLayer { id: 1, row: 1, col: 0, width: 6, height: 1, cells, cursor: None };
 		let lines = LineMetrics { underline_top: 17.0, thickness: 1.0, strikeout_top: 10.0, strikeout_thickness: 1.0 };
 		let mut quads = Vec::new();
-		cell_decorations(&mut quads, &[Layer::Cells(layer)], CellSize { width: 8, height: 19 }, lines, false);
+		cell_decorations(&mut quads, &layer, CellSize { width: 8, height: 19 }, lines, false);
 		quads
 	}
 
