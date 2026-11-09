@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use nvim::{CellText, GridCell as NvimGridCell};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,10 +112,6 @@ impl Grid {
 
 	fn cell_index(&self, row: usize, col: usize) -> usize {
 		(row * self.width) + col
-	}
-
-	fn cell_count(&self) -> usize {
-		self.width * self.height
 	}
 }
 
