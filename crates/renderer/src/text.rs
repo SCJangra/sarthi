@@ -252,13 +252,19 @@ mod tests {
 	use arrayvec::ArrayString;
 
 	use super::{CellLayer, Fonts, RenderCell, Segment, TextStyle, segments, update_rows};
+	use crate::Decoration;
 
 	const PLAIN: TextStyle = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
 	const BOLD: TextStyle = TextStyle { bold: true, ..PLAIN };
 
 	fn cells(text: &[&str], style: TextStyle) -> Vec<RenderCell> {
 		text.iter()
-			.map(|text| RenderCell { text: ArrayString::from(text).unwrap(), style, background: 0 })
+			.map(|text| RenderCell {
+				text: ArrayString::from(text).unwrap(),
+				style,
+				background: 0,
+				decoration: Decoration::default(),
+			})
 			.collect()
 	}
 

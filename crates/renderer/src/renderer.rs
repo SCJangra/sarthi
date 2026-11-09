@@ -1,5 +1,5 @@
 use crate::color::wgpu_color;
-use crate::quad::{Quad, QuadPipeline, bar_cursors, cell_backgrounds};
+use crate::quad::{Quad, QuadPipeline, bar_cursors, cell_backgrounds, cell_decorations};
 use crate::text::TextPipeline;
 use crate::{Fonts, Layer, RendererConfig, RendererError};
 
@@ -12,7 +12,8 @@ pub struct Renderer {
 	quads: QuadPipeline,
 	text: TextPipeline,
 
-	/// Quads of the current frame, kept to reuse the allocation: cell backgrounds, then bar cursors
+	/// Quads of the current frame, kept to reuse the allocation: cell backgrounds, then the decorations and bar
+	/// cursors drawn over the text
 	frame_quads: Vec<Quad>,
 }
 
@@ -159,8 +160,9 @@ impl Renderer {
 		self.frame_quads.clear();
 		cell_backgrounds(&mut self.frame_quads, layers, cell, srgb);
 		let backgrounds = 0..self.frame_quads.len() as u32;
+		cell_decorations(&mut self.frame_quads, layers, cell, fonts.line_metrics(font_size), srgb);
 		bar_cursors(&mut self.frame_quads, layers, cell, srgb);
-		let cursors = backgrounds.end..self.frame_quads.len() as u32;
+		let over_text = backgrounds.end..self.frame_quads.len() as u32;
 		self.quads
 			.prepare(&self.device, &self.queue, self.config.width, self.config.height, &self.frame_quads);
 
@@ -189,7 +191,7 @@ impl Renderer {
 			});
 			self.quads.render(&mut pass, backgrounds);
 			self.text.render(&mut pass)?;
-			self.quads.render(&mut pass, cursors);
+			self.quads.render(&mut pass, over_text);
 		}
 
 		self.queue.submit(Some(encoder.finish()));

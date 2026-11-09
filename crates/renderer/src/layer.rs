@@ -35,6 +35,32 @@ pub struct RenderCell {
 
 	/// As `0xRRGGBB` in sRGB
 	pub background: u32,
+
+	pub decoration: Decoration,
+}
+
+/// Lines drawn over a cell's text
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Decoration {
+	pub underline: Option<Underline>,
+
+	/// Drawn in the text color
+	pub strikethrough: bool,
+
+	/// Drawn in the text color
+	pub overline: bool,
+
+	/// Color of the underline, as `0xRRGGBB` in sRGB (Neovim's `special` color)
+	pub underline_color: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Underline {
+	Single,
+	Double,
+	Curly,
+	Dotted,
+	Dashed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -1,5 +1,5 @@
 use nvim::CursorShape;
-use renderer::{BarCursor, BarOrientation, CellLayer, RenderCell, TextStyle};
+use renderer::{BarCursor, BarOrientation, CellLayer, Decoration, RenderCell, TextStyle};
 
 use crate::cursor::CursorStyle;
 use crate::grid::Grid;
@@ -18,6 +18,12 @@ pub fn cell_layer(id: u32, grid: &Grid, highlights: &HighlightState, cursor: Opt
 				text: cell.text,
 				style: TextStyle { foreground: style.foreground, bold: style.bold, italic: style.italic },
 				background: style.background,
+				decoration: Decoration {
+					underline: style.underline,
+					strikethrough: style.strikethrough,
+					overline: style.overline,
+					underline_color: style.special,
+				},
 			}
 		})
 		.collect();

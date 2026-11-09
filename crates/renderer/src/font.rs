@@ -3,6 +3,7 @@ use std::sync::Arc;
 use glyphon::FontSystem;
 use glyphon::cosmic_text::skrifa::charmap::Charmap;
 use glyphon::cosmic_text::skrifa::instance::{LocationRef, Size};
+use glyphon::cosmic_text::skrifa::metrics::Decoration;
 use glyphon::cosmic_text::skrifa::{FontRef, MetadataProvider};
 use glyphon::fontdb::Source;
 
@@ -27,8 +28,8 @@ pub struct Fonts {
 	/// Which characters the bundled font has
 	charmap: Charmap<'static>,
 
-	/// Cell width and height at a font size of 1 pixel
-	cell_em: (f32, f32),
+	/// Metrics of the bundled font at a font size of 1 pixel
+	em: EmMetrics,
 }
 
 impl Fonts {
@@ -42,19 +43,42 @@ impl Fonts {
 		db.set_monospace_family(FAMILY);
 
 		let regular = FontRef::new(REGULAR).expect("the bundled font is valid");
-		let cell_em = measure_cell(&regular).expect("the bundled font has metrics");
-		Self { system, charmap: regular.charmap(), cell_em }
+		let em = EmMetrics::measure(&regular).expect("the bundled font has metrics");
+		Self { system, charmap: regular.charmap(), em }
 	}
 
 	/// Size of a grid cell for text of `font_size` physical pixels. The width is the advance of `M`, and the
 	/// height fits the font's ascent, descent and line gap. Both are whole pixels, so cells line up with the
 	/// pixel grid: the width is rounded, and the height rounded up so descenders aren't cut off.
 	pub fn cell_size(&self, font_size: f32) -> CellSize {
-		let (width, height) = self.cell_em;
 		CellSize {
-			width: ((width * font_size).round() as u32).max(1),
-			height: ((height * font_size).ceil() as u32).max(1),
+			width: ((self.em.cell_width * font_size).round() as u32).max(1),
+			height: ((self.em.cell_height * font_size).ceil() as u32).max(1),
 		}
+	}
+
+	/// Distance of the baseline from the top of a cell, like cosmic-text places it: the font's ascent and descent
+	/// are centered in the line.
+	fn baseline(&self, font_size: f32) -> f32 {
+		let cell_height = self.cell_size(font_size).height as f32;
+		(cell_height - (self.em.ascent + self.em.descent) * font_size) / 2.0 + self.em.ascent * font_size
+	}
+
+	/// Where underlines and strikethroughs go in a cell, for text of `font_size` physical pixels
+	pub(crate) fn line_metrics(&self, font_size: f32) -> LineMetrics {
+		let em = &self.em;
+		let cell_height = self.cell_size(font_size).height as f32;
+		let baseline = self.baseline(font_size);
+
+		// Whole pixels, so lines are sharp, and inside the cell
+		let line = |(offset, thickness): (f32, f32)| {
+			let thickness = (thickness * font_size).round().clamp(1.0, cell_height);
+			let top = (baseline - offset * font_size).round().clamp(0.0, cell_height - thickness);
+			(top, thickness)
+		};
+		let (underline_top, thickness) = line(em.underline);
+		let (strikeout_top, strikeout_thickness) = line(em.strikeout);
+		LineMetrics { underline_top, thickness, strikeout_top, strikeout_thickness }
 	}
 
 	/// Whether the bundled font has every character of `text`. Its glyphs are exactly one cell wide, while
@@ -70,34 +94,104 @@ impl Default for Fonts {
 	}
 }
 
-/// Cell width and height of `font` at a font size of 1 pixel, at its default weight (a monospace font is
-/// equally wide at every weight)
-fn measure_cell(font: &FontRef<'_>) -> Option<(f32, f32)> {
-	// In font units, and scaled here: skrifa scales in fixed point, which gives e.g. 0.59996 for 0.6.
-	let metrics = font.metrics(Size::unscaled(), LocationRef::default());
-	let width = font
-		.glyph_metrics(Size::unscaled(), LocationRef::default())
-		.advance_width(font.charmap().map('M')?)?;
-	let height = metrics.ascent - metrics.descent + metrics.leading;
+/// Where underlines and strikethroughs go in a cell, in pixels from its top
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LineMetrics {
+	pub underline_top: f32,
 
-	let units_per_em = f32::from(metrics.units_per_em);
-	Some((width / units_per_em, height / units_per_em))
+	/// Thickness of underlines and overlines
+	pub thickness: f32,
+
+	pub strikeout_top: f32,
+	pub strikeout_thickness: f32,
+}
+
+/// Metrics of a font at a font size of 1 pixel, at its default weight (a monospace font is equally wide at every
+/// weight). Distances from the baseline are positive upwards.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct EmMetrics {
+	/// Advance of `M`
+	cell_width: f32,
+
+	/// Ascent, descent and line gap
+	cell_height: f32,
+
+	ascent: f32,
+
+	/// Below the baseline, as a positive distance
+	descent: f32,
+
+	/// Offset of the top edge from the baseline, and thickness
+	underline: (f32, f32),
+	strikeout: (f32, f32),
+}
+
+impl EmMetrics {
+	fn measure(font: &FontRef<'_>) -> Option<Self> {
+		// In font units, and scaled here: skrifa scales in fixed point, which gives e.g. 0.59996 for 0.6.
+		let metrics = font.metrics(Size::unscaled(), LocationRef::default());
+		let width = font
+			.glyph_metrics(Size::unscaled(), LocationRef::default())
+			.advance_width(font.charmap().map('M')?)?;
+		let em = f32::from(metrics.units_per_em);
+		let decoration = |decoration: Decoration| (decoration.offset / em, decoration.thickness / em);
+
+		Some(Self {
+			cell_width: width / em,
+			cell_height: (metrics.ascent - metrics.descent + metrics.leading) / em,
+			ascent: metrics.ascent / em,
+			descent: -metrics.descent / em,
+			underline: decoration(metrics.underline?),
+			strikeout: decoration(metrics.strikeout?),
+		})
+	}
 }
 
 #[cfg(test)]
 mod tests {
 	use glyphon::fontdb::{Family, Query, Style, Weight};
+	use glyphon::{Attrs, Buffer, Metrics, Shaping};
 
-	use super::{CellSize, FAMILY, Fonts};
+	use super::{CellSize, FAMILY, Fonts, LineMetrics};
 
 	#[test]
 	fn cell_size() {
 		let fonts = Fonts::new();
 		// JetBrains Mono: 600 units wide, ascent 1020, descent 300, no line gap, 1000 units per em.
-		assert_eq!(fonts.cell_em, (0.6, 1.32));
+		assert_eq!((fonts.em.cell_width, fonts.em.cell_height), (0.6, 1.32));
 		assert_eq!(fonts.cell_size(14.0), CellSize { width: 8, height: 19 });
 		assert_eq!(fonts.cell_size(28.0), CellSize { width: 17, height: 37 });
 		assert_eq!(fonts.cell_size(0.0), CellSize { width: 1, height: 1 });
+	}
+
+	#[test]
+	fn line_metrics() {
+		let fonts = Fonts::new();
+		// JetBrains Mono: underline 155 units below the baseline, strikeout 320 above, both 50 thick
+		assert_eq!((fonts.em.underline, fonts.em.strikeout), ((-0.155, 0.05), (0.32, 0.05)));
+
+		// At 14 px the baseline is 14.54 px from the top of a 19 px cell.
+		let expected =
+			LineMetrics { underline_top: 17.0, thickness: 1.0, strikeout_top: 10.0, strikeout_thickness: 1.0 };
+		assert_eq!(fonts.line_metrics(14.0), expected);
+
+		// Lines stay inside the cell, at least 1 px thick.
+		let tiny = fonts.line_metrics(1.0);
+		assert!(tiny.thickness >= 1.0 && tiny.underline_top + tiny.thickness <= 2.0);
+	}
+
+	#[test]
+	fn baseline_matches_cosmic_text() {
+		let mut fonts = Fonts::new();
+		for font_size in [14.0, 28.0] {
+			let cell = fonts.cell_size(font_size);
+			let mut buffer = Buffer::new(&mut fonts.system, Metrics::new(font_size, cell.height as f32));
+			buffer.set_text("x", &Attrs::new().family(glyphon::Family::Monospace), Shaping::Advanced, None);
+			buffer.shape_until_scroll(&mut fonts.system, false);
+
+			let line_y = buffer.layout_runs().next().unwrap().line_y;
+			assert!((line_y - fonts.baseline(font_size)).abs() < 0.01, "{line_y} at {font_size} px");
+		}
 	}
 
 	#[test]

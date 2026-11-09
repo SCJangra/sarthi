@@ -1,5 +1,5 @@
-// Rectangles with optional rounded corners and border, one instance per rectangle. Positions are in physical
-// pixels from the top-left corner of the surface.
+// Rectangles with optional rounded corners and border, or patterned lines (curly, dotted and dashed underlines),
+// one instance per quad. Positions are in physical pixels from the top-left corner of the surface.
 
 // Surface size in pixels (xy); zw is padding
 @group(0) @binding(0) var<uniform> viewport: vec4<f32>;
@@ -11,6 +11,8 @@ struct Quad {
 	@location(2) border_color: vec4<f32>,
 	// Corner radius, border width
 	@location(3) radius_border: vec2<f32>,
+	// Kind (0: none, 1: wave, 2: dots, 3: dashes), period and line thickness in pixels, unused
+	@location(4) pattern: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -21,6 +23,7 @@ struct VertexOutput {
 	@location(2) @interpolate(flat) color: vec4<f32>,
 	@location(3) @interpolate(flat) border_color: vec4<f32>,
 	@location(4) @interpolate(flat) radius_border: vec2<f32>,
+	@location(5) @interpolate(flat) pattern: vec4<f32>,
 }
 
 @vertex
@@ -36,6 +39,7 @@ fn vs_main(@builtin(vertex_index) vertex: u32, quad: Quad) -> VertexOutput {
 	out.color = quad.color;
 	out.border_color = quad.border_color;
 	out.radius_border = quad.radius_border;
+	out.pattern = quad.pattern;
 	return out;
 }
 
@@ -46,8 +50,39 @@ fn rounded_box(p: vec2<f32>, half_size: vec2<f32>, radius: f32) -> f32 {
 	return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - radius;
 }
 
+// How much of this pixel a patterned line covers. The pattern follows the surface x, so it continues across
+// neighbouring quads.
+fn pattern_coverage(in: VertexOutput) -> f32 {
+	let period = in.pattern.y;
+	let thickness = in.pattern.z;
+	let x = in.position.x;
+
+	switch u32(in.pattern.x + 0.5) {
+		// A sine wave as high as the quad
+		case 1u: {
+			let amplitude = max(in.half_size.y - thickness * 0.5, 0.0);
+			let phase = 6.2831853 * x / period;
+			let slope = amplitude * 6.2831853 / period * cos(phase);
+			// Roughly the distance to the curve: the vertical distance, shortened where the curve is steep
+			let distance = abs(in.local.y - amplitude * sin(phase)) / sqrt(1.0 + slope * slope);
+			return clamp(thickness * 0.5 + 0.5 - distance, 0.0, 1.0);
+		}
+		// Dots and dashes: on for the first half of each period
+		case 2u, 3u: {
+			return select(0.0, 1.0, fract(x / period) < 0.5);
+		}
+		default: {
+			return 1.0;
+		}
+	}
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+	if in.pattern.x > 0.5 {
+		return vec4<f32>(in.color.rgb * in.color.a, in.color.a) * pattern_coverage(in);
+	}
+
 	let radius = min(in.radius_border.x, min(in.half_size.x, in.half_size.y));
 	let border = in.radius_border.y;
 

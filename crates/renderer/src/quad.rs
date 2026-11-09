@@ -3,7 +3,8 @@ use std::ops::Range;
 use bytemuck::{Pod, Zeroable};
 
 use crate::color::rgba;
-use crate::{BarOrientation, CellSize, Layer, RenderCell};
+use crate::font::LineMetrics;
+use crate::{BarOrientation, CellSize, Decoration, Layer, RenderCell, Underline};
 
 /// A rectangle in physical pixels, with optional rounded corners and border
 #[repr(C)]
@@ -18,12 +19,25 @@ pub(crate) struct Quad {
 
 	pub corner_radius: f32,
 	pub border_width: f32,
+
+	/// Draws a patterned line instead of a rectangle: kind ([`WAVE`], [`DOTS`] or [`DASHES`]; 0 for none), period and
+	/// line thickness in pixels, unused
+	pub pattern: [f32; 4],
 }
+
+const WAVE: f32 = 1.0;
+const DOTS: f32 = 2.0;
+const DASHES: f32 = 3.0;
 
 impl Quad {
 	/// A plain rectangle without rounded corners or border
 	pub fn fill(rect: [f32; 4], color: [f32; 4]) -> Self {
-		Self { rect, color, border_color: [0.0; 4], corner_radius: 0.0, border_width: 0.0 }
+		Self { rect, color, border_color: [0.0; 4], corner_radius: 0.0, border_width: 0.0, pattern: [0.0; 4] }
+	}
+
+	/// A line of `kind` across `rect`, `thickness` pixels thick, repeating every `period` pixels
+	fn patterned(rect: [f32; 4], color: [f32; 4], kind: f32, period: f32, thickness: f32) -> Self {
+		Self { pattern: [kind, period, thickness, 0.0], ..Self::fill(rect, color) }
 	}
 }
 
@@ -83,7 +97,9 @@ impl QuadPipeline {
 				buffers: &[Some(wgpu::VertexBufferLayout {
 					array_stride: size_of::<Quad>() as u64,
 					step_mode: wgpu::VertexStepMode::Instance,
-					attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x2],
+					attributes: &wgpu::vertex_attr_array![
+						0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x2, 4 => Float32x4
+					],
 				})],
 				compilation_options: wgpu::PipelineCompilationOptions::default(),
 			},
@@ -162,6 +178,75 @@ pub(crate) fn cell_backgrounds(quads: &mut Vec<Quad>, layers: &[Layer], cell: Ce
 	}
 }
 
+/// Adds quads for the underlines, strikethroughs and overlines in `layers`, in layer order: one per line and run of
+/// neighbouring cells with the same decoration and text color
+pub(crate) fn cell_decorations(
+	quads: &mut Vec<Quad>,
+	layers: &[Layer],
+	cell: CellSize,
+	lines: LineMetrics,
+	srgb_surface: bool,
+) {
+	for Layer::Cells(layer) in layers {
+		for (row, cells) in (layer.row..).zip(layer.cells.chunks_exact((layer.width as usize).max(1))) {
+			let mut col = layer.col;
+			for run in cells.chunk_by(|a, b| (a.decoration, a.style.foreground) == (b.decoration, b.style.foreground)) {
+				let rect =
+					[(col * cell.width) as f32, (row * cell.height) as f32, (run.len() as u32 * cell.width) as f32];
+				decoration_quads(quads, &run[0], rect, cell, lines, srgb_surface);
+				col += run.len() as u32;
+			}
+		}
+	}
+}
+
+/// Quads for the decoration of `cell`, drawn across a run of cells at `left`, `top`, `width` pixels wide
+fn decoration_quads(
+	quads: &mut Vec<Quad>,
+	cell: &RenderCell,
+	[left, top, width]: [f32; 3],
+	size: CellSize,
+	lines: LineMetrics,
+	srgb_surface: bool,
+) {
+	let Decoration { underline, strikethrough, overline, underline_color } = cell.decoration;
+	let (cell_width, cell_height, thickness) = (size.width as f32, size.height as f32, lines.thickness);
+	let line = |y: f32, height: f32| [left, top + y, width, height];
+
+	let color = rgba(underline_color, srgb_surface);
+	let y = lines.underline_top;
+	match underline {
+		None => (),
+		Some(Underline::Single) => quads.push(Quad::fill(line(y, thickness), color)),
+		// Two lines with a gap as thick as a line, moved up if they would leave the cell
+		Some(Underline::Double) => {
+			let y = y.min(cell_height - 3.0 * thickness).max(0.0);
+			quads.push(Quad::fill(line(y, thickness), color));
+			quads.push(Quad::fill(line(y + 2.0 * thickness, thickness), color));
+		},
+		// A wave 4 lines high around the underline, one period per cell
+		Some(Underline::Curly) => {
+			let height = (4.0 * thickness).min(cell_height);
+			let y = (y + (thickness - height) / 2.0).clamp(0.0, cell_height - height);
+			quads.push(Quad::patterned(line(y, height), color, WAVE, cell_width, thickness));
+		},
+		Some(Underline::Dotted) => {
+			quads.push(Quad::patterned(line(y, thickness), color, DOTS, 2.0 * thickness, thickness));
+		},
+		Some(Underline::Dashed) => {
+			quads.push(Quad::patterned(line(y, thickness), color, DASHES, 6.0 * thickness, thickness));
+		},
+	}
+
+	let text_color = rgba(cell.style.foreground, srgb_surface);
+	if strikethrough {
+		quads.push(Quad::fill(line(lines.strikeout_top, lines.strikeout_thickness), text_color));
+	}
+	if overline {
+		quads.push(Quad::fill(line(0.0, thickness), text_color));
+	}
+}
+
 /// Adds a quad for each bar cursor in `layers`, in layer order
 pub(crate) fn bar_cursors(quads: &mut Vec<Quad>, layers: &[Layer], cell: CellSize, srgb_surface: bool) {
 	for Layer::Cells(layer) in layers {
@@ -193,14 +278,20 @@ fn background_runs(cells: &[RenderCell]) -> impl Iterator<Item = (u32, u32, u32)
 mod tests {
 	use arrayvec::ArrayString;
 
-	use super::{Quad, QuadPipeline, background_runs, bar_cursors};
-	use crate::{BarCursor, BarOrientation, CellLayer, CellSize, Layer, RenderCell, TextStyle};
+	use super::{DASHES, DOTS, Quad, QuadPipeline, WAVE, background_runs, bar_cursors, cell_decorations};
+	use crate::font::LineMetrics;
+	use crate::{BarCursor, BarOrientation, CellLayer, CellSize, Decoration, Layer, RenderCell, TextStyle, Underline};
 
 	fn cells(backgrounds: &[u32]) -> Vec<RenderCell> {
 		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
 		backgrounds
 			.iter()
-			.map(|&background| RenderCell { text: ArrayString::from("x").unwrap(), style, background })
+			.map(|&background| RenderCell {
+				text: ArrayString::from("x").unwrap(),
+				style,
+				background,
+				decoration: Decoration::default(),
+			})
 			.collect()
 	}
 
@@ -230,6 +321,70 @@ mod tests {
 		let mut quads = Vec::new();
 		bar_cursors(&mut quads, &[Layer::Cells(layer)], CellSize { width: 8, height: 19 }, false);
 		quads[0].rect
+	}
+
+	/// Decoration quads for a run of 3 cells with `decoration` at (row 1, col 2), with 8×19 px cells and the lines of
+	/// JetBrains Mono at 14 px
+	fn decorations(decoration: Decoration) -> Vec<Quad> {
+		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
+		let blank = RenderCell {
+			text: ArrayString::from(" ").unwrap(),
+			style,
+			background: 0,
+			decoration: Decoration::default(),
+		};
+		let mut cells = vec![blank; 6];
+		for cell in &mut cells[2..5] {
+			cell.decoration = decoration;
+		}
+		let layer = CellLayer { id: 1, row: 1, col: 0, width: 6, height: 1, cells, cursor: None };
+		let lines = LineMetrics { underline_top: 17.0, thickness: 1.0, strikeout_top: 10.0, strikeout_thickness: 1.0 };
+		let mut quads = Vec::new();
+		cell_decorations(&mut quads, &[Layer::Cells(layer)], CellSize { width: 8, height: 19 }, lines, false);
+		quads
+	}
+
+	const GREEN: u32 = 0x00FF00;
+
+	fn underline(style: Underline) -> Decoration {
+		Decoration { underline: Some(style), underline_color: GREEN, ..Decoration::default() }
+	}
+
+	#[test]
+	fn decoration_rects() {
+		// The run starts at (2 * 8, 1 * 19) = (16, 19) and is 24 px wide.
+		let single = decorations(underline(Underline::Single));
+		assert_eq!(single, [Quad::fill([16.0, 36.0, 24.0, 1.0], [0.0, 1.0, 0.0, 1.0])]);
+
+		// Moved up so both lines fit in the 19 px cell: 16 + 3 > 19 would not
+		let double: Vec<_> = decorations(underline(Underline::Double)).iter().map(|quad| quad.rect).collect();
+		assert_eq!(double, [[16.0, 35.0, 24.0, 1.0], [16.0, 37.0, 24.0, 1.0]]);
+
+		// A wave 4 px high around the underline (15.5 to 19.5), moved up to stay in the cell, one period per cell
+		let curly = decorations(underline(Underline::Curly))[0];
+		assert_eq!((curly.rect, curly.pattern), ([16.0, 34.0, 24.0, 4.0], [WAVE, 8.0, 1.0, 0.0]));
+
+		assert_eq!(decorations(underline(Underline::Dotted))[0].pattern, [DOTS, 2.0, 1.0, 0.0]);
+		assert_eq!(decorations(underline(Underline::Dashed))[0].pattern, [DASHES, 6.0, 1.0, 0.0]);
+	}
+
+	#[test]
+	fn strikethrough_and_overline_use_the_text_color() {
+		let quads = decorations(Decoration {
+			strikethrough: true,
+			overline: true,
+			underline_color: GREEN,
+			..Decoration::default()
+		});
+		let white = [1.0, 1.0, 1.0, 1.0];
+		assert_eq!(quads, [Quad::fill([16.0, 29.0, 24.0, 1.0], white), Quad::fill([16.0, 19.0, 24.0, 1.0], white)]);
+	}
+
+	#[test]
+	fn undecorated_cells_have_no_quads() {
+		assert!(decorations(Decoration::default()).is_empty());
+		// An underline color alone draws nothing.
+		assert!(decorations(Decoration { underline_color: GREEN, ..Decoration::default() }).is_empty());
 	}
 
 	#[test]
@@ -355,6 +510,35 @@ mod tests {
 		// Pixel (35, 3) has its center about 12.02 px from the corner circle's center, so about half covered.
 		let [r, g, b, _] = pixel(&pixels, 35, 3);
 		assert!((r, b) == (0, 0) && (100..156).contains(&g), "edge pixel: {g}");
+	}
+
+	#[test]
+	fn gpu_dots_and_dashes() {
+		let dots = Quad::patterned([0.0, 0.0, 12.0, 1.0], RED, DOTS, 2.0, 1.0);
+		let dashes = Quad::patterned([0.0, 2.0, 12.0, 1.0], RED, DASHES, 6.0, 1.0);
+		let Some(pixels) = draw(&[dots, dashes]) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		let row = |y| (0..12).map(|x| pixel(&pixels, x, y)[0] > 128).collect::<Vec<_>>();
+		let (on, off) = (true, false);
+		assert_eq!(row(0), [on, off, on, off, on, off, on, off, on, off, on, off]);
+		assert_eq!(row(2), [on, on, on, off, off, off, on, on, on, off, off, off]);
+	}
+
+	#[test]
+	fn gpu_wave_swings_around_its_center() {
+		// 8 px high, one period over 16 px: up in the first half, down in the second
+		let Some(pixels) = draw(&[Quad::patterned([0.0, 0.0, 16.0, 8.0], RED, WAVE, 16.0, 1.0)]) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		let drawn_rows = |x| (0..8).filter(|&y| pixel(&pixels, x, y)[0] > 64).collect::<Vec<_>>();
+		// Through the middle at the start, lowest on screen at a quarter period, highest at three quarters
+		assert!(drawn_rows(0).iter().all(|&y| (3..=5).contains(&y)), "x = 0: {:?}", drawn_rows(0));
+		assert!(drawn_rows(4).iter().all(|&y| y >= 6), "x = 4: {:?}", drawn_rows(4));
+		assert!(drawn_rows(12).iter().all(|&y| y <= 1), "x = 12: {:?}", drawn_rows(12));
+		assert!((0..16).all(|x| !drawn_rows(x).is_empty()), "the wave has no gaps");
 	}
 
 	#[test]

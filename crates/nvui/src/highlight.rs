@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use nvim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent};
+use renderer::Underline;
 
 /// Default colors until Neovim sends its own, matching what Neovim uses when none are set
 const INITIAL_DEFAULT_COLORS: DefaultColors =
@@ -25,6 +26,10 @@ pub struct CellStyle {
 
 	pub bold: bool,
 	pub italic: bool,
+
+	pub underline: Option<Underline>,
+	pub strikethrough: bool,
+	pub overline: bool,
 }
 
 /// Neovim's highlight table, from `hl_attr_define`, `default_colors_set` and `hl_group_set`
@@ -77,6 +82,9 @@ impl HighlightState {
 				special: defaults.special,
 				bold: false,
 				italic: false,
+				underline: None,
+				strikethrough: false,
+				overline: false,
 			};
 		};
 
@@ -92,8 +100,24 @@ impl HighlightState {
 			special: attrs.special.unwrap_or(defaults.special),
 			bold: attrs.bold,
 			italic: attrs.italic,
+			underline: underline(attrs),
+			strikethrough: attrs.strikethrough,
+			overline: attrs.overline,
 		}
 	}
+}
+
+/// The underline style of `attrs`. Neovim sends one, but if several are set, the more specific one wins.
+fn underline(attrs: &HlAttrs) -> Option<Underline> {
+	[
+		(attrs.undercurl, Underline::Curly),
+		(attrs.underdouble, Underline::Double),
+		(attrs.underdotted, Underline::Dotted),
+		(attrs.underdashed, Underline::Dashed),
+		(attrs.underline, Underline::Single),
+	]
+	.into_iter()
+	.find_map(|(set, style)| set.then_some(style))
 }
 
 #[cfg(test)]
@@ -101,6 +125,7 @@ pub(crate) mod tests {
 	use nvim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs};
 
 	use super::{CellStyle, DefaultColors, HighlightState, INITIAL_DEFAULT_COLORS};
+	use renderer::Underline;
 
 	const FG: u32 = 0xC7C7C7;
 	const BG: u32 = 0x1C1C1C;
@@ -146,7 +171,16 @@ pub(crate) mod tests {
 	}
 
 	fn plain(foreground: u32, background: u32) -> CellStyle {
-		CellStyle { foreground, background, special: SP, bold: false, italic: false }
+		CellStyle {
+			foreground,
+			background,
+			special: SP,
+			bold: false,
+			italic: false,
+			underline: None,
+			strikethrough: false,
+			overline: false,
+		}
 	}
 
 	#[test]
@@ -192,8 +226,7 @@ pub(crate) mod tests {
 			..attrs()
 		};
 		state.set_attrs(vec![define(5, highlight)]);
-		let expected =
-			CellStyle { foreground: 0x112233, background: 0x445566, special: 0x778899, bold: true, italic: true };
+		let expected = CellStyle { special: 0x778899, bold: true, italic: true, ..plain(0x112233, 0x445566) };
 		assert_eq!(state.resolve(5), expected);
 	}
 
@@ -221,8 +254,7 @@ pub(crate) mod tests {
 		let mut state = state();
 		state.set_attrs(vec![define(5, HlAttrs { foreground: Some(0x112233), ..attrs() })]);
 		state.set_default_colors(vec![colors(0xEEEEEE, 0x222222, 0x00FF00)]);
-		let expected =
-			CellStyle { foreground: 0x112233, background: 0x222222, special: 0x00FF00, bold: false, italic: false };
+		let expected = CellStyle { special: 0x00FF00, ..plain(0x112233, 0x222222) };
 		assert_eq!(state.resolve(5), expected);
 	}
 
@@ -245,5 +277,32 @@ pub(crate) mod tests {
 		};
 		state.set_attrs(vec![event]);
 		assert_eq!(state.resolve(5), plain(0x112233, BG));
+	}
+
+	#[test]
+	fn decorations() {
+		let mut state = state();
+		state.set_attrs(vec![
+			define(1, HlAttrs { underline: true, special: Some(0x00FF00), ..attrs() }),
+			define(2, HlAttrs { undercurl: true, strikethrough: true, ..attrs() }),
+			define(3, HlAttrs { underdouble: true, overline: true, ..attrs() }),
+			define(4, HlAttrs { underdotted: true, ..attrs() }),
+			define(5, HlAttrs { underdashed: true, ..attrs() }),
+			// Several underline styles: the more specific one wins
+			define(6, HlAttrs { underline: true, undercurl: true, ..attrs() }),
+		]);
+
+		assert_eq!(
+			state.resolve(1),
+			CellStyle { underline: Some(Underline::Single), special: 0x00FF00, ..plain(FG, BG) }
+		);
+		assert_eq!(
+			state.resolve(2),
+			CellStyle { underline: Some(Underline::Curly), strikethrough: true, ..plain(FG, BG) }
+		);
+		assert_eq!(state.resolve(3), CellStyle { underline: Some(Underline::Double), overline: true, ..plain(FG, BG) });
+		assert_eq!(state.resolve(4).underline, Some(Underline::Dotted));
+		assert_eq!(state.resolve(5).underline, Some(Underline::Dashed));
+		assert_eq!(state.resolve(6).underline, Some(Underline::Curly));
 	}
 }
