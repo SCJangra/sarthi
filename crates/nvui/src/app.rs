@@ -5,9 +5,10 @@ use std::thread;
 use dashmap::DashMap;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::event_loop::EventLoopProxy;
+use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use nvim::{Nvim, NvimNotification, NvimUiAttachParams, NvimUiOptions, NvimUiTryResizeParams, RedrawNotification};
@@ -17,6 +18,7 @@ use crate::compositor::cell_layer;
 use crate::error::Error;
 use crate::grid::Grid;
 use crate::highlight::HighlightState;
+use crate::input::neovim_keys;
 use crate::windows::{GridSize, WindowConfig};
 
 pub struct App {
@@ -31,6 +33,9 @@ pub struct App {
 
 	/// Grid size last sent to Neovim, so resizes that don't change it aren't sent again
 	pub ui_size: GridSize,
+
+	/// Modifier keys held right now, for the keys sent to Neovim
+	pub modifiers: ModifiersState,
 
 	/// Windows showing stale content: their grids changed since the last `flush`, and they're redrawn on the
 	/// next one
@@ -76,6 +81,7 @@ impl App {
 			fonts: Fonts::new(),
 			nvim,
 			ui_size: GridSize { width: 0, height: 0 },
+			modifiers: ModifiersState::empty(),
 			stale_windows: HashSet::new(),
 			layers: HashMap::new(),
 			error: None,
@@ -299,6 +305,19 @@ impl App {
 		Ok(())
 	}
 
+	/// Types a key press in Neovim. Errors mean the connection closed, after which the app exits anyway.
+	fn send_key(&self, event: &KeyEvent) {
+		if event.state != ElementState::Pressed {
+			return;
+		}
+		let Some(keys) = neovim_keys(&event.logical_key, event.text.as_deref(), event.location, self.modifiers) else {
+			return;
+		};
+		if let Err(error) = self.nvim.input(&keys) {
+			tracing::warn!("Couldn't send {keys} to Neovim: {error}");
+		}
+	}
+
 	/// Records `error` and exits. Only the first error is kept, so a later failure can't hide the
 	/// original cause.
 	fn exit_with_error(&mut self, event_loop: &ActiveEventLoop, error: Error) {
@@ -384,6 +403,14 @@ impl ApplicationHandler<AppEvent> for App {
 				}
 				// The text size changed, even if the grid size didn't.
 				window.request_redraw();
+			},
+			WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
+			// Synthetic presses are keys already held when the window gained focus.
+			WindowEvent::KeyboardInput { event, is_synthetic: false, .. } => self.send_key(&event),
+			WindowEvent::Focused(focused) => {
+				if let Err(error) = self.nvim.ui_set_focus(focused) {
+					tracing::warn!("Couldn't tell Neovim about focus: {error}");
+				}
 			},
 			WindowEvent::RedrawRequested => {
 				if let Err(error) = self.redraw_renderer(window_id, &window) {

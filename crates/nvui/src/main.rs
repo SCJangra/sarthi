@@ -3,6 +3,7 @@ mod compositor;
 mod error;
 mod grid;
 mod highlight;
+mod input;
 mod windows;
 
 use app::{App, AppEvent};
