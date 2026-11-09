@@ -4,7 +4,7 @@ use std::{process, thread};
 use flume::Receiver;
 
 use crate::{
-	Error, NvimInput, NvimNotification, NvimUiAttach, NvimUiAttachParams, NvimUiSetFocus, NvimUiTryResize,
+	Error, NvimExecLua, NvimInput, NvimMessage, NvimUiAttach, NvimUiAttachParams, NvimUiSetFocus, NvimUiTryResize,
 	NvimUiTryResizeParams, RpcClient,
 };
 
@@ -21,13 +21,14 @@ pub struct Nvim {
 }
 
 impl Nvim {
-	/// Starts Neovim, embedded. Returns it and its notifications, which end once Neovim exits.
-	pub fn start() -> Result<(Self, Receiver<NvimNotification>), Error> {
+	/// Starts Neovim, embedded. Returns it and what it sends unasked (notifications and requests), which ends once
+	/// Neovim exits.
+	pub fn start() -> Result<(Self, Receiver<NvimMessage>), Error> {
 		Self::spawn(&["--embed"])
 	}
 
 	/// Starts Neovim with `args`, which must include `--embed`
-	fn spawn(args: &[&str]) -> Result<(Self, Receiver<NvimNotification>), Error> {
+	fn spawn(args: &[&str]) -> Result<(Self, Receiver<NvimMessage>), Error> {
 		let mut nvim = process::Command::new("nvim")
 			.args(args)
 			.stdin(process::Stdio::piped())
@@ -41,6 +42,11 @@ impl Nvim {
 		let (rpc, notifications) = RpcClient::start(stdout, stdin);
 
 		Ok((Self { rpc, process: NvimProcess(nvim) }, notifications))
+	}
+
+	/// Runs Lua `code` in Neovim and waits for its result
+	pub fn exec_lua(&self, code: &str) -> Result<rmpv::Value, Error> {
+		self.rpc.call::<NvimExecLua>((code.to_owned(), Vec::new())).map_err(Error::Rpc)
 	}
 
 	/// Attaches as a UI and waits until Neovim accepted it

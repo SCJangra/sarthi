@@ -6,7 +6,9 @@ use std::{io, thread};
 use flume::{Receiver, Sender, WeakSender};
 
 use crate::rpc::frame::FrameReader;
-use crate::{IncomingRpcMessage, NvimNotification, OutgoingRpcMessage, RpcError, RpcMethod, RpcRequest, RpcResponse};
+use crate::{
+	IncomingRpcMessage, NvimMessage, NvimRequest, OutgoingRpcMessage, RpcError, RpcMethod, RpcRequest, RpcResponse,
+};
 
 /// A general msgpack RPC client
 pub struct RpcClient {
@@ -44,7 +46,7 @@ impl RpcClientInner {
 		reader: R,
 		writer: W,
 		request: Receiver<Vec<u8>>,
-		notifications: Sender<NvimNotification>,
+		messages: Sender<NvimMessage>,
 	) -> (thread::JoinHandle<()>, thread::JoinHandle<()>)
 	where
 		R: io::Read + Send + Sync + 'static,
@@ -68,7 +70,7 @@ impl RpcClientInner {
 			}
 		});
 
-		// Exiting drops `notifications`, which ends the stream of notifications.
+		// Exiting drops `messages`, which ends the stream of messages.
 		let read_handle = thread::spawn(move || {
 			let mut frames = FrameReader::new(reader);
 
@@ -91,7 +93,7 @@ impl RpcClientInner {
 					},
 				};
 
-				if let Err(err) = self.process_msg(msg, &notifications) {
+				if let Err(err) = self.process_msg(msg, &messages) {
 					tracing::error!("Failed to process message: {err}");
 				}
 			}
@@ -126,25 +128,20 @@ impl RpcClientInner {
 	fn process_msg(
 		&self,
 		msg: IncomingRpcMessage<rmpv::Value>,
-		notifications: &Sender<NvimNotification>,
+		messages: &Sender<NvimMessage>,
 	) -> Result<(), RpcError> {
 		match msg {
+			// If nobody receives it, the request is dropped, which answers it with an error.
 			IncomingRpcMessage::Request(req) => {
-				// No requests are handled yet. Reply with an error, so the caller's `rpcrequest()`
-				// fails instead of blocking Neovim while it waits for a response.
-				tracing::warn!("Received unsupported RPC request: {}", req.method);
-
-				let reply = OutgoingRpcMessage::<()>::ErrorResponse {
-					id: req.id,
-					message: format!("Unknown method: {}", req.method),
-				};
-				let reply = rmp_serde::to_vec_named(&reply)?;
-
-				let Some(replies) = self.replies.upgrade() else { return Ok(()) };
-				replies.send(reply).map_err(|_| RpcError::SendRequest)?;
+				let request = NvimRequest::new(req.id, req.method, req.params, self.replies.clone());
+				messages
+					.send(NvimMessage::Request(request))
+					.map_err(|_| RpcError::SendNotification)?;
 			},
 			IncomingRpcMessage::Notification(notification) => {
-				notifications.send(notification).map_err(|_| RpcError::SendNotification)?;
+				messages
+					.send(NvimMessage::Notification(notification))
+					.map_err(|_| RpcError::SendNotification)?;
 			},
 			IncomingRpcMessage::Response(response) => {
 				let Some(req) = self.pending().remove(&response.id) else { return Ok(()) };
@@ -157,14 +154,14 @@ impl RpcClientInner {
 
 impl RpcClient {
 	/// Starts reading messages from `reader` and writing them to `writer`, each on its own thread. Returns the client
-	/// and the server's notifications, which end once the connection closes.
-	pub fn start<R, W>(reader: R, writer: W) -> (Self, Receiver<NvimNotification>)
+	/// and what the server sends unasked (notifications and requests), which ends once the connection closes.
+	pub fn start<R, W>(reader: R, writer: W) -> (Self, Receiver<NvimMessage>)
 	where
 		R: io::Read + Send + Sync + 'static,
 		W: io::Write + Send + Sync + 'static,
 	{
 		let (sender, receiver) = flume::unbounded();
-		let (notify, notifications) = flume::unbounded();
+		let (send_message, messages) = flume::unbounded();
 
 		let inner = Arc::new(RpcClientInner {
 			next_req_id: AtomicU32::new(0),
@@ -173,9 +170,9 @@ impl RpcClient {
 			replies: sender.downgrade(),
 		});
 
-		let (read_handle, write_handle) = inner.clone().start(reader, writer, receiver, notify);
+		let (read_handle, write_handle) = inner.clone().start(reader, writer, receiver, send_message);
 
-		(Self { inner, request: sender, read_handle, write_handle }, notifications)
+		(Self { inner, request: sender, read_handle, write_handle }, messages)
 	}
 
 	/// Calls `M` and waits for Neovim's reply. Never call it from the reader thread, which delivers the reply.
@@ -230,8 +227,8 @@ mod tests {
 	use std::time::Duration;
 
 	use crate::{
-		GridCursorGotoEvent, NvimEval, NvimInput, NvimNotification, NvimUiAttach, NvimUiAttachParams, NvimUiOptions,
-		RedrawNotification, RpcClient, RpcError,
+		GridCursorGotoEvent, NvimEval, NvimInput, NvimMessage, NvimNotification, NvimUiAttach, NvimUiAttachParams,
+		NvimUiOptions, RedrawNotification, RpcClient, RpcError,
 	};
 
 	/// Runs `call` on another thread, so a call that never returns fails the test instead of hanging it
@@ -258,7 +255,7 @@ mod tests {
 		let stdin = nvim.stdin.take().unwrap();
 		let stdout = nvim.stdout.take().unwrap();
 
-		let (client, _notifications) = RpcClient::start(stdout, stdin);
+		let (client, _messages) = RpcClient::start(stdout, stdin);
 
 		let response = client.call::<NvimEval>(["1 + 1".into()]).unwrap();
 
@@ -274,7 +271,7 @@ mod tests {
 
 		let stdin = nvim.stdin.take().unwrap();
 		let stdout = nvim.stdout.take().unwrap();
-		let (client, _notifications) = RpcClient::start(stdout, stdin);
+		let (client, _messages) = RpcClient::start(stdout, stdin);
 
 		// With --embed, Neovim finishes starting up, and only then handles typed keys, once a UI attaches.
 		let attach = NvimUiAttachParams { width: 20, height: 5, options: NvimUiOptions::all() };
@@ -297,7 +294,7 @@ mod tests {
 	}
 
 	#[test]
-	fn reply_error_to_unsupported_request() {
+	fn answer_unhandled_request_with_an_error() {
 		let mut nvim = spawn_nvim();
 
 		let stdin = nvim.stdin.take().unwrap();
@@ -305,7 +302,8 @@ mod tests {
 
 		let client = Arc::new(RpcClient::start(stdout, stdin).0);
 
-		// While evaluating this, Neovim sends us a request on our channel (1) and blocks until we reply.
+		// While evaluating this, Neovim sends us a request on our channel (1) and blocks until we reply. Nobody
+		// receives it here, so it's dropped, which answers it with an error.
 		let caller = client.clone();
 		let response = within_5s(move || caller.call::<NvimEval>(["rpcrequest(1, 'nvui_test')".into()]))
 			.expect("Neovim is blocked on our reply");
@@ -318,13 +316,40 @@ mod tests {
 	}
 
 	#[test]
+	fn answer_request() {
+		let mut nvim = spawn_nvim();
+
+		let stdin = nvim.stdin.take().unwrap();
+		let stdout = nvim.stdout.take().unwrap();
+		let (client, messages) = RpcClient::start(stdout, stdin);
+
+		// Neovim blocks in rpcrequest() until we answer, and our answer is what it evaluates to.
+		let client = Arc::new(client);
+		let caller = client.clone();
+		let call = std::thread::spawn(move || caller.call::<NvimEval>(["rpcrequest(1, 'nvui_test', 41, 'x')".into()]));
+
+		let Ok(NvimMessage::Request(request)) = messages.recv_timeout(Duration::from_secs(5)) else {
+			panic!("expected a request")
+		};
+		assert_eq!(request.method(), "nvui_test");
+		let (number, text): (u32, String) = request.params().unwrap();
+		assert_eq!(text, "x");
+		request.respond(Ok(number + 1));
+
+		assert_eq!(call.join().unwrap().unwrap(), rmpv::Value::from(42));
+
+		nvim.kill().unwrap();
+		nvim.wait().unwrap();
+	}
+
+	#[test]
 	fn call_nvim_ui_attach() {
 		let mut nvim = spawn_nvim();
 
 		let stdin = nvim.stdin.take().unwrap();
 		let stdout = nvim.stdout.take().unwrap();
 
-		let (client, _notifications) = RpcClient::start(stdout, stdin);
+		let (client, _messages) = RpcClient::start(stdout, stdin);
 
 		let params = NvimUiAttachParams { width: 10, height: 10, options: NvimUiOptions::all() };
 		let response = client.call::<NvimUiAttach>(params).unwrap();
@@ -378,7 +403,7 @@ mod tests {
 
 		let (reader, pipe) = io::pipe().unwrap();
 		let reply = [&bad_notification[..], &notification, &response].concat();
-		let (client, notifications) = RpcClient::start(reader, Responder { pipe, reply: Some(reply) });
+		let (client, messages) = RpcClient::start(reader, Responder { pipe, reply: Some(reply) });
 
 		let client = Arc::new(client);
 		let caller = client.clone();
@@ -392,8 +417,11 @@ mod tests {
 			row: 2,
 			col: 3,
 		}])]);
-		assert_eq!(notifications.try_recv().unwrap(), expected);
-		assert!(notifications.try_recv().is_err());
+		let Ok(NvimMessage::Notification(notification)) = messages.try_recv() else {
+			panic!("expected a notification")
+		};
+		assert_eq!(notification, expected);
+		assert!(messages.try_recv().is_err());
 	}
 
 	#[test]
@@ -431,15 +459,12 @@ mod tests {
 	#[test]
 	fn fail_pending_call_when_connection_closes() {
 		let (reader, pipe) = io::pipe().unwrap();
-		let (client, notifications) = RpcClient::start(reader, CloseOnWrite(Some(pipe)));
+		let (client, messages) = RpcClient::start(reader, CloseOnWrite(Some(pipe)));
 
 		let response =
 			within_5s(move || client.call::<NvimEval>(["1 + 1".into()])).expect("pending call hung after disconnect");
 
 		assert!(matches!(response, Err(RpcError::RequestDropped)), "unexpected response: {response:?}");
-		assert!(matches!(
-			notifications.recv_timeout(Duration::from_secs(5)),
-			Err(flume::RecvTimeoutError::Disconnected)
-		));
+		assert!(matches!(messages.recv_timeout(Duration::from_secs(5)), Err(flume::RecvTimeoutError::Disconnected)));
 	}
 }

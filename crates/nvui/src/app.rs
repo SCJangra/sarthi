@@ -10,7 +10,7 @@ use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use editor::Editor;
-use nvim::{Nvim, NvimNotification, NvimUiAttachParams, NvimUiOptions, NvimUiTryResizeParams};
+use nvim::{Nvim, NvimMessage, NvimNotification, NvimUiAttachParams, NvimUiOptions, NvimUiTryResizeParams};
 use renderer::{Fonts, Frame, Renderer, RendererConfig, RendererError};
 
 use crate::error::Error;
@@ -44,7 +44,8 @@ pub struct WindowState {
 
 #[derive(Debug)]
 pub enum AppEvent {
-	Nvim(NvimNotification),
+	/// A notification or request from Neovim
+	Nvim(NvimMessage),
 
 	/// The connection to Neovim closed, e.g. after `:q`
 	NvimExited,
@@ -52,15 +53,15 @@ pub enum AppEvent {
 
 impl App {
 	pub fn new(config: WindowConfig, proxy: EventLoopProxy<AppEvent>) -> Result<Self, Error> {
-		let (nvim, notifications) = Nvim::start()?;
+		let (nvim, messages) = Nvim::start()?;
 		let proxy = proxy.clone();
 
 		thread::spawn(move || {
-			for notification in notifications.iter() {
-				let _ = proxy.send_event(AppEvent::Nvim(notification));
+			for message in messages.iter() {
+				let _ = proxy.send_event(AppEvent::Nvim(message));
 			}
 
-			// The notification stream only ends once the connection to Neovim is closed.
+			// The message stream only ends once the connection to Neovim is closed.
 			let _ = proxy.send_event(AppEvent::NvimExited);
 		});
 
@@ -271,7 +272,9 @@ impl ApplicationHandler<AppEvent> for App {
 
 	fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
 		match event {
-			AppEvent::Nvim(notification) => self.handle_nvim_notification(notification),
+			AppEvent::Nvim(NvimMessage::Notification(notification)) => self.handle_nvim_notification(notification),
+			// None are handled yet: dropping a request answers it with an error.
+			AppEvent::Nvim(NvimMessage::Request(_)) => (),
 			AppEvent::NvimExited => event_loop.exit(),
 		}
 	}

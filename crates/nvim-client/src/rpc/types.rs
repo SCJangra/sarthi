@@ -11,6 +11,12 @@ pub enum OutgoingRpcMessage<T> {
 		params: T,
 	},
 
+	/// Successful response to a request from the server
+	Response {
+		id: u32,
+		result: T,
+	},
+
 	/// Failed response to a request from the server
 	ErrorResponse {
 		id: u32,
@@ -74,6 +80,14 @@ mod ser_de {
 					tuple.serialize_element(&2)?;
 					tuple.serialize_element(method)?;
 					tuple.serialize_element(params)?;
+					tuple.end()
+				},
+				Self::Response { id, result } => {
+					let mut tuple = serializer.serialize_tuple(4)?;
+					tuple.serialize_element(&1)?;
+					tuple.serialize_element(id)?;
+					tuple.serialize_element(&())?;
+					tuple.serialize_element(result)?;
 					tuple.end()
 				},
 				Self::ErrorResponse { id, message } => {
@@ -210,6 +224,16 @@ mod tests {
 
 		// [1, 3, [0, "x"], nil]
 		let expected = vec![0x94, 0x01, 0x03, 0x92, 0x00, 0xA1, b'x', 0xC0];
+
+		assert_eq!(rmp_serde::to_vec_named(&response).unwrap(), expected);
+	}
+
+	#[test]
+	fn ser_response() {
+		let response = OutgoingRpcMessage::Response { id: 3, result: 42 };
+
+		// [1, 3, nil, 42]
+		let expected = vec![0x94, 0x01, 0x03, 0xC0, 0x2A];
 
 		assert_eq!(rmp_serde::to_vec_named(&response).unwrap(), expected);
 	}
