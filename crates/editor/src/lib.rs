@@ -8,7 +8,7 @@ pub mod highlight;
 use std::collections::HashMap;
 
 use nvim::{CellText, GridCell as NvimGridCell, RedrawNotification};
-use renderer::{CellLayer, Layer};
+use renderer::{CellLayer, Layer, Scroll};
 
 use crate::compositor::cell_layer;
 use crate::cursor::CursorState;
@@ -24,6 +24,9 @@ pub struct Editor {
 
 	/// Where each grid other than grid 1 is shown; grids without one aren't shown yet
 	placements: HashMap<u32, Placement>,
+
+	/// How each window's text scrolls, by grid
+	viewports: HashMap<u32, Viewport>,
 
 	highlights: HighlightState,
 	cursor: CursorState,
@@ -52,6 +55,20 @@ enum Placement {
 	Hidden,
 }
 
+/// How a window's text scrolls, from `win_viewport` and `win_viewport_margins`
+#[derive(Debug, Default)]
+struct Viewport {
+	/// Lines in the window's buffer. When it changes, the window likely shows another buffer, which Neovim also
+	/// reports as a scroll.
+	line_count: u32,
+
+	/// Rows and columns at the window's edges that don't scroll, like the winbar or a border: top, bottom, left, right
+	margins: [u32; 4],
+
+	/// Rows the text moved up since the last `flush`, or down if negative
+	scrolled: i64,
+}
+
 /// What to draw after Neovim finished redrawing
 #[derive(Debug, Clone, PartialEq)]
 pub struct Redraw {
@@ -73,6 +90,7 @@ impl Editor {
 		Self {
 			grids: HashMap::new(),
 			placements: HashMap::new(),
+			viewports: HashMap::new(),
 			highlights: HighlightState::new(),
 			cursor: CursorState::default(),
 			cursor_grid: 1,
@@ -108,6 +126,7 @@ impl Editor {
 			RedrawNotification::GridDestroy(destroys) => {
 				for destroy in destroys {
 					self.grids.remove(&destroy.grid);
+					self.viewports.remove(&destroy.grid);
 					self.placements.remove(&destroy.grid);
 					self.stale = true;
 				}
@@ -172,6 +191,20 @@ impl Editor {
 					);
 				}
 			},
+			RedrawNotification::WinViewport(viewports) => {
+				for event in viewports {
+					let viewport = self.viewports.entry(event.grid).or_default();
+					let same_buffer = viewport.line_count == event.line_count;
+					viewport.scrolled = if same_buffer { viewport.scrolled + event.scroll_delta } else { 0 };
+					viewport.line_count = event.line_count;
+				}
+			},
+			RedrawNotification::WinViewportMargins(margins) => {
+				for event in margins {
+					self.viewports.entry(event.grid).or_default().margins =
+						[event.top, event.bottom, event.left, event.right];
+				}
+			},
 			RedrawNotification::HlAttrDefine(attrs) => {
 				self.highlights.set_attrs(attrs);
 				self.stale = true;
@@ -225,10 +258,13 @@ impl Editor {
 
 	/// The layers to draw, if anything changed since the last `flush`
 	fn flush(&mut self) -> Option<Redraw> {
-		if !std::mem::take(&mut self.stale) {
-			return None;
+		let redraw =
+			std::mem::take(&mut self.stale).then(|| Redraw { background: self.background(), layers: self.layers() });
+		// A scroll belongs to the redraw it's part of.
+		for viewport in self.viewports.values_mut() {
+			viewport.scrolled = 0;
 		}
-		Some(Redraw { background: self.background(), layers: self.layers() })
+		redraw
 	}
 
 	/// The layers in Neovim's drawing order, like its own compositor (`:help ui-event-win_float_pos`): grid 1, the
@@ -275,7 +311,21 @@ impl Editor {
 		let cursor = (id == self.cursor_grid).then(|| self.cursor.style()).flatten();
 		let mut layer = cell_layer(id, &self.grids[&id], &self.highlights, cursor);
 		(layer.row, layer.col) = (row, col);
+		layer.scroll = self.scroll(id, layer.width, layer.height);
 		Layer::Cells(layer)
+	}
+
+	/// How the text of grid `id`, `width` × `height` cells, scrolled since the last `flush`, if it did
+	fn scroll(&self, id: u32, width: u32, height: u32) -> Option<Scroll> {
+		let viewport = self.viewports.get(&id).filter(|viewport| viewport.scrolled != 0)?;
+		let [top, bottom, left, right] = viewport.margins;
+		Some(Scroll {
+			rows: viewport.scrolled.clamp(i32::MIN.into(), i32::MAX.into()) as i32,
+			top,
+			bottom: height.saturating_sub(bottom),
+			left,
+			right: width.saturating_sub(right),
+		})
 	}
 
 	/// The line the TUI draws above messages that scrolled over the windows: `separator` across the screen at `row`,
@@ -311,7 +361,7 @@ mod tests {
 	use nvim::{
 		CellText, DefaultColorsSetEvent, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
 		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, RedrawNotification,
-		WinCloseEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent,
+		WinCloseEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent, WinViewportEvent, WinViewportMarginsEvent,
 	};
 	use renderer::{CellLayer, Layer};
 	use serde::de::IgnoredAny;
@@ -540,5 +590,66 @@ mod tests {
 		// The block cursor swaps the colors of "b" in the window, and nothing in grid 1.
 		assert_eq!(colors(1)[..2], [(FG, BG), (BG, FG)]);
 		assert!(colors(0).iter().all(|&cell| cell == (FG, BG)));
+	}
+
+	fn viewport(grid: u32, line_count: u32, scroll_delta: i64) -> RedrawNotification {
+		RedrawNotification::WinViewport(vec![WinViewportEvent {
+			grid,
+			win: IgnoredAny,
+			topline: 0,
+			botline: 0,
+			curline: 0,
+			curcol: 0,
+			line_count,
+			scroll_delta,
+		}])
+	}
+
+	/// The scroll of grid `id`'s layer in `redraw`: (rows, top, bottom, left, right)
+	fn scroll_of(redraw: &Redraw, id: u64) -> Option<(i32, u32, u32, u32, u32)> {
+		let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id)?;
+		layer
+			.scroll
+			.map(|scroll| (scroll.rows, scroll.top, scroll.bottom, scroll.left, scroll.right))
+	}
+
+	#[test]
+	fn a_scroll_is_part_of_its_redraw() {
+		let mut editor = screen();
+		flush(&mut editor, vec![win_pos(2, 0, 0), viewport(2, 100, 0)]);
+
+		// Scrolls add up until the redraw ends.
+		let redraw = flush(&mut editor, vec![viewport(2, 100, 2), viewport(2, 100, 1), line(2, 0, "a")]);
+		assert_eq!(scroll_of(&redraw, 2), Some((3, 0, 3, 0, 4)));
+		assert_eq!(scroll_of(&redraw, 1), None);
+
+		// The next redraw didn't scroll.
+		assert_eq!(scroll_of(&flush(&mut editor, vec![line(2, 0, "b")]), 2), None);
+
+		// A redraw without changes drops its scroll, so the next one doesn't slide.
+		editor.apply(vec![viewport(2, 100, 1), RedrawNotification::Flush]);
+		assert_eq!(scroll_of(&flush(&mut editor, vec![line(2, 0, "c")]), 2), None);
+	}
+
+	#[test]
+	fn margins_dont_scroll() {
+		let mut editor = screen();
+		let margins = WinViewportMarginsEvent { grid: 2, win: IgnoredAny, top: 1, bottom: 0, left: 1, right: 1 };
+		flush(
+			&mut editor,
+			vec![win_pos(2, 0, 0), RedrawNotification::WinViewportMargins(vec![margins]), viewport(2, 9, 0)],
+		);
+		let redraw = flush(&mut editor, vec![viewport(2, 9, -1), line(2, 1, "a")]);
+		assert_eq!(scroll_of(&redraw, 2), Some((-1, 1, 3, 1, 3)));
+	}
+
+	#[test]
+	fn another_buffer_doesnt_scroll() {
+		let mut editor = screen();
+		// Neovim reports the first viewport of a window, and switching buffers, as scrolls.
+		let redraw = flush(&mut editor, vec![win_pos(2, 0, 0), viewport(2, 500, 243)]);
+		assert_eq!(scroll_of(&redraw, 2), None);
+		let redraw = flush(&mut editor, vec![viewport(2, 300, -294), line(2, 0, "a")]);
+		assert_eq!(scroll_of(&redraw, 2), None);
 	}
 }
