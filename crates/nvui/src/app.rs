@@ -11,14 +11,14 @@ use winit::event_loop::EventLoopProxy;
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowAttributes, WindowId};
 
+use editor::compositor::cell_layer;
+use editor::cursor::CursorState;
+use editor::grid::Grid;
+use editor::highlight::HighlightState;
 use nvim::{Nvim, NvimNotification, NvimUiAttachParams, NvimUiOptions, NvimUiTryResizeParams, RedrawNotification};
 use renderer::{Fonts, Frame, Layer, Renderer, RendererConfig, RendererError};
 
-use crate::compositor::cell_layer;
-use crate::cursor::CursorState;
 use crate::error::Error;
-use crate::grid::Grid;
-use crate::highlight::HighlightState;
 use crate::input::neovim_keys;
 use crate::windows::{GridSize, WindowConfig};
 

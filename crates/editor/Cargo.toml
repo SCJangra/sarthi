@@ -1,0 +1,8 @@
+[package]
+name = "nvui-editor"
+version = { workspace = true }
+edition = { workspace = true }
+
+[dependencies]
+nvim = { workspace = true }
+renderer = { workspace = true }

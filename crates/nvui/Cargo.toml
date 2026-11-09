@@ -4,6 +4,7 @@ version = { workspace = true }
 edition = { workspace = true }
 
 [dependencies]
+editor = { workspace = true }
 renderer = { workspace = true }
 nvim = { workspace = true }
 smol = { workspace = true }

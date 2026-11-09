@@ -1296,6 +1296,7 @@ name = "nvui"
 version = "0.1.0"
 dependencies = [
  "dashmap",
+ "nvui-editor",
  "nvui-nvim-client",
  "nvui-renderer",
  "smol",
@@ -1319,6 +1320,14 @@ dependencies = [
  "serde",
  "syn 2.0.117",
  "trybuild",
+]
+
+[[package]]
+name = "nvui-editor"
+version = "0.1.0"
+dependencies = [
+ "nvui-nvim-client",
+ "nvui-renderer",
 ]
 
 [[package]]

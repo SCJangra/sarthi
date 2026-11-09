@@ -43,6 +43,12 @@ pub struct HighlightState {
 	groups: HashMap<String, u32>,
 }
 
+impl Default for HighlightState {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl HighlightState {
 	pub fn new() -> Self {
 		Self { attrs: HashMap::new(), defaults: INITIAL_DEFAULT_COLORS, groups: HashMap::new() }

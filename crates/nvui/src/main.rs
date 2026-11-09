@@ -1,9 +1,5 @@
 mod app;
-mod compositor;
-mod cursor;
 mod error;
-mod grid;
-mod highlight;
 mod input;
 mod windows;
 
