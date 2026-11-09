@@ -4,8 +4,8 @@ use std::{process, thread};
 use flume::Receiver;
 
 use crate::{
-	Error, NvimExecLua, NvimInput, NvimMessage, NvimUiAttach, NvimUiAttachParams, NvimUiSetFocus, NvimUiTryResize,
-	NvimUiTryResizeParams, RpcClient,
+	Error, NvimClientInfo, NvimExecLua, NvimInput, NvimMessage, NvimSetClientInfo, NvimUiAttach, NvimUiAttachParams,
+	NvimUiSetFocus, NvimUiTryResize, NvimUiTryResizeParams, RpcClient,
 };
 
 /// How long to wait for Neovim to exit on its own before killing it. Generous, since killing it
@@ -39,9 +39,14 @@ impl Nvim {
 		let stdin = nvim.stdin.take().expect("stdin handle present");
 		let stdout = nvim.stdout.take().expect("stdout handle present");
 
-		let (rpc, notifications) = RpcClient::start(stdout, stdin);
+		let (rpc, messages) = RpcClient::start(stdout, stdin);
 
-		Ok((Self { rpc, process: NvimProcess(nvim) }, notifications))
+		Ok((Self { rpc, process: NvimProcess(nvim) }, messages))
+	}
+
+	/// Identifies the client to Neovim, e.g. for Lua code looking for its channel
+	pub fn set_client_info(&self, info: NvimClientInfo) -> Result<(), Error> {
+		self.rpc.notify::<NvimSetClientInfo>(info).map_err(Error::Rpc)
 	}
 
 	/// Runs Lua `code` in Neovim and waits for its result
