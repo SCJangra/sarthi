@@ -1,17 +1,23 @@
 use std::sync::Arc;
 
 use glyphon::FontSystem;
-use glyphon::cosmic_text::skrifa::charmap::Charmap;
+use glyphon::cosmic_text::Font;
 use glyphon::cosmic_text::skrifa::instance::{LocationRef, Size};
 use glyphon::cosmic_text::skrifa::metrics::Decoration;
 use glyphon::cosmic_text::skrifa::{FontRef, MetadataProvider};
-use glyphon::fontdb::Source;
+use glyphon::fontdb::{Family, Query, Source, Style, Weight};
+use rustc_hash::FxHashMap;
 
-/// nvui draws text with JetBrains Mono, bundled so it looks the same everywhere (license: `assets/fonts/OFL.txt`).
-/// Both faces are variable fonts, so every weight is available.
-const FAMILY: &str = "JetBrains Mono";
-const REGULAR: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono[wght].ttf");
-const FACES: [&[u8]; 2] = [REGULAR, include_bytes!("../assets/fonts/JetBrainsMono-Italic[wght].ttf")];
+/// nvui draws text with JetBrains Mono unless told otherwise, bundled so it looks the same everywhere (license:
+/// `assets/fonts/OFL.txt`). Both faces are variable fonts, so every weight is available.
+const BUNDLED: &str = "JetBrains Mono";
+const FACES: [&[u8]; 2] = [
+	include_bytes!("../assets/fonts/JetBrainsMono[wght].ttf"),
+	include_bytes!("../assets/fonts/JetBrainsMono-Italic[wght].ttf"),
+];
+
+/// Most fonts [`FontChoice::families`] can name
+const MAX_FAMILIES: usize = 32;
 
 /// Size of a grid cell, in physical pixels
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,31 +26,117 @@ pub struct CellSize {
 	pub height: u32,
 }
 
-/// The fonts text is drawn with: the bundled font, and the system's fonts as fallback for characters it
-/// doesn't have (e.g. CJK and emoji)
+/// Which fonts to draw text with
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FontChoice {
+	/// Font families, by name: the first draws all text it has the characters for, the others, in order, the
+	/// characters it lacks, and the system's fonts what none of them has. Empty for the bundled font.
+	pub families: Vec<String>,
+
+	/// Draws all text bold or italic, not only text highlighted so
+	pub bold: bool,
+	pub italic: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum FontError {
+	#[error("font not found: {0}")]
+	NotFound(String),
+
+	#[error("font {0} has no usable metrics")]
+	NoMetrics(String),
+
+	#[error("at most {MAX_FAMILIES} fonts")]
+	TooMany,
+}
+
+/// The fonts text is drawn with: the chosen ones (the bundled font unless chosen otherwise), and the system's fonts as
+/// fallback for characters they don't have (e.g. CJK and emoji)
 pub struct Fonts {
 	pub(crate) system: FontSystem,
 
-	/// Which characters the bundled font has
-	charmap: Charmap<'static>,
+	/// The chosen fonts, in order: the main font first
+	faces: Vec<Face>,
 
-	/// Metrics of the bundled font at a font size of 1 pixel
+	/// Which of `faces` have each character seen so far, as a bit per face
+	coverage: FxHashMap<char, u32>,
+
+	/// Metrics of the main font at a font size of 1 pixel
 	em: EmMetrics,
+
+	pub(crate) bold: bool,
+	pub(crate) italic: bool,
+
+	/// Changes whenever the fonts do, so text laid out with the old ones is laid out again
+	pub(crate) generation: u32,
+}
+
+/// A chosen font: the regular face of a family
+struct Face {
+	/// The family's name as the font spells it
+	family: String,
+	font: Arc<Font>,
+
+	/// Index of the face in its font file
+	index: u32,
+}
+
+impl Face {
+	fn has(&self, c: char) -> bool {
+		FontRef::from_index(self.font.data(), self.index).is_ok_and(|font| font.charmap().map(c).is_some())
+	}
 }
 
 impl Fonts {
 	/// Loads the bundled font and finds the system's fonts, which takes a few milliseconds.
 	pub fn new() -> Self {
 		let mut system = FontSystem::new();
-		let db = system.db_mut();
 		for face in FACES {
-			db.load_font_source(Source::Binary(Arc::new(face)));
+			system.db_mut().load_font_source(Source::Binary(Arc::new(face)));
 		}
-		db.set_monospace_family(FAMILY);
 
-		let regular = FontRef::new(REGULAR).expect("the bundled font is valid");
-		let em = EmMetrics::measure(&regular).expect("the bundled font has metrics");
-		Self { system, charmap: regular.charmap(), em }
+		let bundled = find(&mut system, BUNDLED).expect("the bundled font is loaded");
+		let em = bundled.metrics().expect("the bundled font has metrics");
+		let mut fonts = Self {
+			system,
+			faces: Vec::new(),
+			coverage: FxHashMap::default(),
+			em,
+			bold: false,
+			italic: false,
+			generation: 0,
+		};
+		fonts.use_faces(vec![bundled], em, &FontChoice::default());
+		fonts
+	}
+
+	/// Draws text with the fonts of `choice`. If one of them can't be used, nothing changes.
+	pub fn choose(&mut self, choice: &FontChoice) -> Result<(), FontError> {
+		if choice.families.len() > MAX_FAMILIES {
+			return Err(FontError::TooMany);
+		}
+		let families: Vec<&str> = match choice.families.as_slice() {
+			[] => vec![BUNDLED],
+			families => families.iter().map(String::as_str).collect(),
+		};
+		let faces = families
+			.into_iter()
+			.map(|family| find(&mut self.system, family).ok_or_else(|| FontError::NotFound(family.to_owned())))
+			.collect::<Result<Vec<_>, _>>()?;
+		let em = faces[0]
+			.metrics()
+			.ok_or_else(|| FontError::NoMetrics(faces[0].family.clone()))?;
+
+		self.use_faces(faces, em, choice);
+		Ok(())
+	}
+
+	fn use_faces(&mut self, faces: Vec<Face>, em: EmMetrics, choice: &FontChoice) {
+		// Text in the monospace family is the main font's.
+		self.system.db_mut().set_monospace_family(faces[0].family.clone());
+		(self.faces, self.em, self.bold, self.italic) = (faces, em, choice.bold, choice.italic);
+		self.coverage.clear();
+		self.generation = self.generation.wrapping_add(1);
 	}
 
 	/// Size of a grid cell for text of `font_size` physical pixels. The width is the advance of `M`, and the
@@ -81,11 +173,52 @@ impl Fonts {
 		LineMetrics { underline_top, thickness, strikeout_top, strikeout_thickness }
 	}
 
-	/// Whether the bundled font has every character of `text`. Its glyphs are exactly one cell wide, while
-	/// glyphs from fallback fonts can have any width.
-	pub(crate) fn covers(&self, text: &str) -> bool {
-		text.chars().all(|c| self.charmap.map(c).is_some())
+	/// Which chosen font draws `text`, one cell's characters: the index of the first that has them all, or `None` if
+	/// none has, for the system's fonts. The main font's glyphs are exactly one cell wide, while other fonts' glyphs
+	/// can have any width.
+	pub(crate) fn face_of(&mut self, text: &str) -> Option<u8> {
+		let faces = &self.faces;
+		let coverage = text.chars().fold(u32::MAX, |coverage, c| {
+			coverage
+				& *self.coverage.entry(c).or_insert_with(|| {
+					(0..)
+						.zip(faces)
+						.filter(|(_, face)| face.has(c))
+						.fold(0, |bits, (index, _)| bits | 1 << index)
+				})
+		});
+		(coverage != 0).then(|| coverage.trailing_zeros() as u8)
 	}
+
+	/// The family of chosen font `face` (see [`Fonts::face_of`]), or of the main font for `None`, which the
+	/// system's fonts stand in for where it lacks characters
+	pub(crate) fn family(&self, face: Option<u8>) -> &str {
+		&self.faces[usize::from(face.unwrap_or(0)).min(self.faces.len() - 1)].family
+	}
+}
+
+impl Face {
+	/// Metrics at a font size of 1 pixel
+	fn metrics(&self) -> Option<EmMetrics> {
+		EmMetrics::measure(&FontRef::from_index(self.font.data(), self.index).ok()?)
+	}
+}
+
+/// The regular face of `family`, whose name may differ in case from the font's
+fn find(system: &mut FontSystem, family: &str) -> Option<Face> {
+	let db = system.db();
+	let name = db
+		.faces()
+		.flat_map(|face| &face.families)
+		.find(|(name, _)| name.eq_ignore_ascii_case(family))
+		.map(|(name, _)| name.clone())?;
+
+	let query =
+		Query { families: &[Family::Name(&name)], weight: Weight::NORMAL, style: Style::Normal, ..Query::default() };
+	let id = db.query(&query)?;
+	let index = db.face(id)?.index;
+	let font = system.get_font(id, Weight::NORMAL)?;
+	Some(Face { family: name, font, index })
 }
 
 impl Default for Fonts {
@@ -152,7 +285,7 @@ mod tests {
 	use glyphon::fontdb::{Family, Query, Style, Weight};
 	use glyphon::{Attrs, Buffer, Metrics, Shaping};
 
-	use super::{CellSize, FAMILY, Fonts, LineMetrics};
+	use super::{BUNDLED, CellSize, FontChoice, FontError, Fonts, LineMetrics};
 
 	#[test]
 	fn cell_size() {
@@ -195,13 +328,54 @@ mod tests {
 	}
 
 	#[test]
-	fn covers() {
-		let fonts = Fonts::new();
-		assert!(fonts.covers("a"));
-		assert!(fonts.covers("│─é→λ"));
-		assert!(!fonts.covers("漢"));
-		assert!(!fonts.covers("😀"));
-		assert!(!fonts.covers("a漢"));
+	fn face_of() {
+		let mut fonts = Fonts::new();
+		assert_eq!(fonts.face_of("a"), Some(0));
+		assert_eq!(fonts.face_of("│─é→λ"), Some(0));
+		assert_eq!(fonts.face_of("漢"), None);
+		assert_eq!(fonts.face_of("😀"), None);
+		assert_eq!(fonts.face_of("a漢"), None);
+	}
+
+	#[test]
+	fn choose_by_name_in_any_case() {
+		let mut fonts = Fonts::new();
+		let generation = fonts.generation;
+		let choice = FontChoice { families: vec![String::from("jetbrains MONO")], bold: true, italic: false };
+		fonts.choose(&choice).unwrap();
+
+		// The font's own spelling is used, and text laid out before is laid out again.
+		assert_eq!(fonts.family(Some(0)), BUNDLED);
+		assert!(fonts.bold && !fonts.italic);
+		assert_ne!(fonts.generation, generation);
+	}
+
+	#[test]
+	fn a_missing_font_changes_nothing() {
+		let mut fonts = Fonts::new();
+		let generation = fonts.generation;
+		let choice =
+			FontChoice { families: vec![BUNDLED.into(), String::from("No Such Font")], ..FontChoice::default() };
+		assert!(matches!(fonts.choose(&choice), Err(FontError::NotFound(name)) if name == "No Such Font"));
+		assert_eq!((fonts.generation, fonts.family(None)), (generation, BUNDLED));
+	}
+
+	#[test]
+	fn another_main_font_and_fallbacks() {
+		let mut fonts = Fonts::new();
+		let choice = FontChoice { families: vec!["DejaVu Sans Mono".into(), BUNDLED.into()], ..FontChoice::default() };
+		if fonts.choose(&choice).is_err() {
+			eprintln!("skipped: DejaVu Sans Mono isn't installed");
+			return;
+		}
+
+		// Measured from DejaVu Sans Mono: 1233 of 2048 units wide
+		assert_eq!(fonts.cell_size(14.0).width, 8);
+		assert!((fonts.em.cell_width - 1233.0 / 2048.0).abs() < 1e-6);
+		assert_eq!(fonts.family(Some(0)), "DejaVu Sans Mono");
+		assert_eq!(fonts.face_of("a"), Some(0));
+		// Neither has it: the system's fonts draw it.
+		assert_eq!(fonts.face_of("漢"), None);
 	}
 
 	#[test]
@@ -220,7 +394,7 @@ mod tests {
 				.unwrap();
 			let face = db.face(id).unwrap();
 			// One variable face per style; cosmic-text applies the weight when it shapes and draws text.
-			assert_eq!(face.families[0].0, FAMILY);
+			assert_eq!(face.families[0].0, BUNDLED);
 			assert_eq!(face.style, style);
 		}
 	}

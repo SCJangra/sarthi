@@ -23,8 +23,9 @@ pub(crate) struct TextPipeline {
 	viewport: Viewport,
 	swash_cache: SwashCache,
 
-	/// Font size the rows were laid out at
+	/// Font size and fonts (their generation) the rows were laid out with
 	font_size: f32,
+	fonts: u32,
 
 	/// Laid-out rows of each piece, by layer id and whether it's a scrolling region
 	layers: HashMap<(u64, bool), Vec<Row>>,
@@ -61,6 +62,7 @@ impl TextPipeline {
 			viewport: Viewport::new(device, &cache),
 			swash_cache: SwashCache::new(),
 			font_size: 0.0,
+			fonts: 0,
 			layers: HashMap::new(),
 			empty: Buffer::new_empty(Metrics::new(1.0, 1.0)),
 		}
@@ -78,8 +80,8 @@ impl TextPipeline {
 		font_size: f32,
 	) -> Result<(), RendererError> {
 		let cell = fonts.cell_size(font_size);
-		if font_size != self.font_size {
-			self.font_size = font_size;
+		if (font_size, fonts.generation) != (self.font_size, self.fonts) {
+			(self.font_size, self.fonts) = (font_size, fonts.generation);
 			self.layers.clear();
 		}
 
@@ -198,7 +200,7 @@ fn update_rows(rows: &mut Vec<Row>, layer: &CellLayer, fonts: &mut Fonts, font_s
 	for index in changed {
 		let cells = &layer.cells[index * width..(index + 1) * width];
 		let layout = moved.get_mut(cells).and_then(Vec::pop).unwrap_or_else(|| RowLayout {
-			buffers: segments(cells, |text| fonts.covers(text))
+			buffers: segments(cells, |text| fonts.face_of(text))
 				.iter()
 				.map(|segment| (segment.col, layout(fonts, font_size, cell, segment)))
 				.collect(),
@@ -229,10 +231,11 @@ fn builtin_glyphs(cells: &[RenderCell], cell: CellSize) -> Vec<CustomGlyph> {
 		.collect()
 }
 
-/// A run of cells laid out together, starting at column `col`
+/// A run of cells laid out together, starting at column `col`, in chosen font `face` (see [`Fonts::face_of`])
 #[derive(Debug, PartialEq)]
 struct Segment {
 	col: u32,
+	face: Option<u8>,
 	text: String,
 	spans: Vec<(Range<usize>, TextStyle)>,
 }
@@ -257,13 +260,13 @@ impl Segment {
 	}
 }
 
-/// Splits a row into segments that each start at their own column. With hinting, glyphs of the bundled font
-/// advance exactly one cell, so a segment only ends after a cell that may not: a double-width character, or
-/// one `covered` says the bundled font lacks, which a fallback font with other widths draws.
+/// Splits a row into segments that each start at their own column. With hinting, glyphs of the main font advance
+/// exactly one cell, so a segment of its text only ends after a cell that may not: a double-width character. A cell
+/// that `face_of` says another font draws, whose glyphs can have any width, is a segment of its own.
 ///
 /// Spaces draw nothing (cell backgrounds are drawn separately), so segments start and end with text. Leaving
 /// out the spaces that fill the rest of a row halves the time to lay it out.
-fn segments(cells: &[RenderCell], covered: impl Fn(&str) -> bool) -> Vec<Segment> {
+fn segments(cells: &[RenderCell], mut face_of: impl FnMut(&str) -> Option<u8>) -> Vec<Segment> {
 	let mut segments = Vec::new();
 	let mut current: Option<Segment> = None;
 	// Spaces after the current segment's text, added once more text follows
@@ -281,16 +284,26 @@ fn segments(cells: &[RenderCell], covered: impl Fn(&str) -> bool) -> Vec<Segment
 			_ => (),
 		}
 
+		let face = face_of(&cell.text);
+		if face != Some(0) {
+			segments.extend(current.take());
+			spaces = 0;
+			let mut segment = Segment { col, face, text: String::new(), spans: Vec::new() };
+			segment.push(&cell.text, cell.style);
+			segments.push(segment);
+			continue;
+		}
+
 		if let Some(segment) = &mut current {
 			segment.push_spaces(spaces);
 		}
 		spaces = 0;
 
-		let segment = current.get_or_insert_with(|| Segment { col, text: String::new(), spans: Vec::new() });
+		let segment = current.get_or_insert_with(|| Segment { col, face, text: String::new(), spans: Vec::new() });
 		segment.push(&cell.text, cell.style);
 
 		let double_width = cells.get(col as usize + 1).is_some_and(|next| next.text.is_empty());
-		if double_width || !covered(&cell.text) {
+		if double_width {
 			segments.extend(current.take());
 		}
 	}
@@ -299,17 +312,19 @@ fn segments(cells: &[RenderCell], covered: impl Fn(&str) -> bool) -> Vec<Segment
 	segments
 }
 
+/// Lays out `segment` in its font, with all text bold or italic if the fonts were chosen so
 fn layout(fonts: &mut Fonts, font_size: f32, cell: CellSize, segment: &Segment) -> Buffer {
+	let (family, bold, italic) = (fonts.family(segment.face).to_owned(), fonts.bold, fonts.italic);
 	let mut buffer = Buffer::new(&mut fonts.system, Metrics::new(font_size, cell.height as f32));
 	buffer.set_wrap(Wrap::None);
-	// Rounds advances to whole pixels, like the cell width, so the bundled font's glyphs line up with cells.
+	// Rounds advances to whole pixels, like the cell width, so the main font's glyphs line up with cells.
 	buffer.set_hinting(Hinting::Enabled);
 
-	let attrs = Attrs::new().family(Family::Monospace);
-	let spans = segment
-		.spans
-		.iter()
-		.map(|(range, style)| (&segment.text[range.clone()], text_attrs(&attrs, style)));
+	let attrs = Attrs::new().family(Family::Name(&family));
+	let spans = segment.spans.iter().map(|(range, style)| {
+		let style = TextStyle { bold: style.bold || bold, italic: style.italic || italic, ..*style };
+		(&segment.text[range.clone()], text_attrs(&attrs, &style))
+	});
 	buffer.set_rich_text(spans, &attrs, Shaping::Advanced, None);
 	buffer.shape_until_scroll(&mut fonts.system, false);
 	buffer
@@ -345,12 +360,19 @@ mod tests {
 			.collect()
 	}
 
+	/// A segment in the main font
 	fn segment(col: u32, text: &str, spans: &[(std::ops::Range<usize>, TextStyle)]) -> Segment {
-		Segment { col, text: text.to_owned(), spans: spans.to_vec() }
+		Segment { col, face: Some(0), text: text.to_owned(), spans: spans.to_vec() }
 	}
 
-	fn ascii_only(text: &str) -> bool {
-		text.is_ascii()
+	/// A main font with ASCII only, and no other chosen fonts
+	fn ascii_only(text: &str) -> Option<u8> {
+		text.is_ascii().then_some(0)
+	}
+
+	/// Every character in the main font
+	fn main_font(_: &str) -> Option<u8> {
+		Some(0)
 	}
 
 	/// A layer one cell wide, with one row per string
@@ -386,20 +408,29 @@ mod tests {
 	fn double_width_character_ends_a_segment() {
 		let row = cells(&["a", "漢", "", "b"], PLAIN);
 		// "漢" is treated as covered here, so only its width ends the segment.
-		assert_eq!(segments(&row, |_| true), [segment(0, "a漢", &[(0..4, PLAIN)]), segment(3, "b", &[(0..1, PLAIN)])],);
+		assert_eq!(segments(&row, main_font), [segment(0, "a漢", &[(0..4, PLAIN)]), segment(3, "b", &[(0..1, PLAIN)])],);
 	}
 
 	#[test]
-	fn uncovered_character_ends_a_segment() {
-		let row = cells(&["a", "é", "b"], PLAIN);
-		assert_eq!(segments(&row, ascii_only), [segment(0, "aé", &[(0..3, PLAIN)]), segment(2, "b", &[(0..1, PLAIN)])],);
+	fn character_of_another_font_is_a_segment_of_its_own() {
+		let row = cells(&["a", "b", "é", "c"], PLAIN);
+		// "é" is in no chosen font, so the system's fonts draw it.
+		let system = Segment { col: 2, face: None, text: String::from("é"), spans: vec![(0..2, PLAIN)] };
+		assert_eq!(
+			segments(&row, ascii_only),
+			[segment(0, "ab", &[(0..2, PLAIN)]), system, segment(3, "c", &[(0..1, PLAIN)])],
+		);
+
+		// In the second chosen font
+		let face = |text: &str| if text == "é" { Some(1) } else { Some(0) };
+		assert_eq!(segments(&row, face)[1].face, Some(1));
 	}
 
 	#[test]
 	fn multibyte_spans_use_byte_ranges() {
 		let mut row = cells(&["é"], BOLD);
 		row.extend(cells(&["a"], PLAIN));
-		assert_eq!(segments(&row, |_| true), [segment(0, "éa", &[(0..2, BOLD), (2..3, PLAIN)])]);
+		assert_eq!(segments(&row, main_font), [segment(0, "éa", &[(0..2, BOLD), (2..3, PLAIN)])]);
 	}
 
 	#[test]
@@ -451,7 +482,7 @@ mod tests {
 	#[test]
 	fn spaces_after_a_segment_end_are_left_out() {
 		let row = cells(&["漢", "", " ", "b"], PLAIN);
-		assert_eq!(segments(&row, |_| true), [segment(0, "漢", &[(0..3, PLAIN)]), segment(3, "b", &[(0..1, PLAIN)])]);
+		assert_eq!(segments(&row, main_font), [segment(0, "漢", &[(0..3, PLAIN)]), segment(3, "b", &[(0..1, PLAIN)])]);
 	}
 
 	#[test]
