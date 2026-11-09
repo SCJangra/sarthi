@@ -1,7 +1,9 @@
+use std::ops::Range;
+
 use bytemuck::{Pod, Zeroable};
 
 use crate::color::rgba;
-use crate::{CellSize, Layer, RenderCell};
+use crate::{BarOrientation, CellSize, Layer, RenderCell};
 
 /// A rectangle in physical pixels, with optional rounded corners and border
 #[repr(C)]
@@ -25,15 +27,14 @@ impl Quad {
 	}
 }
 
-/// Draws [`Quad`]s in one instanced draw call
+/// Draws [`Quad`]s with instanced draw calls: all quads of a frame are uploaded at once, and drawn in ranges
 pub(crate) struct QuadPipeline {
 	pipeline: wgpu::RenderPipeline,
 	viewport: wgpu::Buffer,
 	bind_group: wgpu::BindGroup,
 
-	/// Instance buffer, grown when a frame needs more room, and the number of quads it holds
+	/// Instance buffer, grown when a frame needs more room
 	instances: wgpu::Buffer,
-	count: u32,
 }
 
 impl QuadPipeline {
@@ -104,7 +105,7 @@ impl QuadPipeline {
 		});
 
 		let instances = instance_buffer(device, 0);
-		Self { pipeline, viewport, bind_group, instances, count: 0 }
+		Self { pipeline, viewport, bind_group, instances }
 	}
 
 	/// Uploads `quads` for a surface of `width` × `height` pixels.
@@ -123,17 +124,17 @@ impl QuadPipeline {
 			self.instances = instance_buffer(device, size.next_power_of_two());
 		}
 		queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(quads));
-		self.count = quads.len() as u32;
 	}
 
-	pub(crate) fn render(&self, pass: &mut wgpu::RenderPass<'_>) {
-		if self.count == 0 {
+	/// Draws the quads at `range` of those last prepared.
+	pub(crate) fn render(&self, pass: &mut wgpu::RenderPass<'_>, range: Range<u32>) {
+		if range.is_empty() {
 			return;
 		}
 		pass.set_pipeline(&self.pipeline);
 		pass.set_bind_group(0, &self.bind_group, &[]);
 		pass.set_vertex_buffer(0, self.instances.slice(..));
-		pass.draw(0..4, 0..self.count);
+		pass.draw(0..4, range);
 	}
 }
 
@@ -161,6 +162,24 @@ pub(crate) fn cell_backgrounds(quads: &mut Vec<Quad>, layers: &[Layer], cell: Ce
 	}
 }
 
+/// Adds a quad for each bar cursor in `layers`, in layer order
+pub(crate) fn bar_cursors(quads: &mut Vec<Quad>, layers: &[Layer], cell: CellSize, srgb_surface: bool) {
+	for Layer::Cells(layer) in layers {
+		let Some(cursor) = layer.cursor else { continue };
+
+		let (left, top) = ((layer.col + cursor.col) * cell.width, (layer.row + cursor.row) * cell.height);
+		let thickness = |size: u32| (size * cursor.percentage).div_ceil(100).clamp(1, size);
+		let rect = match cursor.orientation {
+			BarOrientation::Vertical => [left, top, thickness(cell.width), cell.height],
+			BarOrientation::Horizontal => {
+				let height = thickness(cell.height);
+				[left, top + cell.height - height, cursor.width * cell.width, height]
+			},
+		};
+		quads.push(Quad::fill(rect.map(|value| value as f32), rgba(cursor.color, srgb_surface)));
+	}
+}
+
 /// Runs of neighbouring cells with the same background, as (first column, length, color)
 fn background_runs(cells: &[RenderCell]) -> impl Iterator<Item = (u32, u32, u32)> {
 	cells.chunk_by(|a, b| a.background == b.background).scan(0, |col, run| {
@@ -174,8 +193,8 @@ fn background_runs(cells: &[RenderCell]) -> impl Iterator<Item = (u32, u32, u32)
 mod tests {
 	use arrayvec::ArrayString;
 
-	use super::{Quad, QuadPipeline, background_runs};
-	use crate::{RenderCell, TextStyle};
+	use super::{Quad, QuadPipeline, background_runs, bar_cursors};
+	use crate::{BarCursor, BarOrientation, CellLayer, CellSize, Layer, RenderCell, TextStyle};
 
 	fn cells(backgrounds: &[u32]) -> Vec<RenderCell> {
 		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
@@ -202,6 +221,26 @@ mod tests {
 		let mut row = cells(&[1, 2, 2, 1]);
 		row[2].text = ArrayString::new();
 		assert_eq!(background_runs(&row).collect::<Vec<_>>(), [(0, 1, 1), (1, 2, 2), (3, 1, 1)]);
+	}
+
+	/// Rectangles of a bar cursor at (row 2, col 3) of a layer placed at (row 1, col 1), with 8×19 px cells
+	fn bar_rect(orientation: BarOrientation, width: u32, percentage: u32) -> [f32; 4] {
+		let cursor = BarCursor { row: 2, col: 3, width, orientation, percentage, color: 0xFFFFFF };
+		let layer = CellLayer { id: 1, row: 1, col: 1, width: 10, height: 5, cells: Vec::new(), cursor: Some(cursor) };
+		let mut quads = Vec::new();
+		bar_cursors(&mut quads, &[Layer::Cells(layer)], CellSize { width: 8, height: 19 }, false);
+		quads[0].rect
+	}
+
+	#[test]
+	fn bar_cursor_rects() {
+		// The cell starts at (4 * 8, 3 * 19) = (32, 57).
+		assert_eq!(bar_rect(BarOrientation::Vertical, 1, 25), [32.0, 57.0, 2.0, 19.0]);
+		// 20% of 19 px is 3.8, rounded up; the bar sits on the bottom edge and spans both halves of a wide character.
+		assert_eq!(bar_rect(BarOrientation::Horizontal, 2, 20), [32.0, 72.0, 16.0, 4.0]);
+		// At least 1 px, at most the whole cell
+		assert_eq!(bar_rect(BarOrientation::Vertical, 1, 0), [32.0, 57.0, 1.0, 19.0]);
+		assert_eq!(bar_rect(BarOrientation::Horizontal, 1, 150), [32.0, 57.0, 8.0, 19.0]);
 	}
 
 	const SIZE: u32 = 64;
@@ -248,7 +287,7 @@ mod tests {
 					timestamp_writes: None,
 					multiview_mask: None,
 				});
-				pipeline.render(&mut pass);
+				pipeline.render(&mut pass, 0..quads.len() as u32);
 			}
 
 			let buffer = device.create_buffer(&wgpu::BufferDescriptor {

@@ -15,6 +15,7 @@ use nvim::{Nvim, NvimNotification, NvimUiAttachParams, NvimUiOptions, NvimUiTryR
 use renderer::{Fonts, Frame, Layer, Renderer, RendererConfig, RendererError};
 
 use crate::compositor::cell_layer;
+use crate::cursor::CursorState;
 use crate::error::Error;
 use crate::grid::Grid;
 use crate::highlight::HighlightState;
@@ -28,6 +29,7 @@ pub struct App {
 	pub grid: DashMap<u32, Grid>,
 	pub grid_window: DashMap<u32, WindowId>,
 	pub highlight_state: HighlightState,
+	pub cursor: CursorState,
 	pub fonts: Fonts,
 	pub nvim: Nvim,
 
@@ -78,6 +80,7 @@ impl App {
 			grid: DashMap::new(),
 			grid_window: DashMap::new(),
 			highlight_state: HighlightState::new(),
+			cursor: CursorState::default(),
 			fonts: Fonts::new(),
 			nvim,
 			ui_size: GridSize { width: 0, height: 0 },
@@ -239,6 +242,26 @@ impl App {
 				RedrawNotification::HlGroupSet(groups) => {
 					self.highlight_state.set_hl_groups(groups);
 				},
+				RedrawNotification::ModeInfoSet(sets) => {
+					if let Some(set) = sets.into_iter().last() {
+						self.cursor.set_modes(set.cursor_style_enabled, set.mode_info);
+						self.mark_all_stale();
+					}
+				},
+				RedrawNotification::ModeChange(changes) => {
+					if let Some(change) = changes.last() {
+						self.cursor.set_mode(change.mode_idx as usize);
+						self.mark_all_stale();
+					}
+				},
+				RedrawNotification::BusyStart => {
+					self.cursor.set_hidden(true);
+					self.mark_all_stale();
+				},
+				RedrawNotification::BusyStop => {
+					self.cursor.set_hidden(false);
+					self.mark_all_stale();
+				},
 				RedrawNotification::Flush => self.flush(),
 				_ => (),
 			}
@@ -269,7 +292,7 @@ impl App {
 			}
 			let (Some(grid), Some(window)) = (self.grid.get(&grid_id), self.window.get(&window_id)) else { continue };
 
-			let layer = cell_layer(grid_id, &grid, &self.highlight_state);
+			let layer = cell_layer(grid_id, &grid, &self.highlight_state, self.cursor.style());
 			self.layers.insert(window_id, vec![Layer::Cells(layer)]);
 			window.request_redraw();
 		}

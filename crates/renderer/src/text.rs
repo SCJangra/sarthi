@@ -272,7 +272,15 @@ mod tests {
 
 	/// A layer one cell wide, with one row per string
 	fn column(rows: &[&str]) -> CellLayer {
-		CellLayer { id: 1, row: 0, col: 0, width: 1, height: rows.len() as u32, cells: cells(rows, PLAIN) }
+		CellLayer {
+			id: 1,
+			row: 0,
+			col: 0,
+			width: 1,
+			height: rows.len() as u32,
+			cells: cells(rows, PLAIN),
+			cursor: None,
+		}
 	}
 
 	#[test]

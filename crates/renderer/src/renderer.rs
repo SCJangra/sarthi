@@ -1,5 +1,5 @@
 use crate::color::wgpu_color;
-use crate::quad::{Quad, QuadPipeline, cell_backgrounds};
+use crate::quad::{Quad, QuadPipeline, bar_cursors, cell_backgrounds};
 use crate::text::TextPipeline;
 use crate::{Fonts, Layer, RendererConfig, RendererError};
 
@@ -12,8 +12,8 @@ pub struct Renderer {
 	quads: QuadPipeline,
 	text: TextPipeline,
 
-	/// Cell backgrounds of the current frame, kept to reuse the allocation
-	backgrounds: Vec<Quad>,
+	/// Quads of the current frame, kept to reuse the allocation: cell backgrounds, then bar cursors
+	frame_quads: Vec<Quad>,
 }
 
 impl Renderer {
@@ -111,7 +111,7 @@ impl Renderer {
 		let quads = QuadPipeline::new(&device, config.format);
 		let text = TextPipeline::new(&device, &queue, config.format);
 
-		Ok(Self { surface, device, queue, config, clear_color, quads, text, backgrounds: Vec::new() })
+		Ok(Self { surface, device, queue, config, clear_color, quads, text, frame_quads: Vec::new() })
 	}
 
 	pub fn resize(&mut self, width: u32, height: u32) {
@@ -155,10 +155,14 @@ impl Renderer {
 		self.text
 			.prepare(&self.device, &self.queue, resolution, fonts, layers, font_size)?;
 
-		self.backgrounds.clear();
-		cell_backgrounds(&mut self.backgrounds, layers, fonts.cell_size(font_size), self.config.format.is_srgb());
+		let (cell, srgb) = (fonts.cell_size(font_size), self.config.format.is_srgb());
+		self.frame_quads.clear();
+		cell_backgrounds(&mut self.frame_quads, layers, cell, srgb);
+		let backgrounds = 0..self.frame_quads.len() as u32;
+		bar_cursors(&mut self.frame_quads, layers, cell, srgb);
+		let cursors = backgrounds.end..self.frame_quads.len() as u32;
 		self.quads
-			.prepare(&self.device, &self.queue, self.config.width, self.config.height, &self.backgrounds);
+			.prepare(&self.device, &self.queue, self.config.width, self.config.height, &self.frame_quads);
 
 		let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -183,8 +187,9 @@ impl Renderer {
 				timestamp_writes: None,
 				multiview_mask: None,
 			});
-			self.quads.render(&mut pass);
+			self.quads.render(&mut pass, backgrounds);
 			self.text.render(&mut pass)?;
+			self.quads.render(&mut pass, cursors);
 		}
 
 		self.queue.submit(Some(encoder.finish()));
