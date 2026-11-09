@@ -49,6 +49,12 @@ impl Nvim {
 		self.rpc.notify::<NvimSetClientInfo>(info).map_err(Error::Rpc)
 	}
 
+	/// Shows `message` as an error in Neovim (`vim.notify()` at ERROR level), without waiting for it
+	pub fn show_error(&self, message: &str) -> Result<(), Error> {
+		let code = String::from("vim.notify(..., vim.log.levels.ERROR)");
+		self.rpc.notify::<NvimExecLua>((code, vec![message.into()])).map_err(Error::Rpc)
+	}
+
 	/// Runs Lua `code` in Neovim and waits for its result
 	pub fn exec_lua(&self, code: &str) -> Result<rmpv::Value, Error> {
 		self.rpc.call::<NvimExecLua>((code.to_owned(), Vec::new())).map_err(Error::Rpc)
@@ -106,7 +112,7 @@ mod tests {
 	#[test]
 	fn drop_waits_for_neovim_to_exit() {
 		// Isolated from the user's config and ShaDa.
-		let (nvim, _notifications) = Nvim::spawn(&["--embed", "--clean", "-i", "NONE", "-n"]).unwrap();
+		let (nvim, _messages) = Nvim::spawn(&["--embed", "--clean", "-i", "NONE", "-n"]).unwrap();
 		let pid = nvim.process.0.id();
 
 		let start = Instant::now();
@@ -115,5 +121,17 @@ mod tests {
 		// Exiting on its own (not killed after the timeout), and reaped: no zombie left in /proc.
 		assert!(start.elapsed() < EXIT_TIMEOUT, "Neovim had to be killed");
 		assert!(!Path::new(&format!("/proc/{pid}")).exists(), "Neovim process {pid} still exists");
+	}
+
+	#[test]
+	fn show_error() {
+		let (nvim, _messages) = Nvim::spawn(&["--embed", "--clean", "-i", "NONE", "-n"]).unwrap();
+		nvim.show_error("guifont: font not found: X").unwrap();
+		// Neovim handles the notification first, then this call.
+		let error = nvim.exec_lua("return vim.v.errmsg").unwrap();
+		assert_eq!(error, rmpv::Value::from("guifont: font not found: X"));
+
+		// With an error shown, Neovim doesn't exit right away when its input closes; quitting spares the test the wait.
+		nvim.exec_lua("vim.schedule(function() vim.cmd('qa!') end)").unwrap();
 	}
 }
