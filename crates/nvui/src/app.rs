@@ -128,7 +128,8 @@ impl App {
 		let line_space = (self.linespace as f64 * scale)
 			.round()
 			.clamp(f64::from(i32::MIN), f64::from(i32::MAX));
-		TextSize { font_size: self.font_size * scale as f32, line_space: line_space as i32 }
+		let underlines = self.config.underlines.scaled(scale as f32);
+		TextSize { font_size: self.font_size * scale as f32, line_space: line_space as i32, underlines }
 	}
 
 	/// Number of grid cells that fit in `window`

@@ -26,19 +26,56 @@ pub struct CellSize {
 	pub height: u32,
 }
 
-/// How large text is drawn, in physical pixels
+/// How large text and its underlines are drawn, in physical pixels
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextSize {
 	pub font_size: f32,
 
 	/// Added to the height of each row, or taken from it if negative (Neovim's `linespace`)
 	pub line_space: i32,
+
+	pub underlines: UnderlineSize,
 }
 
 impl TextSize {
-	/// Text of `font_size` pixels, without line space
+	/// Text of `font_size` pixels, without line space, with underlines as the font has them
 	pub fn new(font_size: f32) -> Self {
-		Self { font_size, line_space: 0 }
+		Self { font_size, line_space: 0, underlines: UnderlineSize::default() }
+	}
+}
+
+/// How underlines are drawn, in pixels, as adjustments to what the font says. The default follows the font.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnderlineSize {
+	/// Moves underlines down from the font's position, or up if negative
+	pub offset: f32,
+
+	/// Replaces the font's thickness of every line: underlines, overlines and strikethroughs
+	pub thickness: Option<f32>,
+
+	/// Height of an undercurl's wave, in line thicknesses
+	pub wave_height: f32,
+
+	/// Space kept between underlines and the text's ink where it crosses them, like CSS's
+	/// `text-decoration-skip-ink`; `None`, the default, draws underlines through the ink.
+	pub ink_gaps: Option<f32>,
+}
+
+impl Default for UnderlineSize {
+	fn default() -> Self {
+		Self { offset: 0.0, thickness: None, wave_height: 2.0, ink_gaps: None }
+	}
+}
+
+impl UnderlineSize {
+	/// These sizes `scale` times larger, e.g. from logical to physical pixels; the wave height is in thicknesses
+	pub fn scaled(self, scale: f32) -> Self {
+		Self {
+			offset: self.offset * scale,
+			thickness: self.thickness.map(|thickness| thickness * scale),
+			wave_height: self.wave_height,
+			ink_gaps: self.ink_gaps.map(|clearance| clearance * scale),
+		}
 	}
 }
 
@@ -187,14 +224,28 @@ impl Fonts {
 		let baseline = self.baseline(size);
 
 		// Whole pixels, so lines are sharp, and inside the cell
-		let line = |(offset, thickness): (f32, f32)| {
-			let thickness = (thickness * font_size).round().clamp(1.0, cell_height);
-			let top = (baseline - offset * font_size).round().clamp(0.0, cell_height - thickness);
-			(top, thickness)
+		let line = |top: f32, thickness: f32| {
+			let thickness = thickness.round().clamp(1.0, cell_height);
+			(top.round().clamp(0.0, cell_height - thickness), thickness)
 		};
-		let (underline_top, thickness) = line(em.underline);
-		let (strikeout_top, strikeout_thickness) = line(em.strikeout);
-		LineMetrics { underline_top, thickness, strikeout_top, strikeout_thickness }
+		let underlines = size.underlines;
+		let (offset, thickness) = em.underline;
+		let (underline_top, thickness) = line(
+			baseline - offset * font_size + underlines.offset,
+			underlines.thickness.unwrap_or(thickness * font_size),
+		);
+		let (offset, strikeout_thickness) = em.strikeout;
+		let strikeout_thickness = underlines.thickness.unwrap_or(strikeout_thickness * font_size);
+		let (strikeout_top, strikeout_thickness) = line(baseline - offset * font_size, strikeout_thickness);
+
+		LineMetrics {
+			underline_top,
+			thickness,
+			wave_height: (underlines.wave_height * thickness).round().clamp(thickness, cell_height),
+			ink_gaps: underlines.ink_gaps,
+			strikeout_top,
+			strikeout_thickness,
+		}
 	}
 
 	/// Which chosen font draws `text`, one cell's characters: the index of the first that has them all, or `None` if
@@ -286,6 +337,12 @@ pub(crate) struct LineMetrics {
 	/// Thickness of underlines and overlines
 	pub thickness: f32,
 
+	/// Height of an undercurl's wave, centered on the underline
+	pub wave_height: f32,
+
+	/// Space kept between underlines and the text's ink, if they break around it (see [`UnderlineSize::ink_gaps`])
+	pub ink_gaps: Option<f32>,
+
 	pub strikeout_top: f32,
 	pub strikeout_thickness: f32,
 }
@@ -336,7 +393,7 @@ mod tests {
 	use glyphon::fontdb::{Family, Query, Style, Weight};
 	use glyphon::{Attrs, Buffer, Metrics, Shaping};
 
-	use super::{BUNDLED, CellSize, FontChoice, FontError, Fonts, LineMetrics, TextSize};
+	use super::{BUNDLED, CellSize, FontChoice, FontError, Fonts, LineMetrics, TextSize, UnderlineSize};
 
 	#[test]
 	fn cell_size() {
@@ -355,8 +412,14 @@ mod tests {
 		assert_eq!((fonts.em.underline, fonts.em.strikeout), ((-0.155, 0.05), (0.32, 0.05)));
 
 		// At 14 px the baseline is 14.54 px from the top of a 19 px cell.
-		let expected =
-			LineMetrics { underline_top: 17.0, thickness: 1.0, strikeout_top: 10.0, strikeout_thickness: 1.0 };
+		let expected = LineMetrics {
+			underline_top: 17.0,
+			thickness: 1.0,
+			wave_height: 2.0,
+			ink_gaps: None,
+			strikeout_top: 10.0,
+			strikeout_thickness: 1.0,
+		};
 		assert_eq!(fonts.line_metrics(TextSize::new(14.0)), expected);
 
 		// Lines stay inside the cell, at least 1 px thick.
@@ -368,7 +431,7 @@ mod tests {
 	fn baseline_matches_cosmic_text() {
 		let mut fonts = Fonts::new();
 		for (font_size, line_space) in [(14.0, 0), (28.0, 0), (14.0, 5), (14.0, -3)] {
-			let size = TextSize { font_size, line_space };
+			let size = TextSize { line_space, ..TextSize::new(font_size) };
 			let cell = fonts.cell_size(size);
 			let mut buffer = Buffer::new(&mut fonts.system, Metrics::new(font_size, cell.height as f32));
 			buffer.set_text("x", &Attrs::new().family(glyphon::Family::Monospace), Shaping::Advanced, None);
@@ -382,7 +445,7 @@ mod tests {
 	#[test]
 	fn line_space() {
 		let fonts = Fonts::new();
-		let size = |line_space| TextSize { font_size: 14.0, line_space };
+		let size = |line_space| TextSize { line_space, ..TextSize::new(14.0) };
 		assert_eq!(fonts.cell_size(size(4)), CellSize { width: 8, height: 23 });
 		assert_eq!(fonts.cell_size(size(-5)), CellSize { width: 8, height: 14 });
 		// A cell is at least a pixel tall.
@@ -505,5 +568,20 @@ mod tests {
 		assert_eq!(fonts.variant(Some(0), true, false), (Weight::BLACK, Style::Normal));
 		assert_eq!(fonts.variant(Some(0), true, true), (Weight::BLACK, Style::Italic));
 		assert_eq!(fonts.variant(Some(0), false, true), (Weight::NORMAL, Style::Italic));
+	}
+
+	#[test]
+	fn underline_adjustments() {
+		let fonts = Fonts::new();
+		let font = fonts.line_metrics(TextSize::new(28.0));
+		let underlines = UnderlineSize { offset: -2.0, thickness: Some(3.0), wave_height: 2.0, ink_gaps: Some(1.5) };
+		let adjusted = fonts.line_metrics(TextSize { underlines, ..TextSize::new(28.0) });
+
+		// The thickness is every line's; the offset moves only underlines.
+		assert_eq!((adjusted.thickness, adjusted.strikeout_thickness), (3.0, 3.0));
+		assert_eq!(adjusted.underline_top, font.underline_top - 2.0);
+		assert_eq!(adjusted.strikeout_top, font.strikeout_top);
+		// The wave height is in thicknesses.
+		assert_eq!((adjusted.wave_height, adjusted.ink_gaps), (6.0, Some(1.5)));
 	}
 }

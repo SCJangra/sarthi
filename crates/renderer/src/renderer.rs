@@ -205,7 +205,7 @@ impl Renderer {
 		self.layer_quads.clear();
 		for piece in &pieces {
 			self.layer_quads
-				.push(layer_quads(&mut self.frame_quads, piece, cell, lines, srgb));
+				.push(layer_quads(&mut self.frame_quads, piece, &self.text, cell, lines, srgb));
 		}
 		self.quads
 			.prepare(&self.device, &self.queue, self.config.width, self.config.height, &self.frame_quads);
@@ -313,13 +313,20 @@ struct LayerQuads {
 	clip: [u32; 4],
 }
 
-/// Adds the quads of `piece` to `quads`
-fn layer_quads(quads: &mut Vec<Quad>, piece: &Piece, cell: CellSize, lines: LineMetrics, srgb: bool) -> LayerQuads {
+/// Adds the quads of `piece` to `quads`, with underlines breaking where `text` laid out its text over them
+fn layer_quads(
+	quads: &mut Vec<Quad>,
+	piece: &Piece,
+	text: &TextPipeline,
+	cell: CellSize,
+	lines: LineMetrics,
+	srgb: bool,
+) -> LayerQuads {
 	let layer = &piece.layer;
 	let start = quads.len();
 	cell_backgrounds(quads, layer, cell, srgb);
 	let middle = quads.len();
-	cell_decorations(quads, layer, cell, lines, srgb);
+	cell_decorations(quads, layer, cell, lines, srgb, |row| text.ink(piece, row));
 	bar_cursor(quads, layer, cell, srgb);
 	for quad in &mut quads[start..] {
 		quad.rect[1] += piece.offset;
@@ -411,7 +418,7 @@ mod tests {
 			let mut quads = Vec::new();
 			let ranges: Vec<_> = pieces
 				.iter()
-				.map(|piece| layer_quads(&mut quads, piece, cell, lines, false))
+				.map(|piece| layer_quads(&mut quads, piece, &text, cell, lines, false))
 				.collect();
 			let mut pipeline = QuadPipeline::new(&device, format);
 			pipeline.prepare(&device, &queue, width, height, &quads);

@@ -1,3 +1,5 @@
+use renderer::UnderlineSize;
+
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
 	pub title: String,
@@ -7,11 +9,22 @@ pub struct WindowConfig {
 
 	/// Font size, in logical pixels
 	pub font_size: f32,
+
+	/// How underlines are drawn, in logical pixels: adjustments to the font's position and thickness, the undercurl's
+	/// height, and whether they break around the text's ink (off unless set)
+	pub underlines: UnderlineSize,
 }
 
 impl Default for WindowConfig {
 	fn default() -> Self {
-		Self { title: String::from("NvUI"), width: 1280, height: 720, resizable: true, font_size: 14.0 }
+		Self {
+			title: String::from("NvUI"),
+			width: 1280,
+			height: 720,
+			resizable: true,
+			font_size: 14.0,
+			underlines: UnderlineSize { offset: 0.0, thickness: None, wave_height: 2.0, ink_gaps: None },
+		}
 	}
 }
 

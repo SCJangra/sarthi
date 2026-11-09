@@ -177,60 +177,85 @@ pub(crate) fn cell_backgrounds(quads: &mut Vec<Quad>, layer: &CellLayer, cell: C
 }
 
 /// Adds quads for the underlines, strikethroughs and overlines in `layer`: one per line and run of neighbouring cells
-/// with the same decoration and text color
-pub(crate) fn cell_decorations(
+/// with the same decoration and text color. Underlines break around the text's ink where `ink` (by row) says it
+/// crosses them, given as x ranges in pixels from the row's left.
+pub(crate) fn cell_decorations<'a>(
 	quads: &mut Vec<Quad>,
 	layer: &CellLayer,
 	cell: CellSize,
 	lines: LineMetrics,
 	srgb_surface: bool,
+	ink: impl Fn(usize) -> &'a [Range<f32>],
 ) {
-	for (row, cells) in (layer.row..).zip(layer.cells.chunks_exact((layer.width as usize).max(1))) {
+	let rows = layer.cells.chunks_exact((layer.width as usize).max(1));
+	for (index, (row, cells)) in (layer.row..).zip(rows).enumerate() {
+		// In surface pixels, like the quads
+		let left = (layer.col * cell.width) as f32;
+		let gaps: Vec<Range<f32>> = ink(index).iter().map(|gap| gap.start + left..gap.end + left).collect();
+
 		let mut col = layer.col;
 		for run in cells.chunk_by(|a, b| (a.decoration, a.style.foreground) == (b.decoration, b.style.foreground)) {
 			let rect = [(col * cell.width) as f32, (row * cell.height) as f32, (run.len() as u32 * cell.width) as f32];
-			decoration_quads(quads, &run[0], rect, cell, lines, srgb_surface);
+			decoration_quads(quads, &run[0], rect, cell, lines, &gaps, srgb_surface);
 			col += run.len() as u32;
 		}
 	}
 }
 
-/// Quads for the decoration of `cell`, drawn across a run of cells at `left`, `top`, `width` pixels wide
+/// Where `underline` goes in a cell: its top and bottom, in pixels from the cell's top
+pub(crate) fn underline_band(underline: Underline, cell: CellSize, lines: LineMetrics) -> (f32, f32) {
+	let (cell_height, thickness, y) = (cell.height as f32, lines.thickness, lines.underline_top);
+	match underline {
+		Underline::Single | Underline::Dotted | Underline::Dashed => (y, y + thickness),
+		// Two lines with a gap as thick as a line, moved up if they would leave the cell
+		Underline::Double => {
+			let y = y.min(cell_height - 3.0 * thickness).max(0.0);
+			(y, y + 3.0 * thickness)
+		},
+		// A wave around the underline, as high as the line metrics say
+		Underline::Curly => {
+			let height = lines.wave_height.min(cell_height);
+			let y = (y + (thickness - height) / 2.0).clamp(0.0, cell_height - height);
+			(y, y + height)
+		},
+	}
+}
+
+/// Quads for the decoration of `cell`, drawn across a run of cells at `left`, `top`, `width` pixels wide. The
+/// underline breaks at `gaps`, x ranges in surface pixels.
 fn decoration_quads(
 	quads: &mut Vec<Quad>,
 	cell: &RenderCell,
 	[left, top, width]: [f32; 3],
 	size: CellSize,
 	lines: LineMetrics,
+	gaps: &[Range<f32>],
 	srgb_surface: bool,
 ) {
 	let Decoration { underline, strikethrough, overline, underline_color } = cell.decoration;
-	let (cell_width, cell_height, thickness) = (size.width as f32, size.height as f32, lines.thickness);
+	let (cell_width, thickness) = (size.width as f32, lines.thickness);
 	let line = |y: f32, height: f32| [left, top + y, width, height];
 
-	let color = rgba(underline_color, srgb_surface);
-	let y = lines.underline_top;
-	match underline {
-		None => (),
-		Some(Underline::Single) => quads.push(Quad::fill(line(y, thickness), color)),
-		// Two lines with a gap as thick as a line, moved up if they would leave the cell
-		Some(Underline::Double) => {
-			let y = y.min(cell_height - 3.0 * thickness).max(0.0);
-			quads.push(Quad::fill(line(y, thickness), color));
-			quads.push(Quad::fill(line(y + 2.0 * thickness, thickness), color));
-		},
-		// A wave 4 lines high around the underline, one period per cell
-		Some(Underline::Curly) => {
-			let height = (4.0 * thickness).min(cell_height);
-			let y = (y + (thickness - height) / 2.0).clamp(0.0, cell_height - height);
-			quads.push(Quad::patterned(line(y, height), color, WAVE, cell_width, thickness));
-		},
-		Some(Underline::Dotted) => {
-			quads.push(Quad::patterned(line(y, thickness), color, DOTS, 2.0 * thickness, thickness));
-		},
-		Some(Underline::Dashed) => {
-			quads.push(Quad::patterned(line(y, thickness), color, DASHES, 6.0 * thickness, thickness));
-		},
+	if let Some(underline) = underline {
+		let color = rgba(underline_color, srgb_surface);
+		let (y, bottom) = underline_band(underline, size, lines);
+		let start = quads.len();
+		match underline {
+			Underline::Single => quads.push(Quad::fill(line(y, thickness), color)),
+			Underline::Double => {
+				quads.push(Quad::fill(line(y, thickness), color));
+				quads.push(Quad::fill(line(y + 2.0 * thickness, thickness), color));
+			},
+			// One period per cell
+			Underline::Curly => quads.push(Quad::patterned(line(y, bottom - y), color, WAVE, cell_width, thickness)),
+			Underline::Dotted => {
+				quads.push(Quad::patterned(line(y, thickness), color, DOTS, 2.0 * thickness, thickness));
+			},
+			Underline::Dashed => {
+				quads.push(Quad::patterned(line(y, thickness), color, DASHES, 6.0 * thickness, thickness));
+			},
+		}
+		cut(quads, start, gaps);
 	}
 
 	let text_color = rgba(cell.style.foreground, srgb_surface);
@@ -240,6 +265,34 @@ fn decoration_quads(
 	if overline {
 		quads.push(Quad::fill(line(0.0, thickness), text_color));
 	}
+}
+
+/// Cuts the quads from `start` on around `gaps`, sorted x ranges in surface pixels. Patterns follow the surface x, so
+/// a wave or dashes continue across a gap.
+fn cut(quads: &mut Vec<Quad>, start: usize, gaps: &[Range<f32>]) {
+	if gaps.is_empty() {
+		return;
+	}
+	let pieces: Vec<Quad> = quads
+		.drain(start..)
+		.flat_map(|quad| {
+			let [left, top, width, height] = quad.rect;
+			let right = left + width;
+			let mut x = left;
+			let mut pieces = Vec::new();
+			for gap in gaps.iter().filter(|gap| gap.end > left && gap.start < right) {
+				if gap.start > x {
+					pieces.push(Quad { rect: [x, top, gap.start - x, height], ..quad });
+				}
+				x = x.max(gap.end);
+			}
+			if x < right {
+				pieces.push(Quad { rect: [x, top, right - x, height], ..quad });
+			}
+			pieces
+		})
+		.collect();
+	quads.extend(pieces);
 }
 
 /// Adds a quad for the bar cursor of `layer`, if it has one
@@ -340,9 +393,16 @@ mod tests {
 			cell.decoration = decoration;
 		}
 		let layer = CellLayer { id: 1, row: 1, col: 0, width: 6, height: 1, cells, cursor: None, scroll: None };
-		let lines = LineMetrics { underline_top: 17.0, thickness: 1.0, strikeout_top: 10.0, strikeout_thickness: 1.0 };
+		let lines = LineMetrics {
+			underline_top: 17.0,
+			thickness: 1.0,
+			wave_height: 4.0,
+			ink_gaps: None,
+			strikeout_top: 10.0,
+			strikeout_thickness: 1.0,
+		};
 		let mut quads = Vec::new();
-		cell_decorations(&mut quads, &layer, CellSize { width: 8, height: 19 }, lines, false);
+		cell_decorations(&mut quads, &layer, CellSize { width: 8, height: 19 }, lines, false, |_| &[]);
 		quads
 	}
 
@@ -558,5 +618,16 @@ mod tests {
 		assert_eq!(pixel(&pixels, 3, 48), [255, 255, 255, 255], "border, inner edge");
 		assert_eq!(pixel(&pixels, 4, 48), [0, 0, 255, 255], "fill, next to the border");
 		assert_eq!(pixel(&pixels, 16, 48), [0, 0, 255, 255], "fill");
+	}
+
+	#[test]
+	fn cut_around_gaps() {
+		let line = Quad::fill([0.0, 10.0, 80.0, 1.0], [1.0; 4]);
+		let mut quads = vec![line, line];
+		// Only quads from index 1 on are cut; gaps may reach past the quad.
+		super::cut(&mut quads, 1, &[-5.0..2.0, 10.0..20.0, 50.0..60.0, 79.0..90.0]);
+		let pieces: Vec<_> = quads[1..].iter().map(|quad| (quad.rect[0], quad.rect[2])).collect();
+		assert_eq!(pieces, [(2.0, 8.0), (20.0, 30.0), (60.0, 19.0)]);
+		assert_eq!(quads[0], line);
 	}
 }

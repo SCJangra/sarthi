@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use glyphon::cosmic_text::Hinting;
+use glyphon::cosmic_text::{Hinting, SwashContent};
 use glyphon::{
 	Attrs, Buffer, Cache, Color, ColorMode, ContentType, CustomGlyph, Family, Metrics, RasterizedCustomGlyph,
 	Resolution, Shaping, Style, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport, Weight, Wrap,
@@ -9,6 +9,8 @@ use glyphon::{
 use rustc_hash::FxHashMap;
 
 use crate::builtin_glyphs::{builtin_char, is_builtin, rasterize};
+use crate::font::LineMetrics;
+use crate::quad::underline_band;
 use crate::renderer::Piece;
 use crate::{CellLayer, CellSize, Fonts, RenderCell, RendererError, TextSize, TextStyle};
 
@@ -47,6 +49,9 @@ struct Row {
 struct RowLayout {
 	buffers: Vec<(u32, Buffer)>,
 	glyphs: Vec<CustomGlyph>,
+
+	/// Where underlines break around the text's ink, as sorted x ranges in pixels from the row's left
+	ink: Vec<Range<f32>>,
 }
 
 impl TextPipeline {
@@ -88,7 +93,8 @@ impl TextPipeline {
 		// Forget pieces that are gone, e.g. closed floating windows.
 		self.layers.retain(|key, _| pieces.iter().any(|piece| key_of(piece) == *key));
 		for piece in pieces {
-			update_rows(self.layers.entry(key_of(piece)).or_default(), &piece.layer, fonts, size.font_size, cell);
+			let rows = self.layers.entry(key_of(piece)).or_default();
+			update_rows(rows, &piece.layer, fonts, size, &mut self.swash_cache);
 		}
 
 		self.viewport.update(queue, resolution);
@@ -118,6 +124,12 @@ impl TextPipeline {
 			)?;
 		}
 		Ok(())
+	}
+
+	/// Where underlines in row `row` of `piece` break around the text's ink, as of the last prepare (see [`ink`])
+	pub(crate) fn ink(&self, piece: &Piece, row: usize) -> &[Range<f32>] {
+		let rows = self.layers.get(&key_of(piece));
+		rows.and_then(|rows| rows.get(row)).map_or(&[], |row| &row.layout.ink)
 	}
 
 	/// Draws the text of the piece at `index` in the frame last prepared.
@@ -180,7 +192,14 @@ fn text_areas<'a>(
 /// Lays out the rows of `layer` whose cells changed since `rows` were laid out. A changed row takes over the
 /// layout of another changed row that had the same cells, so content that only moved, e.g. after scrolling, isn't
 /// laid out again.
-fn update_rows(rows: &mut Vec<Row>, layer: &CellLayer, fonts: &mut Fonts, font_size: f32, cell: CellSize) {
+fn update_rows(
+	rows: &mut Vec<Row>,
+	layer: &CellLayer,
+	fonts: &mut Fonts,
+	size: TextSize,
+	swash_cache: &mut SwashCache,
+) {
+	let (cell, lines) = (fonts.cell_size(size), fonts.line_metrics(size));
 	rows.resize_with(layer.height as usize, Row::default);
 	let width = (layer.width as usize).max(1);
 	let changed: Vec<usize> = (0..rows.len())
@@ -199,15 +218,91 @@ fn update_rows(rows: &mut Vec<Row>, layer: &CellLayer, fonts: &mut Fonts, font_s
 
 	for index in changed {
 		let cells = &layer.cells[index * width..(index + 1) * width];
-		let layout = moved.get_mut(cells).and_then(Vec::pop).unwrap_or_else(|| RowLayout {
-			buffers: segments(cells, |text| fonts.face_of(text))
+		let layout = moved.get_mut(cells).and_then(Vec::pop).unwrap_or_else(|| {
+			let buffers: Vec<(u32, Buffer)> = segments(cells, |text| fonts.face_of(text))
 				.iter()
-				.map(|segment| (segment.col, layout(fonts, font_size, cell, segment)))
-				.collect(),
-			glyphs: builtin_glyphs(cells, cell),
+				.map(|segment| (segment.col, layout(fonts, size.font_size, cell, segment)))
+				.collect();
+			let ink = ink(cells, &buffers, cell, lines, fonts, swash_cache);
+			RowLayout { buffers, glyphs: builtin_glyphs(cells, cell), ink }
 		});
 		rows[index] = Row { cells: cells.to_vec(), layout };
 	}
+}
+
+/// Where the ink of underlined text crosses its underline, as sorted x ranges in pixels from the row's left, widened
+/// so the underline keeps clear of the text: underlines break there, like CSS's `text-decoration-skip-ink`, so
+/// descenders like those of g and y aren't struck through. Empty unless the line metrics turn ink gaps on.
+///
+/// The glyphs' images come from `swash_cache`, which glyphon draws them from too, so each is rasterized once.
+fn ink(
+	cells: &[RenderCell],
+	buffers: &[(u32, Buffer)],
+	cell: CellSize,
+	lines: LineMetrics,
+	fonts: &mut Fonts,
+	swash_cache: &mut SwashCache,
+) -> Vec<Range<f32>> {
+	// Off unless asked for; and without underlines, there's nothing to break.
+	let Some(clearance) = lines.ink_gaps else { return Vec::new() };
+	if cells.iter().all(|cell| cell.decoration.underline.is_none()) {
+		return Vec::new();
+	}
+	// Ink fainter than this is anti-aliasing at the glyph's edge, which the clearance covers.
+	const INK: u8 = 64;
+
+	let mut gaps = Vec::new();
+	for (col, buffer) in buffers {
+		let segment_left = (col * cell.width) as f32;
+		for run in buffer.layout_runs() {
+			for glyph in run.glyphs {
+				let index = ((segment_left + glyph.x) / cell.width as f32) as usize;
+				let Some(underline) = cells.get(index).and_then(|cell| cell.decoration.underline) else { continue };
+				let (band_top, band_bottom) = underline_band(underline, cell, lines);
+
+				let physical = glyph.physical((segment_left, run.line_y), 1.0);
+				let Some(image) = swash_cache.get_image(&mut fonts.system, physical.cache_key) else { continue };
+				let placement = image.placement;
+				let (width, height) = (placement.width as usize, placement.height as usize);
+				let (left, top) = (physical.x + placement.left, physical.y - placement.top);
+				let channels = if image.content == SwashContent::Mask { 1 } else { 4 };
+
+				// The image's rows inside the underline's band
+				let first = (band_top.floor() as i32 - top).clamp(0, height as i32) as usize;
+				let last = (band_bottom.ceil() as i32 - top).clamp(0, height as i32) as usize;
+				let inked = |x: usize| {
+					(first..last).any(|y| {
+						let pixel = (y * width + x) * channels;
+						image.data[pixel..pixel + channels].iter().any(|&value| value >= INK)
+					})
+				};
+
+				// Each run of inked columns is a gap.
+				let mut x = 0;
+				while x < width {
+					if !inked(x) {
+						x += 1;
+						continue;
+					}
+					let start = x;
+					while x < width && inked(x) {
+						x += 1;
+					}
+					gaps.push((left + start as i32) as f32 - clearance..(left + x as i32) as f32 + clearance);
+				}
+			}
+		}
+	}
+
+	// Sorted, with overlapping gaps merged
+	gaps.sort_by(|a, b| a.start.total_cmp(&b.start));
+	gaps.into_iter().fold(Vec::new(), |mut merged: Vec<Range<f32>>, gap| {
+		match merged.last_mut() {
+			Some(last) if gap.start <= last.end => last.end = last.end.max(gap.end),
+			_ => merged.push(gap),
+		}
+		merged
+	})
 }
 
 /// A custom glyph, relative to the row, for each cell nvui draws itself, in the cell's text color
@@ -492,13 +587,13 @@ mod tests {
 	#[test]
 	fn moved_rows_keep_their_layout() {
 		let mut fonts = Fonts::new();
-		let cell = fonts.cell_size(TextSize::new(14.0));
+		let (size, mut swash) = (TextSize::new(14.0), glyphon::SwashCache::new());
 		let mut rows = Vec::new();
-		update_rows(&mut rows, &column(&["a", "b", "c"]), &mut fonts, 14.0, cell);
+		update_rows(&mut rows, &column(&["a", "b", "c"]), &mut fonts, size, &mut swash);
 		let laid_out: Vec<_> = rows.iter().map(|row| row.layout.buffers.as_ptr()).collect();
 
 		// Scrolled by one row: "b" and "c" moved up and keep their buffers, "d" is new.
-		update_rows(&mut rows, &column(&["b", "c", "d"]), &mut fonts, 14.0, cell);
+		update_rows(&mut rows, &column(&["b", "c", "d"]), &mut fonts, size, &mut swash);
 		let texts: Vec<_> = rows.iter().map(|row| row.cells[0].text.as_str()).collect();
 		assert_eq!(texts, ["b", "c", "d"]);
 		assert_eq!(rows[0].layout.buffers.as_ptr(), laid_out[1]);
@@ -509,12 +604,12 @@ mod tests {
 	#[test]
 	fn repeated_rows_each_keep_a_layout() {
 		let mut fonts = Fonts::new();
-		let cell = fonts.cell_size(TextSize::new(14.0));
+		let (size, mut swash) = (TextSize::new(14.0), glyphon::SwashCache::new());
 		let mut rows = Vec::new();
-		update_rows(&mut rows, &column(&["a", "}", "}"]), &mut fonts, 14.0, cell);
+		update_rows(&mut rows, &column(&["a", "}", "}"]), &mut fonts, size, &mut swash);
 		let mut braces = vec![rows[1].layout.buffers.as_ptr(), rows[2].layout.buffers.as_ptr()];
 
-		update_rows(&mut rows, &column(&["}", "}", "b"]), &mut fonts, 14.0, cell);
+		update_rows(&mut rows, &column(&["}", "}", "b"]), &mut fonts, size, &mut swash);
 		let mut moved = vec![rows[0].layout.buffers.as_ptr(), rows[1].layout.buffers.as_ptr()];
 		braces.sort();
 		moved.sort();
@@ -543,5 +638,70 @@ mod tests {
 				assert_eq!(face.style == glyphon::fontdb::Style::Italic, italic, "{}", face.post_script_name);
 			}
 		}
+	}
+
+	/// A one-row layer of `text`, one character per cell, underlined in style `underline`
+	fn underlined(text: &str, underline: crate::Underline) -> CellLayer {
+		let decoration = Decoration { underline: Some(underline), ..Decoration::default() };
+		let cells: Vec<RenderCell> = text
+			.chars()
+			.map(|c| RenderCell { decoration, ..cells(&[&c.to_string()], PLAIN)[0] })
+			.collect();
+		CellLayer { width: cells.len() as u32, height: 1, cells, ..column(&["x"]) }
+	}
+
+	#[test]
+	fn underlines_break_around_descenders() {
+		let mut fonts = Fonts::new();
+		let mut swash = glyphon::SwashCache::new();
+		// Ink gaps are off unless turned on.
+		let underlines = crate::UnderlineSize { ink_gaps: Some(1.0), ..crate::UnderlineSize::default() };
+		let size = TextSize { underlines, ..TextSize::new(14.0) };
+		let cell = fonts.cell_size(size);
+		let width = cell.width as f32;
+
+		// "g" and "y" reach below the baseline; "a" and "e" don't. Each case gives the gaps' cells.
+		let gaps = |fonts: &mut Fonts, swash: &mut glyphon::SwashCache, text: &str, underline, lines| {
+			let layer = underlined(text, underline);
+			let buffers: Vec<_> = segments(&layer.cells, |text| fonts.face_of(text))
+				.iter()
+				.map(|segment| (segment.col, super::layout(fonts, size.font_size, cell, segment)))
+				.collect();
+			let ink = super::ink(&layer.cells, &buffers, cell, lines, fonts, swash);
+			ink.iter()
+				.map(|gap| ((gap.start / width) as u32, ((gap.end - 1.0) / width) as u32))
+				.collect::<Vec<_>>()
+		};
+
+		// An underline across the descenders, like some fonts place it: it breaks at g and y only.
+		let lines = crate::font::LineMetrics {
+			underline_top: fonts.line_metrics(size).underline_top - 2.0,
+			..fonts.line_metrics(size)
+		};
+		assert_eq!(gaps(&mut fonts, &mut swash, "agey", crate::Underline::Single, lines), [(1, 1), (3, 3)]);
+		assert_eq!(gaps(&mut fonts, &mut swash, "ae", crate::Underline::Single, lines), []);
+
+		// The bundled font's own underline stays just below its descenders at 14 px, but an undercurl's taller wave
+		// crosses them.
+		let lines = fonts.line_metrics(size);
+		assert_eq!(gaps(&mut fonts, &mut swash, "agey", crate::Underline::Single, lines), []);
+		assert_eq!(gaps(&mut fonts, &mut swash, "agey", crate::Underline::Curly, lines), [(1, 1), (3, 3)]);
+
+		// Laid-out rows keep their gaps; without underlines, nothing is looked at.
+		let mut rows = Vec::new();
+		update_rows(&mut rows, &underlined("agey", crate::Underline::Curly), &mut fonts, size, &mut swash);
+		assert_eq!(rows[0].layout.ink.len(), 2);
+		update_rows(&mut rows, &column(&["g"]), &mut fonts, size, &mut swash);
+		assert_eq!(rows[0].layout.ink, []);
+
+		// Off by default
+		update_rows(
+			&mut rows,
+			&underlined("agey", crate::Underline::Curly),
+			&mut fonts,
+			TextSize::new(14.0),
+			&mut swash,
+		);
+		assert_eq!(rows[0].layout.ink, []);
 	}
 }
