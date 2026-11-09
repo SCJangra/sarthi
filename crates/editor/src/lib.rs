@@ -40,6 +40,9 @@ pub struct Editor {
 	/// Neovim's default `guifont`, the first value it sent
 	default_guifont: Option<String>,
 
+	/// The `linespace` option: pixels added between rows, or taken away if negative
+	linespace: i64,
+
 	/// Whether anything changed since the last `flush`, so it's drawn on the next one
 	stale: bool,
 }
@@ -102,6 +105,7 @@ impl Editor {
 			cursor_grid: 1,
 			guifont: String::new(),
 			default_guifont: None,
+			linespace: 0,
 			stale: false,
 		}
 	}
@@ -115,6 +119,11 @@ impl Editor {
 	/// Neovim's default (a list of common fonts, while nvui has its own default font).
 	pub fn guifont(&self) -> &str {
 		&self.guifont
+	}
+
+	/// The `linespace` option (`:help 'linespace'`): logical pixels added between rows, or taken away if negative
+	pub fn linespace(&self) -> i64 {
+		self.linespace
 	}
 
 	/// Applies a batch of redraw events in order. Neovim's state is only consistent once a redraw ends (`flush`), so
@@ -229,18 +238,24 @@ impl Editor {
 			},
 			RedrawNotification::HlGroupSet(groups) => self.highlights.set_hl_groups(groups),
 			RedrawNotification::OptionSet(options) => {
+				// Other fonts or line space change what's drawn, so a change is drawn with the next flush.
 				for option in options {
-					let ("guifont", OptionValue::String(value)) = (option.name.as_str(), option.value) else {
-						continue;
-					};
-					// Neovim sends its default with the options at attach, before the user's config can set one.
-					let default = self.default_guifont.get_or_insert_with(|| value.clone());
-					let value = if value == *default { String::new() } else { value };
-
-					// Other fonts change what's drawn, so a change is drawn with the next flush.
-					if value != self.guifont {
-						self.guifont = value;
-						self.stale = true;
+					match (option.name.as_str(), option.value) {
+						("guifont", OptionValue::String(value)) => {
+							// Neovim sends its default with the options at attach, before the user's config can set
+							// one.
+							let default = self.default_guifont.get_or_insert_with(|| value.clone());
+							let value = if value == *default { String::new() } else { value };
+							if value != self.guifont {
+								self.guifont = value;
+								self.stale = true;
+							}
+						},
+						("linespace", OptionValue::Number(value)) if value != self.linespace => {
+							self.linespace = value;
+							self.stale = true;
+						},
+						_ => (),
 					}
 				}
 			},
@@ -702,10 +717,22 @@ mod tests {
 
 		// The same value again, or another option, changes nothing to draw.
 		assert_eq!(editor.apply(vec![guifont(), RedrawNotification::Flush]), None);
-		assert_eq!(editor.apply(vec![option("linespace", OptionValue::Number(2)), RedrawNotification::Flush]), None);
+		assert_eq!(editor.apply(vec![option("ttimeoutlen", OptionValue::Number(50)), RedrawNotification::Flush]), None);
 
 		// Set back to the default, it counts as unset again.
 		assert!(editor.apply(vec![default(), RedrawNotification::Flush]).is_some());
 		assert_eq!(editor.guifont(), "");
+	}
+
+	#[test]
+	fn linespace_changes_are_drawn() {
+		let mut editor = screen();
+		flush(&mut editor, vec![option("linespace", OptionValue::Number(0))]);
+		assert_eq!(editor.linespace(), 0);
+
+		let linespace = || option("linespace", OptionValue::Number(3));
+		assert!(editor.apply(vec![linespace(), RedrawNotification::Flush]).is_some());
+		assert_eq!(editor.linespace(), 3);
+		assert_eq!(editor.apply(vec![linespace(), RedrawNotification::Flush]), None);
 	}
 }
