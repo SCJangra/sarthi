@@ -33,11 +33,21 @@ impl Grid {
 		grid
 	}
 
+	/// Resizes the grid, keeping the cells that still fit; new cells are blank. Neovim only redraws what changed
+	/// afterwards, e.g. after a split shrinks a window, so the rest must stay.
 	pub fn resize(&mut self, width: usize, height: usize) {
+		let mut cells = vec![GridCell::blank(); width * height];
+		let kept = self.width.min(width);
+		for row in 0..self.height.min(height) {
+			let old = row * self.width;
+			cells[row * width..row * width + kept].copy_from_slice(&self.cells[old..old + kept]);
+		}
+
+		self.cells = cells;
 		self.width = width;
 		self.height = height;
-		self.cells.resize(self.cell_count(), GridCell::blank());
-		self.clear();
+		self.cursor_row = self.cursor_row.min(height.saturating_sub(1));
+		self.cursor_col = self.cursor_col.min(width.saturating_sub(1));
 	}
 
 	pub fn clear(&mut self) {
@@ -124,6 +134,20 @@ mod tests {
 		assert_eq!(grid.height, 2);
 		assert_eq!(grid.cells.len(), 6);
 		assert!(grid.cells.iter().all(|cell| *cell == GridCell::blank()));
+	}
+
+	#[test]
+	fn resize_keeps_the_cells_that_fit() {
+		let mut grid = grid_of(&["abc", "def", "ghi"]);
+		grid.set_cursor(2, 2);
+
+		grid.resize(2, 2);
+		assert_eq!(rows_of(&grid), ["ab", "de"]);
+		assert_eq!((grid.cursor_row, grid.cursor_col), (1, 1));
+
+		// Growing again, the new cells are blank.
+		grid.resize(4, 3);
+		assert_eq!(rows_of(&grid), ["ab  ", "de  ", "    "]);
 	}
 
 	#[test]
