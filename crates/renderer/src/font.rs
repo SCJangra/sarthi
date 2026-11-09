@@ -40,7 +40,7 @@ pub struct FontChoice {
 
 #[derive(Debug, thiserror::Error)]
 pub enum FontError {
-	#[error("font not found: {0}")]
+	#[error("no font found of: {0}")]
 	NotFound(String),
 
 	#[error("font {0} has no usable metrics")]
@@ -110,7 +110,9 @@ impl Fonts {
 		fonts
 	}
 
-	/// Draws text with the fonts of `choice`. If one of them can't be used, nothing changes.
+	/// Draws text with the fonts of `choice`. Families that aren't installed are skipped, like in a list of
+	/// alternatives; `monospace` is the bundled font. If none is installed, or the main font can't be used, nothing
+	/// changes.
 	pub fn choose(&mut self, choice: &FontChoice) -> Result<(), FontError> {
 		if choice.families.len() > MAX_FAMILIES {
 			return Err(FontError::TooMany);
@@ -119,13 +121,13 @@ impl Fonts {
 			[] => vec![BUNDLED],
 			families => families.iter().map(String::as_str).collect(),
 		};
-		let faces = families
-			.into_iter()
-			.map(|family| find(&mut self.system, family).ok_or_else(|| FontError::NotFound(family.to_owned())))
-			.collect::<Result<Vec<_>, _>>()?;
-		let em = faces[0]
-			.metrics()
-			.ok_or_else(|| FontError::NoMetrics(faces[0].family.clone()))?;
+		let faces: Vec<Face> = families
+			.iter()
+			.map(|family| if family.eq_ignore_ascii_case("monospace") { BUNDLED } else { family })
+			.filter_map(|family| find(&mut self.system, family))
+			.collect();
+		let Some(main) = faces.first() else { return Err(FontError::NotFound(families.join(", "))) };
+		let em = main.metrics().ok_or_else(|| FontError::NoMetrics(main.family.clone()))?;
 
 		self.use_faces(faces, em, choice);
 		Ok(())
@@ -351,12 +353,21 @@ mod tests {
 	}
 
 	#[test]
-	fn a_missing_font_changes_nothing() {
+	fn missing_fonts_are_skipped() {
+		let mut fonts = Fonts::new();
+		let families = vec![String::from("No Such Font"), String::from("monospace"), String::from("Nor This")];
+		fonts.choose(&FontChoice { families, ..FontChoice::default() }).unwrap();
+		// Only `monospace`, the bundled font, is left.
+		assert_eq!(fonts.faces.len(), 1);
+		assert_eq!(fonts.family(Some(0)), BUNDLED);
+	}
+
+	#[test]
+	fn no_installed_font_changes_nothing() {
 		let mut fonts = Fonts::new();
 		let generation = fonts.generation;
-		let choice =
-			FontChoice { families: vec![BUNDLED.into(), String::from("No Such Font")], ..FontChoice::default() };
-		assert!(matches!(fonts.choose(&choice), Err(FontError::NotFound(name)) if name == "No Such Font"));
+		let choice = FontChoice { families: vec!["No Such Font".into(), "Nor This".into()], ..FontChoice::default() };
+		assert!(matches!(fonts.choose(&choice), Err(FontError::NotFound(names)) if names == "No Such Font, Nor This"));
 		assert_eq!((fonts.generation, fonts.family(None)), (generation, BUNDLED));
 	}
 
