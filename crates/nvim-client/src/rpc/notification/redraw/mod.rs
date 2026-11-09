@@ -8,6 +8,7 @@ mod hl_attr_define;
 mod hl_group_set;
 mod mode_change;
 mod mode_info_set;
+mod option_set;
 mod win_pos;
 mod win_viewport;
 
@@ -23,6 +24,7 @@ pub use hl_attr_define::*;
 pub use hl_group_set::*;
 pub use mode_change::*;
 pub use mode_info_set::*;
+pub use option_set::*;
 pub use win_pos::*;
 pub use win_viewport::*;
 
@@ -64,6 +66,8 @@ pub enum RedrawNotification {
 	ModeInfoSet(#[tagged_enum(flatten)] Vec<ModeInfoSetEvent>),
 
 	ModeChange(#[tagged_enum(flatten)] Vec<ModeChangeEvent>),
+
+	OptionSet(#[tagged_enum(flatten)] Vec<OptionSetEvent>),
 
 	/// The UI must stop drawing the cursor until `BusyStop` (`:help ui-global`)
 	BusyStart,
