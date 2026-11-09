@@ -195,6 +195,18 @@ impl App {
 						self.mark_stale(line.grid);
 					}
 				},
+				RedrawNotification::GridScroll(scrolls) => {
+					for scroll in scrolls {
+						let Some(mut grid) = self.grid.get_mut(&scroll.grid) else {
+							tracing::warn!("GridScroll: Unknown grid {}", scroll.grid);
+							continue;
+						};
+						let (top, bot) = (scroll.top as usize, scroll.bot as usize);
+						grid.scroll(top, bot, scroll.left as usize, scroll.right as usize, scroll.rows as isize);
+						drop(grid);
+						self.mark_stale(scroll.grid);
+					}
+				},
 				RedrawNotification::GridCursorGoto(cursors) => {
 					for cursor in cursors {
 						let Some(mut grid) = self.grid.get_mut(&cursor.grid) else {

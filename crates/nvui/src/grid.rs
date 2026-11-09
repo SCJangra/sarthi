@@ -71,6 +71,29 @@ impl Grid {
 		}
 	}
 
+	/// Moves the cells in rows `top..bot` and columns `left..right` up by `rows`, or down if `rows` is negative
+	/// (`grid_scroll`). The rows that open up keep their old cells: Neovim redraws them right after.
+	pub fn scroll(&mut self, top: usize, bot: usize, left: usize, right: usize, rows: isize) {
+		let (bot, right) = (bot.min(self.height), right.min(self.width));
+		if rows == 0 || left >= right {
+			return;
+		}
+
+		let distance = rows.unsigned_abs();
+		let copy_row = |grid: &mut Self, dst: usize| {
+			let src = if rows > 0 { dst + distance } else { dst - distance };
+			let (start, dst) = (grid.cell_index(src, left), grid.cell_index(dst, left));
+			grid.cells.copy_within(start..start + (right - left), dst);
+		};
+
+		// Each row is read before it's overwritten: moving up copies top to bottom, moving down bottom to top.
+		if rows > 0 {
+			(top..bot.saturating_sub(distance)).for_each(|dst| copy_row(self, dst));
+		} else {
+			(top + distance..bot).rev().for_each(|dst| copy_row(self, dst));
+		}
+	}
+
 	pub fn set_cursor(&mut self, row: usize, col: usize) {
 		if row >= self.height || col >= self.width {
 			return;
@@ -156,6 +179,72 @@ mod tests {
 
 		let hl_ids: Vec<u32> = grid.cells.iter().map(|cell| cell.hl_id).collect();
 		assert_eq!(hl_ids, [4, 4, 4, 4, 0, 0]);
+	}
+
+	/// A grid with one row per string, one character per cell
+	fn grid_of(rows: &[&str]) -> Grid {
+		let mut grid = Grid::new(rows[0].len(), rows.len());
+		for (row, text) in rows.iter().enumerate() {
+			let cells: Vec<_> = text
+				.chars()
+				.map(|c| NvimGridCell { text: CellText::from(&c.to_string()).unwrap(), hl_id: None, repeat: None })
+				.collect();
+			grid.set_line(row, 0, &cells);
+		}
+		grid
+	}
+
+	fn rows_of(grid: &Grid) -> Vec<String> {
+		grid.cells
+			.chunks(grid.width)
+			.map(|row| row.iter().map(|cell| cell.text.as_str()).collect())
+			.collect()
+	}
+
+	#[test]
+	fn scroll_up() {
+		let mut grid = grid_of(&["abc", "def", "ghi", "jkl"]);
+		grid.scroll(0, 4, 0, 3, 1);
+		// The last row opened up and keeps its cells until Neovim redraws it.
+		assert_eq!(rows_of(&grid), ["def", "ghi", "jkl", "jkl"]);
+	}
+
+	#[test]
+	fn scroll_down() {
+		let mut grid = grid_of(&["abc", "def", "ghi", "jkl"]);
+		grid.scroll(0, 4, 0, 3, -2);
+		assert_eq!(rows_of(&grid), ["abc", "def", "abc", "def"]);
+	}
+
+	#[test]
+	fn scroll_partial_region() {
+		let mut grid = grid_of(&["abcd", "efgh", "ijkl", "mnop"]);
+		// Rows 1..3, columns 1..3, up by one: like a window next to a split, above the status line
+		grid.scroll(1, 3, 1, 3, 1);
+		assert_eq!(rows_of(&grid), ["abcd", "ejkh", "ijkl", "mnop"]);
+
+		let mut grid = grid_of(&["abcd", "efgh", "ijkl", "mnop"]);
+		grid.scroll(1, 4, 1, 3, -1);
+		assert_eq!(rows_of(&grid), ["abcd", "efgh", "ifgl", "mjkp"]);
+	}
+
+	#[test]
+	fn scroll_by_region_height_or_more_moves_nothing() {
+		let mut grid = grid_of(&["abc", "def", "ghi"]);
+		grid.scroll(0, 2, 0, 3, 2);
+		grid.scroll(0, 3, 0, 3, -5);
+		grid.scroll(0, 3, 0, 3, 0);
+		assert_eq!(rows_of(&grid), ["abc", "def", "ghi"]);
+	}
+
+	#[test]
+	fn scroll_clamps_region_to_grid() {
+		let mut grid = grid_of(&["abc", "def", "ghi"]);
+		grid.scroll(0, 10, 0, 10, 1);
+		assert_eq!(rows_of(&grid), ["def", "ghi", "ghi"]);
+
+		grid.scroll(0, 3, 5, 10, 1);
+		assert_eq!(rows_of(&grid), ["def", "ghi", "ghi"]);
 	}
 
 	#[test]

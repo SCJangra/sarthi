@@ -3,6 +3,7 @@ mod grid_clear;
 mod grid_cursor_goto;
 mod grid_line;
 mod grid_resize;
+mod grid_scroll;
 mod hl_attr_define;
 mod hl_group_set;
 mod mode_info_set;
@@ -14,6 +15,7 @@ pub use grid_clear::*;
 pub use grid_cursor_goto::*;
 pub use grid_line::*;
 pub use grid_resize::*;
+pub use grid_scroll::*;
 pub use hl_attr_define::*;
 pub use hl_group_set::*;
 pub use mode_info_set::*;
@@ -28,6 +30,8 @@ pub enum RedrawNotification {
 	GridCursorGoto(#[tagged_enum(flatten)] Vec<GridCursorGotoEvent>),
 
 	GridLine(#[tagged_enum(flatten)] Vec<GridLineEvent>),
+
+	GridScroll(#[tagged_enum(flatten)] Vec<GridScrollEvent>),
 
 	DefaultColorsSet(#[tagged_enum(flatten)] Vec<DefaultColorsSetEvent>),
 
