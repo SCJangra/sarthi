@@ -6,6 +6,7 @@ use glyphon::{
 	Attrs, Buffer, Cache, Color, ColorMode, Family, Metrics, Resolution, Shaping, Style, SwashCache, TextArea,
 	TextAtlas, TextBounds, TextRenderer, Viewport, Weight, Wrap,
 };
+use rustc_hash::FxHashMap;
 
 use crate::{CellLayer, CellSize, Fonts, Layer, RenderCell, RendererError, TextStyle};
 
@@ -120,17 +121,35 @@ impl TextPipeline {
 	}
 }
 
-/// Lays out the rows of `layer` whose cells changed since `rows` were laid out
+/// Lays out the rows of `layer` whose cells changed since `rows` were laid out. A changed row takes over the
+/// layout of another changed row that had the same cells, so content that only moved, e.g. after scrolling, isn't
+/// laid out again.
 fn update_rows(rows: &mut Vec<Row>, layer: &CellLayer, fonts: &mut Fonts, font_size: f32, cell: CellSize) {
 	rows.resize_with(layer.height as usize, Row::default);
-	for (row, cells) in rows.iter_mut().zip(layer.cells.chunks_exact((layer.width as usize).max(1))) {
-		if row.cells != cells {
-			row.cells = cells.to_vec();
-			row.buffers = segments(cells, |text| fonts.covers(text))
+	let width = (layer.width as usize).max(1);
+	let changed: Vec<usize> = (0..rows.len())
+		.zip(layer.cells.chunks_exact(width))
+		.filter(|&(index, cells)| rows[index].cells != cells)
+		.map(|(index, _)| index)
+		.collect();
+
+	// Layouts of the changed rows by their old cells. Rows often repeat (blank lines, closing braces), so the same
+	// cells can have several.
+	let mut moved: FxHashMap<Vec<RenderCell>, Vec<Vec<(u32, Buffer)>>> = FxHashMap::default();
+	for &index in &changed {
+		let row = std::mem::take(&mut rows[index]);
+		moved.entry(row.cells).or_default().push(row.buffers);
+	}
+
+	for index in changed {
+		let cells = &layer.cells[index * width..(index + 1) * width];
+		let buffers = moved.get_mut(cells).and_then(Vec::pop).unwrap_or_else(|| {
+			segments(cells, |text| fonts.covers(text))
 				.iter()
 				.map(|segment| (segment.col, layout(fonts, font_size, cell, segment)))
-				.collect();
-		}
+				.collect()
+		});
+		rows[index] = Row { cells: cells.to_vec(), buffers };
 	}
 }
 
@@ -232,7 +251,7 @@ fn text_attrs<'a>(attrs: &Attrs<'a>, style: &TextStyle) -> Attrs<'a> {
 mod tests {
 	use arrayvec::ArrayString;
 
-	use super::{RenderCell, Segment, TextStyle, segments};
+	use super::{CellLayer, Fonts, RenderCell, Segment, TextStyle, segments, update_rows};
 
 	const PLAIN: TextStyle = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
 	const BOLD: TextStyle = TextStyle { bold: true, ..PLAIN };
@@ -249,6 +268,11 @@ mod tests {
 
 	fn ascii_only(text: &str) -> bool {
 		text.is_ascii()
+	}
+
+	/// A layer one cell wide, with one row per string
+	fn column(rows: &[&str]) -> CellLayer {
+		CellLayer { id: 1, row: 0, col: 0, width: 1, height: rows.len() as u32, cells: cells(rows, PLAIN) }
 	}
 
 	#[test]
@@ -312,5 +336,37 @@ mod tests {
 	fn spaces_after_a_segment_end_are_left_out() {
 		let row = cells(&["漢", "", " ", "b"], PLAIN);
 		assert_eq!(segments(&row, |_| true), [segment(0, "漢", &[(0..3, PLAIN)]), segment(3, "b", &[(0..1, PLAIN)])]);
+	}
+
+	#[test]
+	fn moved_rows_keep_their_layout() {
+		let mut fonts = Fonts::new();
+		let cell = fonts.cell_size(14.0);
+		let mut rows = Vec::new();
+		update_rows(&mut rows, &column(&["a", "b", "c"]), &mut fonts, 14.0, cell);
+		let laid_out: Vec<_> = rows.iter().map(|row| row.buffers.as_ptr()).collect();
+
+		// Scrolled by one row: "b" and "c" moved up and keep their buffers, "d" is new.
+		update_rows(&mut rows, &column(&["b", "c", "d"]), &mut fonts, 14.0, cell);
+		let texts: Vec<_> = rows.iter().map(|row| row.cells[0].text.as_str()).collect();
+		assert_eq!(texts, ["b", "c", "d"]);
+		assert_eq!(rows[0].buffers.as_ptr(), laid_out[1]);
+		assert_eq!(rows[1].buffers.as_ptr(), laid_out[2]);
+		assert_eq!(rows[2].buffers.len(), 1);
+	}
+
+	#[test]
+	fn repeated_rows_each_keep_a_layout() {
+		let mut fonts = Fonts::new();
+		let cell = fonts.cell_size(14.0);
+		let mut rows = Vec::new();
+		update_rows(&mut rows, &column(&["a", "}", "}"]), &mut fonts, 14.0, cell);
+		let mut braces = vec![rows[1].buffers.as_ptr(), rows[2].buffers.as_ptr()];
+
+		update_rows(&mut rows, &column(&["}", "}", "b"]), &mut fonts, 14.0, cell);
+		let mut moved = vec![rows[0].buffers.as_ptr(), rows[1].buffers.as_ptr()];
+		braces.sort();
+		moved.sort();
+		assert_eq!(moved, braces);
 	}
 }

@@ -23,14 +23,14 @@ pub struct CellLayer {
 	pub cells: Vec<RenderCell>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RenderCell {
 	/// Empty for the right half of a double-width character
 	pub text: ArrayString<32>,
 	pub style: TextStyle,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TextStyle {
 	/// As `0xRRGGBB` in sRGB
 	pub foreground: u32,
