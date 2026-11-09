@@ -1,4 +1,4 @@
-use serde_tuple::Serialize_tuple;
+use serde::{Serialize, Serializer};
 
 use crate::RpcMethod;
 
@@ -12,8 +12,15 @@ impl RpcMethod for NvimUiTryResize {
 	type Response = rmpv::Value;
 }
 
-#[derive(Debug, Serialize_tuple)]
+#[derive(Debug)]
 pub struct NvimUiTryResizeParams {
 	pub width: u32,
 	pub height: u32,
+}
+
+/// As positional arguments, the way Neovim takes them
+impl Serialize for NvimUiTryResizeParams {
+	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		(self.width, self.height).serialize(serializer)
+	}
 }

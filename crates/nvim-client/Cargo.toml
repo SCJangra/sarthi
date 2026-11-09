@@ -11,6 +11,5 @@ rmpv = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 flume = { workspace = true }
-serde_tuple = { workspace = true }
 nvui-derive = { path = "../derive" }
 tracing = { workspace = true }

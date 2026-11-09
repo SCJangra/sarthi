@@ -1,5 +1,4 @@
-use serde::Serialize;
-use serde_tuple::Serialize_tuple;
+use serde::{Serialize, Serializer};
 
 use crate::RpcMethod;
 
@@ -13,11 +12,18 @@ impl RpcMethod for NvimUiAttach {
 	type Response = rmpv::Value;
 }
 
-#[derive(Debug, Serialize_tuple)]
+#[derive(Debug)]
 pub struct NvimUiAttachParams {
 	pub width: u32,
 	pub height: u32,
 	pub options: NvimUiOptions,
+}
+
+/// As positional arguments, the way Neovim takes them
+impl Serialize for NvimUiAttachParams {
+	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		(self.width, self.height, &self.options).serialize(serializer)
+	}
 }
 
 /// Neovim's external UI [`options`](https://neovim.io/doc/user/api-ui-events/#ui-option)

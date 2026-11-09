@@ -19,7 +19,6 @@ rmpv = { version = "1", features = ["with-serde"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 flume = "0.12"
-serde_tuple = "1"
 winit = "0.30"
 wgpu = "30"
 glyphon = "0.12"
