@@ -9,6 +9,7 @@ mod hl_group_set;
 mod mode_change;
 mod mode_info_set;
 mod win_pos;
+mod win_viewport;
 
 use nvui_derive::DeserializeTaggedEnum;
 
@@ -23,6 +24,7 @@ pub use hl_group_set::*;
 pub use mode_change::*;
 pub use mode_info_set::*;
 pub use win_pos::*;
+pub use win_viewport::*;
 
 #[derive(Debug, DeserializeTaggedEnum)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -46,6 +48,10 @@ pub enum RedrawNotification {
 	WinHide(#[tagged_enum(flatten)] Vec<WinHideEvent>),
 
 	WinClose(#[tagged_enum(flatten)] Vec<WinCloseEvent>),
+
+	WinViewport(#[tagged_enum(flatten)] Vec<WinViewportEvent>),
+
+	WinViewportMargins(#[tagged_enum(flatten)] Vec<WinViewportMarginsEvent>),
 
 	MsgSetPos(#[tagged_enum(flatten)] Vec<MsgSetPosEvent>),
 
