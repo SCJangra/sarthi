@@ -28,6 +28,9 @@ pub struct RenderCell {
 	/// Empty for the right half of a double-width character
 	pub text: ArrayString<32>,
 	pub style: TextStyle,
+
+	/// As `0xRRGGBB` in sRGB
+	pub background: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

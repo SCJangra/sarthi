@@ -258,7 +258,7 @@ mod tests {
 
 	fn cells(text: &[&str], style: TextStyle) -> Vec<RenderCell> {
 		text.iter()
-			.map(|text| RenderCell { text: ArrayString::from(text).unwrap(), style })
+			.map(|text| RenderCell { text: ArrayString::from(text).unwrap(), style, background: 0 })
 			.collect()
 	}
 

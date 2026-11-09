@@ -14,6 +14,7 @@ pub fn cell_layer(id: u32, grid: &Grid, highlights: &HighlightState) -> CellLaye
 			RenderCell {
 				text: cell.text,
 				style: TextStyle { foreground: style.foreground, bold: style.bold, italic: style.italic },
+				background: style.background,
 			}
 		})
 		.collect();
@@ -65,14 +66,17 @@ mod tests {
 		assert_eq!(layer.cells[0].text.as_str(), " ");
 		assert_eq!(layer.cells[0].style, plain);
 
-		let row: Vec<_> = layer.cells[3..].iter().map(|cell| (cell.text.as_str(), cell.style)).collect();
+		let row: Vec<_> = layer.cells[3..]
+			.iter()
+			.map(|cell| (cell.text.as_str(), cell.style, cell.background))
+			.collect();
 		assert_eq!(
 			row,
 			[
-				("a", plain),
-				("b", TextStyle { foreground: 0x112233, bold: true, italic: false }),
-				// Reverse: the default background becomes the text color.
-				("c", TextStyle { foreground: BG, bold: false, italic: true }),
+				("a", plain, BG),
+				("b", TextStyle { foreground: 0x112233, bold: true, italic: false }, BG),
+				// Reverse: the default colors swap.
+				("c", TextStyle { foreground: BG, bold: false, italic: true }, FG),
 			],
 		);
 	}

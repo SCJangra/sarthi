@@ -1,4 +1,5 @@
 use crate::color::wgpu_color;
+use crate::quad::{Quad, QuadPipeline, cell_backgrounds};
 use crate::text::TextPipeline;
 use crate::{Fonts, Layer, RendererConfig, RendererError};
 
@@ -8,7 +9,11 @@ pub struct Renderer {
 	queue: wgpu::Queue,
 	config: wgpu::SurfaceConfiguration,
 	clear_color: wgpu::Color,
+	quads: QuadPipeline,
 	text: TextPipeline,
+
+	/// Cell backgrounds of the current frame, kept to reuse the allocation
+	backgrounds: Vec<Quad>,
 }
 
 impl Renderer {
@@ -103,9 +108,10 @@ impl Renderer {
 
 		let clear_color = wgpu_color(renderer_config.background, config.format.is_srgb());
 
+		let quads = QuadPipeline::new(&device, config.format);
 		let text = TextPipeline::new(&device, &queue, config.format);
 
-		Ok(Self { surface, device, queue, config, clear_color, text })
+		Ok(Self { surface, device, queue, config, clear_color, quads, text, backgrounds: Vec::new() })
 	}
 
 	pub fn resize(&mut self, width: u32, height: u32) {
@@ -140,6 +146,11 @@ impl Renderer {
 		self.text
 			.prepare(&self.device, &self.queue, resolution, fonts, layers, font_size)?;
 
+		self.backgrounds.clear();
+		cell_backgrounds(&mut self.backgrounds, layers, fonts.cell_size(font_size), self.config.format.is_srgb());
+		self.quads
+			.prepare(&self.device, &self.queue, self.config.width, self.config.height, &self.backgrounds);
+
 		let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
 		let mut encoder = self
@@ -163,6 +174,7 @@ impl Renderer {
 				timestamp_writes: None,
 				multiview_mask: None,
 			});
+			self.quads.render(&mut pass);
 			self.text.render(&mut pass)?;
 		}
 

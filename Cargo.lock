@@ -1346,9 +1346,11 @@ name = "nvui-renderer"
 version = "0.1.0"
 dependencies = [
  "arrayvec",
+ "bytemuck",
  "cosmic-text",
  "glyphon",
  "rustc-hash 2.1.3",
+ "smol",
  "thiserror 2.0.18",
  "wgpu",
 ]

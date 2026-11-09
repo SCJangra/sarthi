@@ -3,6 +3,7 @@ mod config;
 mod error;
 mod font;
 mod layer;
+mod quad;
 mod renderer;
 mod text;
 
