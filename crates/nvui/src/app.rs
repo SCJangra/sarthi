@@ -11,15 +11,16 @@ use winit::window::{Window, WindowAttributes, WindowId};
 
 use editor::Editor;
 use nvim::{
-	Nvim, NvimClientInfo, NvimClientVersion, NvimMessage, NvimNotification, NvimRequest, NvimUiAttachParams,
-	NvimUiOptions, NvimUiTryResizeParams,
+	Nvim, NvimClientInfo, NvimClientVersion, NvimInputMouseParams, NvimMessage, NvimNotification, NvimRequest,
+	NvimUiAttachParams, NvimUiOptions, NvimUiTryResizeParams,
 };
-use renderer::{FontChoice, Fonts, Frame, Renderer, RendererConfig, RendererError, TextSize};
+use renderer::{CellSize, FontChoice, Fonts, Frame, Renderer, RendererConfig, RendererError, TextSize};
 
 use crate::clipboard::{self, Clipboard, Copied, Register};
 use crate::error::Error;
 use crate::guifont::GuiFont;
 use crate::input::neovim_keys;
+use crate::mouse::Mouse;
 use crate::windows::{GridSize, WindowConfig};
 
 pub struct App {
@@ -45,8 +46,11 @@ pub struct App {
 	/// Grid size last sent to Neovim, so resizes that don't change it aren't sent again
 	pub ui_size: GridSize,
 
-	/// Modifier keys held right now, for the keys sent to Neovim
+	/// Modifier keys held right now, for the keys and mouse events sent to Neovim
 	pub modifiers: ModifiersState,
+
+	/// What the mouse is doing over the window
+	pub mouse: Mouse,
 
 	pub error: Option<Error>,
 }
@@ -85,6 +89,7 @@ impl App {
 
 		Ok(Self {
 			font_size: config.font_size,
+			mouse: Mouse::new(config.touchpad_scroll),
 			config,
 			window: None,
 			editor: Editor::new(),
@@ -132,10 +137,14 @@ impl App {
 		TextSize { font_size: self.font_size * scale as f32, line_space: line_space as i32, underlines }
 	}
 
+	/// Size of a grid cell in `window`, in physical pixels
+	fn cell_size(&self, window: &Window) -> CellSize {
+		self.fonts.cell_size(self.text_size(window))
+	}
+
 	/// Number of grid cells that fit in `window`
 	fn grid_size(&self, window: &Window) -> GridSize {
-		let cell_size = self.fonts.cell_size(self.text_size(window));
-		GridSize::fit(window.inner_size(), cell_size)
+		GridSize::fit(window.inner_size(), self.cell_size(window))
 	}
 
 	fn attach_ui(&mut self, window: &Window) -> Result<(), Error> {
@@ -277,6 +286,15 @@ impl App {
 		Ok(())
 	}
 
+	/// Sends mouse events to Neovim. Errors mean the connection closed, after which the app exits anyway.
+	fn send_mouse(&self, events: impl IntoIterator<Item = NvimInputMouseParams>) {
+		for event in events {
+			if let Err(error) = self.nvim.input_mouse(event) {
+				tracing::warn!("Couldn't send a mouse event to Neovim: {error}");
+			}
+		}
+	}
+
 	/// Types a key press in Neovim. Errors mean the connection closed, after which the app exits anyway.
 	fn send_key(&self, event: &KeyEvent) {
 		if event.state != ElementState::Pressed {
@@ -351,6 +369,22 @@ impl ApplicationHandler<AppEvent> for App {
 				window.request_redraw();
 			},
 			WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
+			WindowEvent::CursorMoved { position, .. } => {
+				let event = self
+					.mouse
+					.moved(position, &self.editor, self.cell_size(&window), self.modifiers);
+				self.send_mouse(event);
+			},
+			WindowEvent::CursorLeft { .. } => self.mouse.left(),
+			WindowEvent::MouseInput { state, button, .. } => {
+				let cell = self.cell_size(&window);
+				let event = self.mouse.button(button, state, &self.editor, cell, self.modifiers);
+				self.send_mouse(event);
+			},
+			WindowEvent::MouseWheel { delta, .. } => {
+				let events = self.mouse.wheel(delta, &self.editor, self.cell_size(&window), self.modifiers);
+				self.send_mouse(events);
+			},
 			// Synthetic presses are keys already held when the window gained focus.
 			WindowEvent::KeyboardInput { event, is_synthetic: false, .. } => self.send_key(&event),
 			WindowEvent::Focused(focused) => {

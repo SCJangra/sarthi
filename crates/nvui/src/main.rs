@@ -3,6 +3,7 @@ mod clipboard;
 mod error;
 mod guifont;
 mod input;
+mod mouse;
 mod windows;
 
 use app::{App, AppEvent};

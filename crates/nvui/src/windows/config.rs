@@ -13,6 +13,9 @@ pub struct WindowConfig {
 	/// How underlines are drawn, in logical pixels: adjustments to the font's position and thickness, the undercurl's
 	/// height, and whether they break around the text's ink (off unless set)
 	pub underlines: UnderlineSize,
+
+	/// Lines a touchpad scrolls per row of finger movement: 1 follows the fingers, more scrolls faster
+	pub touchpad_scroll: f64,
 }
 
 impl Default for WindowConfig {
@@ -24,6 +27,7 @@ impl Default for WindowConfig {
 			resizable: true,
 			font_size: 14.0,
 			underlines: UnderlineSize { offset: 0.0, thickness: None, wave_height: 2.0, ink_gaps: None },
+			touchpad_scroll: 3.0,
 		}
 	}
 }
