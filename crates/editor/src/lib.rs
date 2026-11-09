@@ -43,6 +43,12 @@ pub struct Editor {
 	/// The `linespace` option: pixels added between rows, or taken away if negative
 	linespace: i64,
 
+	/// Whether mouse input is on in the current mode (`mouse_on`, `mouse_off`)
+	mouse: bool,
+
+	/// Whether Neovim wants mouse moves without a button held (the `mousemoveevent` option)
+	mouse_move_events: bool,
+
 	/// Whether anything changed since the last `flush`, so it's drawn on the next one
 	stale: bool,
 }
@@ -53,8 +59,9 @@ enum Placement {
 	/// A window at a cell of grid 1 (`win_pos`)
 	Tiled { row: u32, col: u32 },
 
-	/// A floating window at a cell of the screen, in Neovim's drawing order of floats (`win_float_pos`)
-	Float { row: u32, col: u32, compindex: u32 },
+	/// A floating window at a cell of the screen, in Neovim's drawing order of floats (`win_float_pos`). Without
+	/// `mouse`, clicks go to what's below it.
+	Float { row: u32, col: u32, compindex: u32, mouse: bool },
 
 	/// The message grid, across the screen from `row` down (`msg_set_pos`). When messages scrolled over the windows,
 	/// a line of `separator` goes above them.
@@ -76,6 +83,14 @@ struct Viewport {
 
 	/// Rows the text moved up since the last `flush`, or down if negative
 	scrolled: i64,
+}
+
+/// A cell of a grid
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GridPosition {
+	pub grid: u32,
+	pub row: u32,
+	pub col: u32,
 }
 
 /// What to draw after Neovim finished redrawing
@@ -106,6 +121,8 @@ impl Editor {
 			guifont: String::new(),
 			default_guifont: None,
 			linespace: 0,
+			mouse: false,
+			mouse_move_events: false,
 			stale: false,
 		}
 	}
@@ -124,6 +141,52 @@ impl Editor {
 	/// The `linespace` option (`:help 'linespace'`): logical pixels added between rows, or taken away if negative
 	pub fn linespace(&self) -> i64 {
 		self.linespace
+	}
+
+	/// Whether mouse input is on in the current mode, as the `mouse` option says (`mouse_on`, `mouse_off`)
+	pub fn mouse(&self) -> bool {
+		self.mouse
+	}
+
+	/// Whether Neovim wants mouse moves without a button held (the `mousemoveevent` option)
+	pub fn mouse_move_events(&self) -> bool {
+		self.mouse_move_events
+	}
+
+	/// The grid shown at cell `row`, `col` of the screen, and that cell in it: the topmost grid there that takes the
+	/// mouse, so not a float made with `mouse = false` (`:help ui-multigrid`)
+	pub fn grid_at(&self, row: u32, col: u32) -> Option<GridPosition> {
+		let screen_height = self.grids.get(&1).map_or(0, |grid| grid.height as u32);
+		let covers = |id: u32, top: u32, left: u32, bottom: u32| {
+			let grid = &self.grids[&id];
+			let right = left + grid.width as u32;
+			(top..bottom).contains(&row) && (left..right).contains(&col)
+		};
+
+		let over = self.stacked().into_iter().rev().find_map(|(id, placement)| {
+			let (top, left, bottom) = match placement {
+				Placement::Tiled { row, col } => (*row, *col, row + self.grids[&id].height as u32),
+				Placement::Float { row, col, mouse: true, .. } => (*row, *col, row + self.grids[&id].height as u32),
+				// Only its rows from `row` down show.
+				Placement::Message { row, .. } => (*row, 0, screen_height),
+				Placement::Float { .. } | Placement::Hidden => return None,
+			};
+			covers(id, top, left, bottom).then_some((id, top, left))
+		});
+		let (grid, top, left) = over.or_else(|| covers(1, 0, 0, screen_height).then_some((1, 0, 0)))?;
+		Some(GridPosition { grid, row: row - top, col: col - left })
+	}
+
+	/// The cell of the screen where grid `id`'s top-left cell is shown, if the grid is shown
+	pub fn grid_origin(&self, id: u32) -> Option<(u32, u32)> {
+		if id == 1 {
+			return self.grids.contains_key(&1).then_some((0, 0));
+		}
+		match self.placements.get(&id)? {
+			Placement::Tiled { row, col } | Placement::Float { row, col, .. } => Some((*row, *col)),
+			Placement::Message { row, .. } => Some((*row, 0)),
+			Placement::Hidden => None,
+		}
 	}
 
 	/// Applies a batch of redraw events in order. Neovim's state is only consistent once a redraw ends (`flush`), so
@@ -190,7 +253,8 @@ impl Editor {
 			RedrawNotification::WinFloatPos(positions) => {
 				for position in positions {
 					let (row, col, compindex) = (position.screen_row, position.screen_col, position.compindex);
-					self.place(position.grid, Placement::Float { row, col, compindex });
+					let mouse = position.mouse_enabled;
+					self.place(position.grid, Placement::Float { row, col, compindex, mouse });
 				}
 			},
 			RedrawNotification::WinHide(hides) => {
@@ -255,6 +319,7 @@ impl Editor {
 							self.linespace = value;
 							self.stale = true;
 						},
+						("mousemoveevent", OptionValue::Bool(value)) => self.mouse_move_events = value,
 						_ => (),
 					}
 				}
@@ -279,6 +344,8 @@ impl Editor {
 				self.cursor.set_hidden(false);
 				self.stale = true;
 			},
+			RedrawNotification::MouseOn => self.mouse = true,
+			RedrawNotification::MouseOff => self.mouse = false,
 			RedrawNotification::Flush => return self.flush(),
 			_ => (),
 		}
@@ -312,12 +379,10 @@ impl Editor {
 		redraw
 	}
 
-	/// The layers in Neovim's drawing order, like its own compositor (`:help ui-event-win_float_pos`): grid 1, the
-	/// windows on it, then floating windows and the message grid by `compindex`. Grids that aren't placed aren't
-	/// drawn.
-	fn layers(&self) -> Vec<Layer> {
-		let screen_height = self.grids.get(&1).map_or(0, |grid| grid.height as u32);
-
+	/// The grids shown over grid 1, in Neovim's drawing order, like its own compositor (`:help
+	/// ui-event-win_float_pos`): the windows, then floating windows and the message grid by `compindex`. Grids that
+	/// aren't placed aren't shown.
+	fn stacked(&self) -> Vec<(u32, &Placement)> {
 		// Sort keys: tiled windows before floats and messages, then by Neovim's drawing order or grid id
 		let mut placed: Vec<(u32, &Placement)> =
 			self.placements.iter().map(|(&id, placement)| (id, placement)).collect();
@@ -326,6 +391,13 @@ impl Editor {
 			Placement::Tiled { .. } | Placement::Hidden => (0, id),
 			Placement::Float { compindex, .. } | Placement::Message { compindex, .. } => (1 + compindex, id),
 		});
+		placed
+	}
+
+	/// The layers in drawing order: grid 1, then the grids shown over it (see [`Editor::stacked`])
+	fn layers(&self) -> Vec<Layer> {
+		let screen_height = self.grids.get(&1).map_or(0, |grid| grid.height as u32);
+		let placed = self.stacked();
 
 		let mut layers = Vec::with_capacity(placed.len() + 2);
 		if self.grids.contains_key(&1) {
@@ -412,7 +484,7 @@ mod tests {
 	use renderer::{CellLayer, Layer};
 	use serde::de::IgnoredAny;
 
-	use super::{Editor, Redraw};
+	use super::{Editor, GridPosition, Redraw};
 
 	const FG: u32 = 0xC7C7C7;
 	const BG: u32 = 0x1C1C1C;
@@ -734,5 +806,59 @@ mod tests {
 		assert!(editor.apply(vec![linespace(), RedrawNotification::Flush]).is_some());
 		assert_eq!(editor.linespace(), 3);
 		assert_eq!(editor.apply(vec![linespace(), RedrawNotification::Flush]), None);
+	}
+
+	#[test]
+	fn mouse_on_and_off() {
+		let mut editor = screen();
+		assert!(!editor.mouse());
+		editor.apply(vec![RedrawNotification::MouseOn]);
+		assert!(editor.mouse());
+		editor.apply(vec![RedrawNotification::MouseOff]);
+		assert!(!editor.mouse());
+
+		assert!(!editor.mouse_move_events());
+		editor.apply(vec![option("mousemoveevent", OptionValue::Bool(true))]);
+		assert!(editor.mouse_move_events());
+	}
+
+	#[test]
+	fn the_grid_under_a_cell() {
+		// The 10×5 screen, window grid 2 (4×3) at row 0, col 6, and float 6 (3×2) over it at row 1, col 5
+		let mut editor = screen();
+		flush(&mut editor, vec![resize(6, 3, 2), win_pos(2, 0, 6), float(6, 1, 5, 1)]);
+		let at = |editor: &Editor, row, col| editor.grid_at(row, col);
+		let cell = |grid, row, col| Some(GridPosition { grid, row, col });
+
+		assert_eq!(at(&editor, 0, 7), cell(2, 0, 1));
+		assert_eq!(at(&editor, 0, 2), cell(1, 0, 2));
+		// The float covers the window.
+		assert_eq!(at(&editor, 2, 6), cell(6, 1, 1));
+		assert_eq!(at(&editor, 2, 9), cell(2, 2, 3));
+		// Outside the screen
+		assert_eq!(at(&editor, 5, 0), None);
+		assert_eq!(at(&editor, 0, 10), None);
+
+		// A float made with `mouse = false` lets clicks through to the window below.
+		let mut no_mouse = float(6, 1, 5, 1);
+		let RedrawNotification::WinFloatPos(positions) = &mut no_mouse else { unreachable!() };
+		positions[0].mouse_enabled = false;
+		flush(&mut editor, vec![no_mouse]);
+		assert_eq!(at(&editor, 2, 6), cell(2, 2, 0));
+
+		assert_eq!(
+			(editor.grid_origin(1), editor.grid_origin(2), editor.grid_origin(6)),
+			(Some((0, 0)), Some((0, 6)), Some((1, 5)))
+		);
+		assert_eq!(editor.grid_origin(9), None);
+	}
+
+	#[test]
+	fn the_message_grid_covers_its_rows_only() {
+		let mut editor = screen();
+		flush(&mut editor, vec![resize(3, 10, 5), messages(3, false, 2)]);
+		assert_eq!(editor.grid_at(3, 4), Some(GridPosition { grid: 3, row: 0, col: 4 }));
+		assert_eq!(editor.grid_at(2, 4), Some(GridPosition { grid: 1, row: 2, col: 4 }));
+		assert_eq!(editor.grid_origin(3), Some((3, 0)));
 	}
 }
