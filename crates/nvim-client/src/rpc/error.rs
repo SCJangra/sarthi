@@ -8,9 +8,6 @@ pub enum RpcError {
 	#[error("Rmp({0})")]
 	RmpWrite(#[from] rmp_serde::encode::Error),
 
-	#[error("FlumeRecv({0})")]
-	FlumeRecv(#[from] flume::RecvError),
-
 	#[error("SendRequest")]
 	SendRequest,
 
@@ -29,12 +26,6 @@ pub enum RpcError {
 	#[error("Response({0})")]
 	Response(rmpv::Value),
 
-	#[error("WriterPoisoned")]
-	WriterPoisoned,
-
 	#[error("RequestDropped")]
 	RequestDropped,
-
-	#[error("DeserializeNotification(${0})")]
-	DeserializeNotification(rmp_serde::decode::Error),
 }

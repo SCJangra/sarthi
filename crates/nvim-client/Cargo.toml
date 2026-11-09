@@ -19,4 +19,3 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 smol = "2"
-assertables = "9"
