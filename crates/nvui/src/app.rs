@@ -52,8 +52,7 @@ pub enum AppEvent {
 
 impl App {
 	pub fn new(config: WindowConfig, proxy: EventLoopProxy<AppEvent>) -> Result<Self, Error> {
-		let nvim = Nvim::start()?;
-		let notifications = nvim.notifications()?;
+		let (nvim, notifications) = Nvim::start()?;
 		let proxy = proxy.clone();
 
 		thread::spawn(move || {

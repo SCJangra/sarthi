@@ -21,12 +21,13 @@ pub struct Nvim {
 }
 
 impl Nvim {
-	pub fn start() -> Result<Self, Error> {
+	/// Starts Neovim, embedded. Returns it and its notifications, which end once Neovim exits.
+	pub fn start() -> Result<(Self, Receiver<NvimNotification>), Error> {
 		Self::spawn(&["--embed"])
 	}
 
 	/// Starts Neovim with `args`, which must include `--embed`
-	fn spawn(args: &[&str]) -> Result<Self, Error> {
+	fn spawn(args: &[&str]) -> Result<(Self, Receiver<NvimNotification>), Error> {
 		let mut nvim = process::Command::new("nvim")
 			.args(args)
 			.stdin(process::Stdio::piped())
@@ -37,13 +38,9 @@ impl Nvim {
 		let stdin = nvim.stdin.take().expect("stdin handle present");
 		let stdout = nvim.stdout.take().expect("stdout handle present");
 
-		let rpc = RpcClient::start(stdout, stdin);
+		let (rpc, notifications) = RpcClient::start(stdout, stdin);
 
-		Ok(Self { rpc, process: NvimProcess(nvim) })
-	}
-
-	pub fn notifications(&self) -> Result<Receiver<NvimNotification>, Error> {
-		self.rpc.subscribe().map_err(Error::Rpc)
+		Ok((Self { rpc, process: NvimProcess(nvim) }, notifications))
 	}
 
 	pub async fn ui_attach(&self, params: NvimUiAttachParams) -> Result<rmpv::Value, Error> {
@@ -96,7 +93,7 @@ mod tests {
 	#[test]
 	fn drop_waits_for_neovim_to_exit() {
 		// Isolated from the user's config and ShaDa.
-		let nvim = Nvim::spawn(&["--embed", "--clean", "-i", "NONE", "-n"]).unwrap();
+		let (nvim, _notifications) = Nvim::spawn(&["--embed", "--clean", "-i", "NONE", "-n"]).unwrap();
 		let pid = nvim.process.0.id();
 
 		let start = Instant::now();

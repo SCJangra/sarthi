@@ -1,9 +1,8 @@
-use std::sync::Arc;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
-use arc_swap::ArcSwap;
-use dashmap::DashMap;
 use flume::{Receiver, Sender, WeakSender};
 
 use crate::rpc::frame::FrameReader;
@@ -33,11 +32,9 @@ struct RpcClientInner {
 	/// Whether the RPC client is running or not
 	running: AtomicBool,
 
-	/// Pending ['RpcRequest']s
-	pending: DashMap<u32, Sender<RpcResponse<rmpv::Value>>>,
-
-	/// All the subscriptions to [`NvimNotification`]s
-	subscription: ArcSwap<Option<Sender<NvimNotification>>>,
+	/// Calls waiting for their response, by request id. Only the calling thread and the reader touch it, briefly,
+	/// so a plain mutex is enough.
+	pending: Mutex<HashMap<u32, Sender<RpcResponse<rmpv::Value>>>>,
 
 	/// Sends replies to the server's requests through the writer thread. Weak, so that it doesn't
 	/// keep the writer running once [`RpcClient`] is stopped.
@@ -50,6 +47,7 @@ impl RpcClientInner {
 		reader: R,
 		writer: W,
 		request: Receiver<Vec<u8>>,
+		notifications: Sender<NvimNotification>,
 	) -> (thread::JoinHandle<()>, thread::JoinHandle<()>)
 	where
 		R: io::Read + Send + Sync + 'static,
@@ -73,6 +71,7 @@ impl RpcClientInner {
 			}
 		});
 
+		// Exiting drops `notifications`, which ends the stream of notifications.
 		let read_handle = thread::spawn(move || {
 			let mut frames = FrameReader::new(reader);
 
@@ -95,7 +94,7 @@ impl RpcClientInner {
 					},
 				};
 
-				if let Err(err) = self.process_msg(msg) {
+				if let Err(err) = self.process_msg(msg, &notifications) {
 					tracing::error!("Failed to process message: {err}");
 				}
 			}
@@ -106,12 +105,15 @@ impl RpcClientInner {
 		(read_handle, write_handle)
 	}
 
-	/// Marks the client as stopped once no more messages can arrive, and wakes everyone waiting on
-	/// one: pending calls fail and the notification subscription ends.
+	/// Marks the client as stopped once no more messages can arrive, and fails the calls waiting for a response.
 	fn disconnect(&self) {
 		self.running.store(false, Ordering::SeqCst);
-		self.pending.clear();
-		self.subscription.store(Arc::new(None));
+		self.pending().clear();
+	}
+
+	fn pending(&self) -> std::sync::MutexGuard<'_, HashMap<u32, Sender<RpcResponse<rmpv::Value>>>> {
+		// The map stays consistent even if a thread panicked while holding the lock.
+		self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 	}
 
 	fn send_request<W>(request: Vec<u8>, writer: &mut W) -> Result<(), RpcError>
@@ -124,7 +126,11 @@ impl RpcClientInner {
 		Ok(())
 	}
 
-	fn process_msg(&self, msg: IncomingRpcMessage<rmpv::Value>) -> Result<(), RpcError> {
+	fn process_msg(
+		&self,
+		msg: IncomingRpcMessage<rmpv::Value>,
+		notifications: &Sender<NvimNotification>,
+	) -> Result<(), RpcError> {
 		match msg {
 			IncomingRpcMessage::Request(req) => {
 				// No requests are handled yet. Reply with an error, so the caller's `rpcrequest()`
@@ -141,15 +147,10 @@ impl RpcClientInner {
 				replies.send(reply).map_err(|_| RpcError::SendRequest)?;
 			},
 			IncomingRpcMessage::Notification(notification) => {
-				let sub = self.subscription.load();
-
-				#[rustfmt::skip]
-				let Some(sub) = sub.as_ref() else { return Ok(()); };
-				sub.send(notification).map_err(|_| RpcError::SendNotification)?;
+				notifications.send(notification).map_err(|_| RpcError::SendNotification)?;
 			},
 			IncomingRpcMessage::Response(response) => {
-				#[rustfmt::skip]
-				let Some(req) = self.pending.get(&response.id) else { return Ok(()) };
+				let Some(req) = self.pending().remove(&response.id) else { return Ok(()) };
 				req.send(response).map_err(|_| RpcError::SendResponse)?;
 			},
 		}
@@ -158,51 +159,26 @@ impl RpcClientInner {
 }
 
 impl RpcClient {
-	pub fn start<R, W>(reader: R, writer: W) -> Self
+	/// Starts reading messages from `reader` and writing them to `writer`, each on its own thread. Returns the client
+	/// and the server's notifications, which end once the connection closes.
+	pub fn start<R, W>(reader: R, writer: W) -> (Self, Receiver<NvimNotification>)
 	where
 		R: io::Read + Send + Sync + 'static,
 		W: io::Write + Send + Sync + 'static,
 	{
 		let (sender, receiver) = flume::unbounded();
+		let (notify, notifications) = flume::unbounded();
 
 		let inner = Arc::new(RpcClientInner {
 			next_req_id: AtomicU32::new(0),
 			running: AtomicBool::new(false),
-			pending: DashMap::new(),
-			subscription: ArcSwap::new(Arc::new(None)),
+			pending: Mutex::new(HashMap::new()),
 			replies: sender.downgrade(),
 		});
 
-		let (read_handle, write_handle) = inner.clone().start(reader, writer, receiver);
+		let (read_handle, write_handle) = inner.clone().start(reader, writer, receiver, notify);
 
-		Self { inner, request: sender, read_handle, write_handle }
-	}
-
-	pub async fn call_method<M>(&self, id: u32, params: M::Params) -> Result<M::Response, RpcError>
-	where
-		M: RpcMethod,
-	{
-		let (sender, receiver) = flume::bounded(1);
-
-		self.inner.pending.insert(id, sender);
-
-		// If the connection already closed, nothing will answer or clear this call.
-		if !self.inner.running.load(Ordering::SeqCst) {
-			return Err(RpcError::RequestDropped);
-		}
-
-		let req =
-			OutgoingRpcMessage::Request(RpcRequest { id, method: M::METHOD.to_string(), params });
-		let req = rmp_serde::to_vec_named(&req)?;
-
-		self.request.send(req).map_err(|_| RpcError::SendRequest)?;
-
-		// The sender is dropped without a response when the connection closes.
-		let response = receiver.recv_async().await.map_err(|_| RpcError::RequestDropped)?;
-		let response = response.result.map_err(RpcError::Response)?;
-
-		let response: M::Response = rmpv::ext::from_value(response)?;
-		Ok(response)
+		(Self { inner, request: sender, read_handle, write_handle }, notifications)
 	}
 
 	pub async fn call<M>(&self, params: M::Params) -> Result<M::Response, RpcError>
@@ -210,9 +186,32 @@ impl RpcClient {
 		M: RpcMethod,
 	{
 		let id = self.inner.next_req_id.fetch_add(1, Ordering::SeqCst);
-		let res = self.call_method::<M>(id, params).await;
-		self.inner.pending.remove(&id);
-		res
+		let (sender, receiver) = flume::bounded(1);
+		self.inner.pending().insert(id, sender);
+
+		// If the connection already closed, nothing will answer or clear this call.
+		if !self.inner.running.load(Ordering::SeqCst) {
+			self.inner.pending().remove(&id);
+			return Err(RpcError::RequestDropped);
+		}
+
+		let req =
+			OutgoingRpcMessage::Request(RpcRequest { id, method: M::METHOD.to_string(), params });
+		let sent = rmp_serde::to_vec_named(&req)
+			.map_err(RpcError::from)
+			.and_then(|req| self.request.send(req).map_err(|_| RpcError::SendRequest));
+		if let Err(err) = sent {
+			self.inner.pending().remove(&id);
+			return Err(err);
+		}
+
+		// The reader removes the call when its response arrives. The sender is dropped without a response when the
+		// connection closes.
+		let response = receiver.recv_async().await.map_err(|_| RpcError::RequestDropped)?;
+		let response = response.result.map_err(RpcError::Response)?;
+
+		let response: M::Response = rmpv::ext::from_value(response)?;
+		Ok(response)
 	}
 
 	/// Calls `M` without waiting for a reply. Neovim processes it in order with other messages and reports errors
@@ -224,21 +223,6 @@ impl RpcClient {
 		let notification = OutgoingRpcMessage::Notification { method: M::METHOD, params };
 		let notification = rmp_serde::to_vec_named(&notification)?;
 		self.request.send(notification).map_err(|_| RpcError::SendRequest)
-	}
-
-	pub fn subscribe(&self) -> Result<Receiver<NvimNotification>, RpcError> {
-		if self.inner.subscription.load().is_some() {
-			return Err(RpcError::AlreadySubscribed);
-		}
-		let (sender, receiver) = flume::unbounded();
-
-		self.inner.subscription.store(Arc::new(Some(sender)));
-
-		Ok(receiver)
-	}
-
-	pub fn unsubscribe(&self) {
-		self.inner.subscription.store(Arc::new(None));
 	}
 
 	pub fn stop(self) {
@@ -278,7 +262,7 @@ mod tests {
 		let stdin = nvim.stdin.take().unwrap();
 		let stdout = nvim.stdout.take().unwrap();
 
-		let client = RpcClient::start(stdout, stdin);
+		let (client, _notifications) = RpcClient::start(stdout, stdin);
 
 		let future = client.call::<NvimEval>(["1 + 1".into()]);
 		let response = smol::block_on(future).unwrap();
@@ -296,7 +280,7 @@ mod tests {
 
 		let stdin = nvim.stdin.take().unwrap();
 		let stdout = nvim.stdout.take().unwrap();
-		let client = RpcClient::start(stdout, stdin);
+		let (client, _notifications) = RpcClient::start(stdout, stdin);
 
 		// With --embed, Neovim finishes starting up, and only then handles typed keys, once a UI attaches.
 		let attach = NvimUiAttachParams { width: 20, height: 5, options: NvimUiOptions::all() };
@@ -326,7 +310,7 @@ mod tests {
 		let stdin = nvim.stdin.take().unwrap();
 		let stdout = nvim.stdout.take().unwrap();
 
-		let client = RpcClient::start(stdout, stdin);
+		let (client, _notifications) = RpcClient::start(stdout, stdin);
 
 		// While evaluating this, Neovim sends us a request on our channel (1) and blocks until we reply.
 		let call = async { Some(client.call::<NvimEval>(["rpcrequest(1, 'nvui_test')".into()]).await) };
@@ -351,7 +335,7 @@ mod tests {
 		let stdin = nvim.stdin.take().unwrap();
 		let stdout = nvim.stdout.take().unwrap();
 
-		let client = RpcClient::start(stdout, stdin);
+		let (client, _notifications) = RpcClient::start(stdout, stdin);
 
 		let future = client.call::<NvimUiAttach>(NvimUiAttachParams {
 			width: 10,
@@ -410,8 +394,7 @@ mod tests {
 
 		let (reader, pipe) = io::pipe().unwrap();
 		let reply = [&bad_notification[..], &notification, &response].concat();
-		let client = RpcClient::start(reader, Responder { pipe, reply: Some(reply) });
-		let notifications = client.subscribe().unwrap();
+		let (client, notifications) = RpcClient::start(reader, Responder { pipe, reply: Some(reply) });
 
 		let call = async { Some(client.call::<NvimEval>(["1 + 1".into()]).await) };
 		let timeout = async {
@@ -468,8 +451,7 @@ mod tests {
 	#[test]
 	fn fail_pending_call_when_connection_closes() {
 		let (reader, pipe) = io::pipe().unwrap();
-		let client = RpcClient::start(reader, CloseOnWrite(Some(pipe)));
-		let notifications = client.subscribe().unwrap();
+		let (client, notifications) = RpcClient::start(reader, CloseOnWrite(Some(pipe)));
 
 		let call = async { Some(client.call::<NvimEval>(["1 + 1".into()]).await) };
 		let timeout = async {

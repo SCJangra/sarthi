@@ -10,9 +10,7 @@ rmp-serde = { workspace = true }
 rmpv = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
-dashmap = { workspace = true }
 flume = { workspace = true }
-arc-swap = { workspace = true }
 serde_tuple = { workspace = true }
 nvui-derive = { path = "../derive" }
 tracing = { workspace = true }

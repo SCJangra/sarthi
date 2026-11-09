@@ -20,9 +20,6 @@ pub enum RpcError {
 	#[error("SendNotification")]
 	SendNotification,
 
-	#[error("AlreadySubscribed")]
-	AlreadySubscribed,
-
 	#[error("Response({0})")]
 	Response(rmpv::Value),
 

@@ -18,9 +18,7 @@ rmp-serde = "1"
 rmpv = { version = "1", features = ["with-serde"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
-dashmap = "6"
 flume = "0.12"
-arc-swap = "1"
 serde_tuple = "1"
 winit = "0.30"
 wgpu = "30"
