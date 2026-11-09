@@ -74,6 +74,12 @@ pub enum RedrawNotification {
 
 	BusyStop,
 
+	/// Mouse input is on in the current mode, as the `mouse` option says; the TUI only reports the mouse while it's on
+	/// (`:help ui-global`)
+	MouseOn,
+
+	MouseOff,
+
 	/// Neovim is done redrawing the screen, so this is the time to show the result (`:help ui-global`)
 	Flush,
 
@@ -126,6 +132,16 @@ mod tests {
 
 		assert_eq!(rmp_serde::from_slice::<RedrawNotification>(&start).unwrap(), RedrawNotification::BusyStart);
 		assert_eq!(rmp_serde::from_slice::<RedrawNotification>(&stop).unwrap(), RedrawNotification::BusyStop);
+	}
+
+	#[test]
+	fn de_mouse_on_and_off() {
+		// ["mouse_on", []] and ["mouse_off", []]
+		let on = [&[0x92, 0xA8][..], b"mouse_on", &[0x90]].concat();
+		let off = [&[0x92, 0xA9][..], b"mouse_off", &[0x90]].concat();
+
+		assert_eq!(rmp_serde::from_slice::<RedrawNotification>(&on).unwrap(), RedrawNotification::MouseOn);
+		assert_eq!(rmp_serde::from_slice::<RedrawNotification>(&off).unwrap(), RedrawNotification::MouseOff);
 	}
 
 	#[test]

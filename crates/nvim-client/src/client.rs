@@ -4,8 +4,9 @@ use std::{process, thread};
 use flume::Receiver;
 
 use crate::{
-	Error, NvimClientInfo, NvimExecLua, NvimInput, NvimMessage, NvimSetClientInfo, NvimUiAttach, NvimUiAttachParams,
-	NvimUiSetFocus, NvimUiTryResize, NvimUiTryResizeParams, RpcClient,
+	Error, NvimClientInfo, NvimExecLua, NvimInput, NvimInputMouse, NvimInputMouseParams, NvimMessage,
+	NvimSetClientInfo, NvimUiAttach, NvimUiAttachParams, NvimUiSetFocus, NvimUiTryResize, NvimUiTryResizeParams,
+	RpcClient,
 };
 
 /// How long to wait for Neovim to exit on its own before killing it. Generous, since killing it
@@ -73,6 +74,11 @@ impl Nvim {
 	/// Types `keys`, in `:help key-notation`, without waiting for Neovim to process them
 	pub fn input(&self, keys: &str) -> Result<(), Error> {
 		self.rpc.notify::<NvimInput>([keys.to_owned()]).map_err(Error::Rpc)
+	}
+
+	/// Sends a mouse event, without waiting for Neovim to process it
+	pub fn input_mouse(&self, params: NvimInputMouseParams) -> Result<(), Error> {
+		self.rpc.notify::<NvimInputMouse>(params).map_err(Error::Rpc)
 	}
 
 	/// Tells Neovim whether the UI has focus, for `FocusGained` and `FocusLost` autocommands
