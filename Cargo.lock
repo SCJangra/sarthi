@@ -1303,7 +1303,6 @@ dependencies = [
  "rmpv",
  "serde",
  "serde_tuple",
- "smol",
  "thiserror 2.0.18",
  "tracing",
 ]

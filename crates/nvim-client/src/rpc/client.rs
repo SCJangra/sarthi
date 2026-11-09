@@ -181,7 +181,8 @@ impl RpcClient {
 		(Self { inner, request: sender, read_handle, write_handle }, notifications)
 	}
 
-	pub async fn call<M>(&self, params: M::Params) -> Result<M::Response, RpcError>
+	/// Calls `M` and waits for Neovim's reply. Never call it from the reader thread, which delivers the reply.
+	pub fn call<M>(&self, params: M::Params) -> Result<M::Response, RpcError>
 	where
 		M: RpcMethod,
 	{
@@ -207,7 +208,7 @@ impl RpcClient {
 
 		// The reader removes the call when its response arrives. The sender is dropped without a response when the
 		// connection closes.
-		let response = receiver.recv_async().await.map_err(|_| RpcError::RequestDropped)?;
+		let response = receiver.recv().map_err(|_| RpcError::RequestDropped)?;
 		let response = response.result.map_err(RpcError::Response)?;
 
 		let response: M::Response = rmpv::ext::from_value(response)?;
@@ -224,26 +225,25 @@ impl RpcClient {
 		let notification = rmp_serde::to_vec_named(&notification)?;
 		self.request.send(notification).map_err(|_| RpcError::SendRequest)
 	}
-
-	pub fn stop(self) {
-		let Self { inner, request, read_handle, write_handle } = self;
-
-		inner.running.store(false, Ordering::SeqCst);
-		drop(request);
-		let _ = read_handle.join();
-		let _ = write_handle.join();
-	}
 }
 
 #[cfg(test)]
 mod tests {
 	use std::io::{self, Read, Write};
+	use std::sync::Arc;
 	use std::time::Duration;
 
 	use crate::{
 		GridCursorGotoEvent, NvimEval, NvimInput, NvimNotification, NvimUiAttach, NvimUiAttachParams, NvimUiOptions,
 		RedrawNotification, RpcClient, RpcError,
 	};
+
+	/// Runs `call` on another thread, so a call that never returns fails the test instead of hanging it
+	fn within_5s<T: Send + 'static>(call: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+		let (done, result) = flume::bounded(1);
+		std::thread::spawn(move || done.send(call()));
+		result.recv_timeout(Duration::from_secs(5)).ok()
+	}
 
 	/// Starts an embedded Neovim that doesn't touch the user's config, ShaDa or swap files.
 	fn spawn_nvim() -> std::process::Child {
@@ -264,12 +264,10 @@ mod tests {
 
 		let (client, _notifications) = RpcClient::start(stdout, stdin);
 
-		let future = client.call::<NvimEval>(["1 + 1".into()]);
-		let response = smol::block_on(future).unwrap();
+		let response = client.call::<NvimEval>(["1 + 1".into()]).unwrap();
 
 		assert_eq!(response, rmpv::Value::from(2));
 
-		client.stop();
 		nvim.kill().unwrap();
 		nvim.wait().unwrap();
 	}
@@ -284,7 +282,7 @@ mod tests {
 
 		// With --embed, Neovim finishes starting up, and only then handles typed keys, once a UI attaches.
 		let attach = NvimUiAttachParams { width: 20, height: 5, options: NvimUiOptions::all() };
-		smol::block_on(client.call::<NvimUiAttach>(attach)).unwrap();
+		client.call::<NvimUiAttach>(attach).unwrap();
 
 		client.notify::<NvimInput>(["ihello<lt>x<Esc>".into()]).unwrap();
 
@@ -293,12 +291,11 @@ mod tests {
 		let deadline = std::time::Instant::now() + Duration::from_secs(5);
 		let mut line = rmpv::Value::Nil;
 		while line != typed && std::time::Instant::now() < deadline {
-			line = smol::block_on(client.call::<NvimEval>(["getline(1)".into()])).unwrap();
+			line = client.call::<NvimEval>(["getline(1)".into()]).unwrap();
 		}
 
 		assert_eq!(line, typed);
 
-		client.stop();
 		nvim.kill().unwrap();
 		nvim.wait().unwrap();
 	}
@@ -310,20 +307,16 @@ mod tests {
 		let stdin = nvim.stdin.take().unwrap();
 		let stdout = nvim.stdout.take().unwrap();
 
-		let (client, _notifications) = RpcClient::start(stdout, stdin);
+		let client = Arc::new(RpcClient::start(stdout, stdin).0);
 
 		// While evaluating this, Neovim sends us a request on our channel (1) and blocks until we reply.
-		let call = async { Some(client.call::<NvimEval>(["rpcrequest(1, 'nvui_test')".into()]).await) };
-		let timeout = async {
-			smol::Timer::after(Duration::from_secs(5)).await;
-			None
-		};
-		let response = smol::block_on(smol::future::or(call, timeout)).expect("Neovim is blocked on our reply");
+		let caller = client.clone();
+		let response = within_5s(move || caller.call::<NvimEval>(["rpcrequest(1, 'nvui_test')".into()]))
+			.expect("Neovim is blocked on our reply");
 
 		let err = response.unwrap_err();
 		assert!(err.to_string().contains("Unknown method: nvui_test"), "unexpected error: {err}");
 
-		client.stop();
 		nvim.kill().unwrap();
 		nvim.wait().unwrap();
 	}
@@ -337,16 +330,11 @@ mod tests {
 
 		let (client, _notifications) = RpcClient::start(stdout, stdin);
 
-		let future = client.call::<NvimUiAttach>(NvimUiAttachParams {
-			width: 10,
-			height: 10,
-			options: NvimUiOptions::all(),
-		});
-		let response = smol::block_on(future).unwrap();
+		let params = NvimUiAttachParams { width: 10, height: 10, options: NvimUiOptions::all() };
+		let response = client.call::<NvimUiAttach>(params).unwrap();
 
 		assert_eq!(response, rmpv::Value::Nil);
 
-		client.stop();
 		nvim.kill().unwrap();
 		nvim.wait().unwrap();
 	}
@@ -396,12 +384,10 @@ mod tests {
 		let reply = [&bad_notification[..], &notification, &response].concat();
 		let (client, notifications) = RpcClient::start(reader, Responder { pipe, reply: Some(reply) });
 
-		let call = async { Some(client.call::<NvimEval>(["1 + 1".into()]).await) };
-		let timeout = async {
-			smol::Timer::after(Duration::from_secs(5)).await;
-			None
-		};
-		let response = smol::block_on(smol::future::or(call, timeout)).expect("response after bad message was lost");
+		let client = Arc::new(client);
+		let caller = client.clone();
+		let response = within_5s(move || caller.call::<NvimEval>(["1 + 1".into()]))
+			.expect("response after bad message was lost");
 
 		assert_eq!(response.unwrap(), rmpv::Value::from(2));
 
@@ -413,7 +399,6 @@ mod tests {
 		assert_eq!(notifications.try_recv().unwrap(), expected);
 		assert!(notifications.try_recv().is_err());
 
-		client.stop();
 	}
 
 	#[test]
@@ -453,12 +438,7 @@ mod tests {
 		let (reader, pipe) = io::pipe().unwrap();
 		let (client, notifications) = RpcClient::start(reader, CloseOnWrite(Some(pipe)));
 
-		let call = async { Some(client.call::<NvimEval>(["1 + 1".into()]).await) };
-		let timeout = async {
-			smol::Timer::after(Duration::from_secs(5)).await;
-			None
-		};
-		let response = smol::block_on(smol::future::or(call, timeout)).expect("pending call hung after disconnect");
+		let response = within_5s(move || client.call::<NvimEval>(["1 + 1".into()])).expect("pending call hung after disconnect");
 
 		assert!(matches!(response, Err(RpcError::RequestDropped)), "unexpected response: {response:?}");
 		assert!(matches!(
@@ -466,6 +446,5 @@ mod tests {
 			Err(flume::RecvTimeoutError::Disconnected)
 		));
 
-		client.stop();
 	}
 }

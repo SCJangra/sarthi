@@ -114,7 +114,7 @@ impl App {
 		let options = NvimUiOptions::all();
 		let params = NvimUiAttachParams { width: size.width, height: size.height, options };
 
-		smol::block_on(self.nvim.ui_attach(params))?;
+		self.nvim.ui_attach(params)?;
 		self.ui_size = size;
 		Ok(())
 	}
@@ -127,7 +127,7 @@ impl App {
 
 		let params = NvimUiTryResizeParams { width: size.width, height: size.height };
 
-		smol::block_on(self.nvim.ui_try_resize(params))?;
+		self.nvim.ui_try_resize(params)?;
 		self.ui_size = size;
 		Ok(())
 	}

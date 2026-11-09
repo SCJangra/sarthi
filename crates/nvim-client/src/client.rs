@@ -43,12 +43,14 @@ impl Nvim {
 		Ok((Self { rpc, process: NvimProcess(nvim) }, notifications))
 	}
 
-	pub async fn ui_attach(&self, params: NvimUiAttachParams) -> Result<rmpv::Value, Error> {
-		self.rpc.call::<NvimUiAttach>(params).await.map_err(Error::Rpc)
+	/// Attaches as a UI and waits until Neovim accepted it
+	pub fn ui_attach(&self, params: NvimUiAttachParams) -> Result<rmpv::Value, Error> {
+		self.rpc.call::<NvimUiAttach>(params).map_err(Error::Rpc)
 	}
 
-	pub async fn ui_try_resize(&self, params: NvimUiTryResizeParams) -> Result<rmpv::Value, Error> {
-		self.rpc.call::<NvimUiTryResize>(params).await.map_err(Error::Rpc)
+	/// Asks Neovim to resize the UI, without waiting for it: the new size arrives with the redraws
+	pub fn ui_try_resize(&self, params: NvimUiTryResizeParams) -> Result<(), Error> {
+		self.rpc.notify::<NvimUiTryResize>(params).map_err(Error::Rpc)
 	}
 
 	/// Types `keys`, in `:help key-notation`, without waiting for Neovim to process them
