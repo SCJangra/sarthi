@@ -31,6 +31,9 @@ cosmic-text = { version = "0.19", features = ["shape-run-cache"] }
 smol = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Clipboard access through the window's display: on Wayland it uses the window's connection, which works on every
+# compositor
+window_clipboard = "0.5"
 
 [workspace.package]
 version = "0.1.0"

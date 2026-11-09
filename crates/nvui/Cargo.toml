@@ -12,3 +12,8 @@ winit = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+window_clipboard = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+rmpv = { workspace = true }

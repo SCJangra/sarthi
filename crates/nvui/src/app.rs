@@ -10,9 +10,13 @@ use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use editor::Editor;
-use nvim::{Nvim, NvimMessage, NvimNotification, NvimUiAttachParams, NvimUiOptions, NvimUiTryResizeParams};
+use nvim::{
+	Nvim, NvimClientInfo, NvimClientVersion, NvimMessage, NvimNotification, NvimRequest, NvimUiAttachParams,
+	NvimUiOptions, NvimUiTryResizeParams,
+};
 use renderer::{Fonts, Frame, Renderer, RendererConfig, RendererError};
 
+use crate::clipboard::{self, Clipboard, Copied, Register};
 use crate::error::Error;
 use crate::input::neovim_keys;
 use crate::windows::{GridSize, WindowConfig};
@@ -38,6 +42,9 @@ pub struct App {
 
 /// A window and its renderer, which holds what the window shows
 pub struct WindowState {
+	/// The clipboard of the window's display, if it could connect. Dropped first: it needs the display.
+	pub clipboard: Option<Clipboard>,
+
 	pub window: Arc<Window>,
 	pub renderer: Renderer,
 }
@@ -87,7 +94,10 @@ impl App {
 	fn create_window(&mut self, event_loop: &ActiveEventLoop) -> Result<Arc<Window>, Error> {
 		let window = Arc::new(event_loop.create_window(Self::window_attributes(&self.config))?);
 		let renderer = Self::create_renderer(&window, self.editor.background())?;
-		self.window = Some(WindowState { window: window.clone(), renderer });
+		let clipboard = Clipboard::connect(&window)
+			.inspect_err(|error| tracing::warn!("Couldn't connect to the clipboard: {error}"))
+			.ok();
+		self.window = Some(WindowState { clipboard, window: window.clone(), renderer });
 		Ok(window)
 	}
 
@@ -115,6 +125,13 @@ impl App {
 		let options = NvimUiOptions::all();
 		let params = NvimUiAttachParams { width: size.width, height: size.height, options };
 
+		// Names nvui's channel, so Lua code (the clipboard below, plugins) can find it.
+		self.nvim.set_client_info(client_info())?;
+
+		// Before attaching, so it runs before the user's config, which Neovim sources once a UI attached.
+		if let Err(error) = self.nvim.exec_lua(clipboard::SETUP) {
+			tracing::warn!("Couldn't set up the clipboard: {error}");
+		}
 		self.nvim.ui_attach(params)?;
 		self.ui_size = size;
 		Ok(())
@@ -142,6 +159,34 @@ impl App {
 		state.renderer.set_clear_color(redraw.background);
 		state.renderer.set_layers(redraw.layers);
 		state.window.request_redraw();
+	}
+
+	/// Answers a request from Neovim, which waits for the answer, so this must not wait for Neovim. Dropping a request
+	/// answers it with an error.
+	fn handle_nvim_request(&mut self, request: NvimRequest) {
+		let clipboard = self
+			.window
+			.as_mut()
+			.and_then(|state| state.clipboard.as_mut())
+			.ok_or("no clipboard");
+		let register = |name: &str| Register::from_name(name).ok_or_else(|| format!("no clipboard register {name}"));
+
+		match request.method() {
+			"nvui.set_clipboard" => {
+				let copied = request
+					.params::<(String, Vec<String>, String)>()
+					.map_err(|error| error.to_string());
+				let result = copied
+					.and_then(|(name, lines, regtype)| clipboard?.copy(register(&name)?, Copied { lines, regtype }));
+				request.respond(result);
+			},
+			"nvui.get_clipboard" => {
+				let name = request.params::<(String,)>().map_err(|error| error.to_string());
+				let result = name.and_then(|(name,)| clipboard?.paste(register(&name)?));
+				request.respond(result);
+			},
+			_ => (),
+		}
 	}
 
 	fn resize_renderer(&mut self) {
@@ -273,9 +318,19 @@ impl ApplicationHandler<AppEvent> for App {
 	fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
 		match event {
 			AppEvent::Nvim(NvimMessage::Notification(notification)) => self.handle_nvim_notification(notification),
-			// None are handled yet: dropping a request answers it with an error.
-			AppEvent::Nvim(NvimMessage::Request(_)) => (),
+			AppEvent::Nvim(NvimMessage::Request(request)) => self.handle_nvim_request(request),
 			AppEvent::NvimExited => event_loop.exit(),
 		}
 	}
+}
+
+/// How nvui introduces itself to Neovim (`:help nvim_set_client_info()`)
+fn client_info() -> NvimClientInfo {
+	let number = |part: &str| part.parse().unwrap_or(0);
+	let version = NvimClientVersion {
+		major: number(env!("CARGO_PKG_VERSION_MAJOR")),
+		minor: number(env!("CARGO_PKG_VERSION_MINOR")),
+		patch: number(env!("CARGO_PKG_VERSION_PATCH")),
+	};
+	NvimClientInfo { name: String::from("nvui"), version, kind: "ui" }
 }
