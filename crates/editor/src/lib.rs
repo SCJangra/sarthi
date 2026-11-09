@@ -7,7 +7,7 @@ pub mod highlight;
 
 use std::collections::HashMap;
 
-use nvim::{CellText, GridCell as NvimGridCell, RedrawNotification};
+use nvim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification};
 use renderer::{CellLayer, Layer, Scroll};
 
 use crate::compositor::cell_layer;
@@ -33,6 +33,9 @@ pub struct Editor {
 
 	/// The grid the cursor is in
 	cursor_grid: u32,
+
+	/// The `guifont` option, as Neovim sent it
+	guifont: String,
 
 	/// Whether anything changed since the last `flush`, so it's drawn on the next one
 	stale: bool,
@@ -94,6 +97,7 @@ impl Editor {
 			highlights: HighlightState::new(),
 			cursor: CursorState::default(),
 			cursor_grid: 1,
+			guifont: String::new(),
 			stale: false,
 		}
 	}
@@ -101,6 +105,11 @@ impl Editor {
 	/// Neovim's default background, as `0xRRGGBB`
 	pub fn background(&self) -> u32 {
 		self.highlights.defaults().background
+	}
+
+	/// The `guifont` option (`:help 'guifont'`): which fonts to draw text with. Empty unless set.
+	pub fn guifont(&self) -> &str {
+		&self.guifont
 	}
 
 	/// Applies a batch of redraw events in order. Neovim's state is only consistent once a redraw ends (`flush`), so
@@ -214,6 +223,17 @@ impl Editor {
 				self.stale = true;
 			},
 			RedrawNotification::HlGroupSet(groups) => self.highlights.set_hl_groups(groups),
+			RedrawNotification::OptionSet(options) => {
+				for option in options {
+					// Other fonts change what's drawn, so a change is drawn with the next flush.
+					if let ("guifont", OptionValue::String(value)) = (option.name.as_str(), option.value)
+						&& value != self.guifont
+					{
+						self.guifont = value;
+						self.stale = true;
+					}
+				}
+			},
 			RedrawNotification::ModeInfoSet(sets) => {
 				if let Some(set) = sets.into_iter().last() {
 					self.cursor.set_modes(set.cursor_style_enabled, set.mode_info);
@@ -360,8 +380,9 @@ fn clip_rows(layer: &mut Layer, height: u32) {
 mod tests {
 	use nvim::{
 		CellText, DefaultColorsSetEvent, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
-		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, RedrawNotification,
-		WinCloseEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent, WinViewportEvent, WinViewportMarginsEvent,
+		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, OptionSetEvent, OptionValue,
+		RedrawNotification, WinCloseEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent, WinViewportEvent,
+		WinViewportMarginsEvent,
 	};
 	use renderer::{CellLayer, Layer};
 	use serde::de::IgnoredAny;
@@ -651,5 +672,24 @@ mod tests {
 		assert_eq!(scroll_of(&redraw, 2), None);
 		let redraw = flush(&mut editor, vec![viewport(2, 300, -294), line(2, 0, "a")]);
 		assert_eq!(scroll_of(&redraw, 2), None);
+	}
+
+	fn option(name: &str, value: OptionValue) -> RedrawNotification {
+		RedrawNotification::OptionSet(vec![OptionSetEvent { name: name.to_owned(), value }])
+	}
+
+	#[test]
+	fn guifont_changes_are_drawn() {
+		let mut editor = screen();
+		flush(&mut editor, vec![]);
+		assert_eq!(editor.guifont(), "");
+
+		let guifont = || option("guifont", OptionValue::String(String::from("Iosevka:h14")));
+		assert!(editor.apply(vec![guifont(), RedrawNotification::Flush]).is_some());
+		assert_eq!(editor.guifont(), "Iosevka:h14");
+
+		// The same value again, or another option, changes nothing to draw.
+		assert_eq!(editor.apply(vec![guifont(), RedrawNotification::Flush]), None);
+		assert_eq!(editor.apply(vec![option("linespace", OptionValue::Number(2)), RedrawNotification::Flush]), None);
 	}
 }
