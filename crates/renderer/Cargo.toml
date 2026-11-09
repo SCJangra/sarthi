@@ -11,6 +11,7 @@ glyphon = { workspace = true }
 rustc-hash = { workspace = true }
 thiserror = { workspace = true }
 wgpu = { workspace = true }
+zeno = { workspace = true }
 
 [dev-dependencies]
 smol = { workspace = true }

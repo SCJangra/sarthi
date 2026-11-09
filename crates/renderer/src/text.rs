@@ -3,11 +3,12 @@ use std::ops::Range;
 
 use glyphon::cosmic_text::Hinting;
 use glyphon::{
-	Attrs, Buffer, Cache, Color, ColorMode, Family, Metrics, Resolution, Shaping, Style, SwashCache, TextArea,
-	TextAtlas, TextBounds, TextRenderer, Viewport, Weight, Wrap,
+	Attrs, Buffer, Cache, Color, ColorMode, ContentType, CustomGlyph, Family, Metrics, RasterizedCustomGlyph,
+	Resolution, Shaping, Style, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport, Weight, Wrap,
 };
 use rustc_hash::FxHashMap;
 
+use crate::builtin_glyphs::{builtin_char, is_builtin, rasterize};
 use crate::{CellLayer, CellSize, Fonts, Layer, RenderCell, RendererError, TextStyle};
 
 /// Draws the text of cell layers with glyphon
@@ -22,13 +23,24 @@ pub(crate) struct TextPipeline {
 
 	/// Laid-out rows of each cell layer, by layer id
 	layers: HashMap<u64, Vec<Row>>,
+
+	/// Text areas need a buffer; this empty one carries a row's custom glyphs.
+	empty: Buffer,
 }
 
-/// One row of a cell layer: its cells as last drawn, and their laid-out segments
+/// One row of a cell layer: its cells as last drawn, and how they're drawn
 #[derive(Default)]
 struct Row {
 	cells: Vec<RenderCell>,
+	layout: RowLayout,
+}
+
+/// How a row's cells are drawn: segments of text by starting column, and custom glyphs for the cells nvui draws
+/// itself (box drawing, blocks, powerline), positioned relative to the row
+#[derive(Default)]
+struct RowLayout {
 	buffers: Vec<(u32, Buffer)>,
+	glyphs: Vec<CustomGlyph>,
 }
 
 impl TextPipeline {
@@ -46,6 +58,7 @@ impl TextPipeline {
 			swash_cache: SwashCache::new(),
 			font_size: 0.0,
 			layers: HashMap::new(),
+			empty: Buffer::new_empty(Metrics::new(1.0, 1.0)),
 		}
 	}
 
@@ -85,20 +98,29 @@ impl TextPipeline {
 				bottom: (top + layer.height * cell.height) as i32,
 			};
 
+			let empty = &self.empty;
 			self.layers[&layer.id].iter().zip(0..).flat_map(move |(row, y)| {
-				row.buffers.iter().map(move |(col, buffer)| TextArea {
+				let area = move |col: u32, buffer, custom_glyphs| TextArea {
 					buffer,
 					left: (left + col * cell.width) as f32,
 					top: (top + y * cell.height) as f32,
 					scale: 1.0,
 					bounds,
 					default_color: Color::rgb(0xFF, 0xFF, 0xFF),
-					custom_glyphs: &[],
-				})
+					custom_glyphs,
+				};
+				let glyphs = (!row.layout.glyphs.is_empty()).then(|| area(0, empty, &row.layout.glyphs[..]));
+				row.layout
+					.buffers
+					.iter()
+					.map(move |(col, buffer)| area(*col, buffer, &[]))
+					.chain(glyphs)
 			})
 		});
 
-		self.renderer.prepare(
+		// Custom glyphs are the cells nvui draws itself, rasterized once per size.
+		let thickness = fonts.line_metrics(font_size).thickness;
+		self.renderer.prepare_with_custom(
 			device,
 			queue,
 			&mut fonts.system,
@@ -106,6 +128,11 @@ impl TextPipeline {
 			&self.viewport,
 			text_areas,
 			&mut self.swash_cache,
+			|request| {
+				let c = char::from_u32(u32::from(request.id))?;
+				let data = rasterize(c, u32::from(request.width), u32::from(request.height), thickness)?;
+				Some(RasterizedCustomGlyph { data, content_type: ContentType::Mask })
+			},
 		)?;
 		Ok(())
 	}
@@ -135,22 +162,44 @@ fn update_rows(rows: &mut Vec<Row>, layer: &CellLayer, fonts: &mut Fonts, font_s
 
 	// Layouts of the changed rows by their old cells. Rows often repeat (blank lines, closing braces), so the same
 	// cells can have several.
-	let mut moved: FxHashMap<Vec<RenderCell>, Vec<Vec<(u32, Buffer)>>> = FxHashMap::default();
+	let mut moved: FxHashMap<Vec<RenderCell>, Vec<RowLayout>> = FxHashMap::default();
 	for &index in &changed {
 		let row = std::mem::take(&mut rows[index]);
-		moved.entry(row.cells).or_default().push(row.buffers);
+		moved.entry(row.cells).or_default().push(row.layout);
 	}
 
 	for index in changed {
 		let cells = &layer.cells[index * width..(index + 1) * width];
-		let buffers = moved.get_mut(cells).and_then(Vec::pop).unwrap_or_else(|| {
-			segments(cells, |text| fonts.covers(text))
+		let layout = moved.get_mut(cells).and_then(Vec::pop).unwrap_or_else(|| RowLayout {
+			buffers: segments(cells, |text| fonts.covers(text))
 				.iter()
 				.map(|segment| (segment.col, layout(fonts, font_size, cell, segment)))
-				.collect()
+				.collect(),
+			glyphs: builtin_glyphs(cells, cell),
 		});
-		rows[index] = Row { cells: cells.to_vec(), buffers };
+		rows[index] = Row { cells: cells.to_vec(), layout };
 	}
+}
+
+/// A custom glyph, relative to the row, for each cell nvui draws itself, in the cell's text color
+fn builtin_glyphs(cells: &[RenderCell], cell: CellSize) -> Vec<CustomGlyph> {
+	(0..)
+		.zip(cells)
+		.filter_map(|(col, render_cell)| {
+			let c = builtin_char(&render_cell.text)?;
+			let [_, r, g, b] = render_cell.style.foreground.to_be_bytes();
+			Some(CustomGlyph {
+				id: u16::try_from(u32::from(c)).ok()?,
+				left: (col * cell.width) as f32,
+				top: 0.0,
+				width: cell.width as f32,
+				height: cell.height as f32,
+				color: Some(Color::rgb(r, g, b)),
+				snap_to_physical_pixel: true,
+				metadata: 0,
+			})
+		})
+		.collect()
 }
 
 /// A run of cells laid out together, starting at column `col`
@@ -197,7 +246,8 @@ fn segments(cells: &[RenderCell], covered: impl Fn(&str) -> bool) -> Vec<Segment
 		match cell.text.as_str() {
 			// The right half of a double-width character: the next segment starts after it.
 			"" => continue,
-			" " => {
+			// Cells nvui draws itself count as spaces for the text.
+			text if text == " " || is_builtin(text) => {
 				spaces += 1;
 				continue;
 			},
@@ -347,6 +397,30 @@ mod tests {
 	}
 
 	#[test]
+	fn builtin_characters_count_as_spaces() {
+		// A status line: text, a powerline separator, more text; and a box border with its contents
+		let row = cells(&["a", "\u{E0BC}", "b", "│", " ", "c", "│"], PLAIN);
+		assert_eq!(segments(&row, ascii_only), [segment(0, "a b  c", &[(0..6, PLAIN)])]);
+		assert_eq!(segments(&cells(&["╭", "─", "╮"], PLAIN), ascii_only), []);
+	}
+
+	#[test]
+	fn builtin_characters_get_custom_glyphs() {
+		let row = cells(&["a", "\u{E0BC}", "b", "█"], PLAIN);
+		let glyphs = super::builtin_glyphs(&row, crate::CellSize { width: 8, height: 19 });
+		let placed: Vec<_> = glyphs
+			.iter()
+			.map(|glyph| (glyph.id, glyph.left, glyph.width, glyph.height))
+			.collect();
+		assert_eq!(placed, [(0xE0BC, 8.0, 8.0, 19.0), (0x2588, 24.0, 8.0, 19.0)]);
+		assert!(
+			glyphs
+				.iter()
+				.all(|glyph| glyph.color == Some(glyphon::Color::rgb(0xFF, 0xFF, 0xFF)))
+		);
+	}
+
+	#[test]
 	fn spaces_after_a_segment_end_are_left_out() {
 		let row = cells(&["漢", "", " ", "b"], PLAIN);
 		assert_eq!(segments(&row, |_| true), [segment(0, "漢", &[(0..3, PLAIN)]), segment(3, "b", &[(0..1, PLAIN)])]);
@@ -358,15 +432,15 @@ mod tests {
 		let cell = fonts.cell_size(14.0);
 		let mut rows = Vec::new();
 		update_rows(&mut rows, &column(&["a", "b", "c"]), &mut fonts, 14.0, cell);
-		let laid_out: Vec<_> = rows.iter().map(|row| row.buffers.as_ptr()).collect();
+		let laid_out: Vec<_> = rows.iter().map(|row| row.layout.buffers.as_ptr()).collect();
 
 		// Scrolled by one row: "b" and "c" moved up and keep their buffers, "d" is new.
 		update_rows(&mut rows, &column(&["b", "c", "d"]), &mut fonts, 14.0, cell);
 		let texts: Vec<_> = rows.iter().map(|row| row.cells[0].text.as_str()).collect();
 		assert_eq!(texts, ["b", "c", "d"]);
-		assert_eq!(rows[0].buffers.as_ptr(), laid_out[1]);
-		assert_eq!(rows[1].buffers.as_ptr(), laid_out[2]);
-		assert_eq!(rows[2].buffers.len(), 1);
+		assert_eq!(rows[0].layout.buffers.as_ptr(), laid_out[1]);
+		assert_eq!(rows[1].layout.buffers.as_ptr(), laid_out[2]);
+		assert_eq!(rows[2].layout.buffers.len(), 1);
 	}
 
 	#[test]
@@ -375,10 +449,10 @@ mod tests {
 		let cell = fonts.cell_size(14.0);
 		let mut rows = Vec::new();
 		update_rows(&mut rows, &column(&["a", "}", "}"]), &mut fonts, 14.0, cell);
-		let mut braces = vec![rows[1].buffers.as_ptr(), rows[2].buffers.as_ptr()];
+		let mut braces = vec![rows[1].layout.buffers.as_ptr(), rows[2].layout.buffers.as_ptr()];
 
 		update_rows(&mut rows, &column(&["}", "}", "b"]), &mut fonts, 14.0, cell);
-		let mut moved = vec![rows[0].buffers.as_ptr(), rows[1].buffers.as_ptr()];
+		let mut moved = vec![rows[0].layout.buffers.as_ptr(), rows[1].layout.buffers.as_ptr()];
 		braces.sort();
 		moved.sort();
 		assert_eq!(moved, braces);

@@ -1,3 +1,4 @@
+mod builtin_glyphs;
 mod color;
 mod config;
 mod error;

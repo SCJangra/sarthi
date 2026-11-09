@@ -25,6 +25,8 @@ wgpu = "30"
 glyphon = "0.12"
 rustc-hash = "2"
 bytemuck = { version = "1", features = ["derive"] }
+# Path rasterizer swash uses; draws the characters nvui shapes itself (box drawing, blocks, powerline)
+zeno = "0.3"
 # glyphon's cosmic-text, with the shaping cache: without it, laying out a full screen takes ~20× longer.
 cosmic-text = { version = "0.19", features = ["shape-run-cache"] }
 smol = "2"
