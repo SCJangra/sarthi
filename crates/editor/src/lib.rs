@@ -34,8 +34,11 @@ pub struct Editor {
 	/// The grid the cursor is in
 	cursor_grid: u32,
 
-	/// The `guifont` option, as Neovim sent it
+	/// The `guifont` option, as Neovim sent it, or empty while it's Neovim's default
 	guifont: String,
+
+	/// Neovim's default `guifont`, the first value it sent
+	default_guifont: Option<String>,
 
 	/// Whether anything changed since the last `flush`, so it's drawn on the next one
 	stale: bool,
@@ -98,6 +101,7 @@ impl Editor {
 			cursor: CursorState::default(),
 			cursor_grid: 1,
 			guifont: String::new(),
+			default_guifont: None,
 			stale: false,
 		}
 	}
@@ -107,7 +111,8 @@ impl Editor {
 		self.highlights.defaults().background
 	}
 
-	/// The `guifont` option (`:help 'guifont'`): which fonts to draw text with. Empty unless set.
+	/// The `guifont` option (`:help 'guifont'`): which fonts to draw text with. Empty unless set to something other than
+	/// Neovim's default (a list of common fonts, while nvui has its own default font).
 	pub fn guifont(&self) -> &str {
 		&self.guifont
 	}
@@ -225,10 +230,15 @@ impl Editor {
 			RedrawNotification::HlGroupSet(groups) => self.highlights.set_hl_groups(groups),
 			RedrawNotification::OptionSet(options) => {
 				for option in options {
+					let ("guifont", OptionValue::String(value)) = (option.name.as_str(), option.value) else {
+						continue;
+					};
+					// Neovim sends its default with the options at attach, before the user's config can set one.
+					let default = self.default_guifont.get_or_insert_with(|| value.clone());
+					let value = if value == *default { String::new() } else { value };
+
 					// Other fonts change what's drawn, so a change is drawn with the next flush.
-					if let ("guifont", OptionValue::String(value)) = (option.name.as_str(), option.value)
-						&& value != self.guifont
-					{
+					if value != self.guifont {
 						self.guifont = value;
 						self.stale = true;
 					}
@@ -681,7 +691,9 @@ mod tests {
 	#[test]
 	fn guifont_changes_are_drawn() {
 		let mut editor = screen();
-		flush(&mut editor, vec![]);
+		// Neovim's default comes first, at attach.
+		let default = || option("guifont", OptionValue::String(String::from("Source Code Pro,monospace")));
+		flush(&mut editor, vec![default()]);
 		assert_eq!(editor.guifont(), "");
 
 		let guifont = || option("guifont", OptionValue::String(String::from("Iosevka:h14")));
@@ -691,5 +703,9 @@ mod tests {
 		// The same value again, or another option, changes nothing to draw.
 		assert_eq!(editor.apply(vec![guifont(), RedrawNotification::Flush]), None);
 		assert_eq!(editor.apply(vec![option("linespace", OptionValue::Number(2)), RedrawNotification::Flush]), None);
+
+		// Set back to the default, it counts as unset again.
+		assert!(editor.apply(vec![default(), RedrawNotification::Flush]).is_some());
+		assert_eq!(editor.guifont(), "");
 	}
 }
