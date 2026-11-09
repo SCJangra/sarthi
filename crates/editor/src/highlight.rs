@@ -75,6 +75,12 @@ impl HighlightState {
 		self.groups.extend(groups.into_iter().map(|group| (group.name, group.hl_id)));
 	}
 
+	/// The highlight id of Neovim's UI highlight group `name` (`:help highlight-groups`), or 0, the default highlight,
+	/// until Neovim sends it with `hl_group_set`
+	pub fn group(&self, name: &str) -> u32 {
+		self.groups.get(name).copied().unwrap_or(0)
+	}
+
 	/// The style of cells with highlight `hl_id`. Id 0 is the default highlight: the default colors and no
 	/// styles. An id that hasn't been defined is treated the same way.
 	pub fn resolve(&self, hl_id: u32) -> CellStyle {

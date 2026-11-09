@@ -7,3 +7,6 @@ edition = { workspace = true }
 nvim = { workspace = true }
 renderer = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }

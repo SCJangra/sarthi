@@ -7,8 +7,8 @@ pub mod highlight;
 
 use std::collections::HashMap;
 
-use nvim::RedrawNotification;
-use renderer::Layer;
+use nvim::{CellText, GridCell as NvimGridCell, RedrawNotification};
+use renderer::{CellLayer, Layer};
 
 use crate::compositor::cell_layer;
 use crate::cursor::CursorState;
@@ -18,8 +18,13 @@ use crate::highlight::HighlightState;
 /// Neovim's UI state, kept up to date from its redraw events (`:help ui-events`)
 #[derive(Debug)]
 pub struct Editor {
-	/// Neovim's grids by id. Without multigrid, Neovim draws everything to grid 1.
+	/// Neovim's grids by id (`:help ui-multigrid`). Grid 1 is the screen: it holds what isn't in a window, like
+	/// window separators, status lines and the command line, and the windows' grids are placed on it.
 	grids: HashMap<u32, Grid>,
+
+	/// Where each grid other than grid 1 is shown; grids without one aren't shown yet
+	placements: HashMap<u32, Placement>,
+
 	highlights: HighlightState,
 	cursor: CursorState,
 
@@ -28,6 +33,23 @@ pub struct Editor {
 
 	/// Whether anything changed since the last `flush`, so it's drawn on the next one
 	stale: bool,
+}
+
+/// Where a grid is shown, from Neovim's multigrid events
+#[derive(Debug, Clone, PartialEq)]
+enum Placement {
+	/// A window at a cell of grid 1 (`win_pos`)
+	Tiled { row: u32, col: u32 },
+
+	/// A floating window at a cell of the screen, in Neovim's drawing order of floats (`win_float_pos`)
+	Float { row: u32, col: u32, compindex: u32 },
+
+	/// The message grid, across the screen from `row` down (`msg_set_pos`). When messages scrolled over the windows,
+	/// a line of `separator` goes above them.
+	Message { row: u32, compindex: u32, separator: Option<CellText> },
+
+	/// Not shown, e.g. a window of another tab (`win_hide`)
+	Hidden,
 }
 
 /// What to draw after Neovim finished redrawing
@@ -49,7 +71,8 @@ impl Default for Editor {
 impl Editor {
 	pub fn new() -> Self {
 		Self {
-			grids: HashMap::from([(1, Grid::new(0, 0))]),
+			grids: HashMap::new(),
+			placements: HashMap::new(),
 			highlights: HighlightState::new(),
 			cursor: CursorState::default(),
 			cursor_grid: 1,
@@ -74,11 +97,19 @@ impl Editor {
 
 	fn apply_event(&mut self, event: RedrawNotification) -> Option<Redraw> {
 		match event {
+			// A grid starts with its first resize.
 			RedrawNotification::GridResize(resizes) => {
 				for resize in resizes {
-					self.update_grid(resize.grid, "grid_resize", |grid| {
-						grid.resize(resize.width as usize, resize.height as usize);
-					});
+					let grid = self.grids.entry(resize.grid).or_insert_with(|| Grid::new(0, 0));
+					grid.resize(resize.width as usize, resize.height as usize);
+					self.stale = true;
+				}
+			},
+			RedrawNotification::GridDestroy(destroys) => {
+				for destroy in destroys {
+					self.grids.remove(&destroy.grid);
+					self.placements.remove(&destroy.grid);
+					self.stale = true;
 				}
 			},
 			RedrawNotification::GridClear(clears) => {
@@ -107,6 +138,38 @@ impl Editor {
 						grid.set_cursor(goto.row as usize, goto.col as usize);
 					});
 					self.cursor_grid = goto.grid;
+				}
+			},
+			RedrawNotification::WinPos(positions) => {
+				for position in positions {
+					self.place(position.grid, Placement::Tiled { row: position.start_row, col: position.start_col });
+				}
+			},
+			RedrawNotification::WinFloatPos(positions) => {
+				for position in positions {
+					let (row, col, compindex) = (position.screen_row, position.screen_col, position.compindex);
+					self.place(position.grid, Placement::Float { row, col, compindex });
+				}
+			},
+			RedrawNotification::WinHide(hides) => {
+				for hide in hides {
+					self.place(hide.grid, Placement::Hidden);
+				}
+			},
+			RedrawNotification::WinClose(closes) => {
+				for close in closes {
+					self.place(close.grid, Placement::Hidden);
+				}
+			},
+			RedrawNotification::MsgSetPos(positions) => {
+				for position in positions {
+					let separator = CellText::from(&position.sep_char)
+						.ok()
+						.filter(|_| position.scrolled && position.row > 0);
+					self.place(
+						position.grid,
+						Placement::Message { row: position.row, compindex: position.compindex, separator },
+					);
 				}
 			},
 			RedrawNotification::HlAttrDefine(attrs) => {
@@ -155,33 +218,103 @@ impl Editor {
 		self.stale = true;
 	}
 
-	/// The layers to draw, if anything changed since the last `flush`: one per grid, by id
+	fn place(&mut self, grid: u32, placement: Placement) {
+		self.placements.insert(grid, placement);
+		self.stale = true;
+	}
+
+	/// The layers to draw, if anything changed since the last `flush`
 	fn flush(&mut self) -> Option<Redraw> {
 		if !std::mem::take(&mut self.stale) {
 			return None;
 		}
+		Some(Redraw { background: self.background(), layers: self.layers() })
+	}
 
-		let mut ids: Vec<u32> = self.grids.keys().copied().collect();
-		ids.sort_unstable();
-		let layers = ids
-			.into_iter()
-			.map(|id| {
-				let cursor = (id == self.cursor_grid).then(|| self.cursor.style()).flatten();
-				Layer::Cells(cell_layer(id, &self.grids[&id], &self.highlights, cursor))
-			})
-			.collect();
+	/// The layers in Neovim's drawing order, like its own compositor (`:help ui-event-win_float_pos`): grid 1, the
+	/// windows on it, then floating windows and the message grid by `compindex`. Grids that aren't placed aren't
+	/// drawn.
+	fn layers(&self) -> Vec<Layer> {
+		let screen_height = self.grids.get(&1).map_or(0, |grid| grid.height as u32);
 
-		Some(Redraw { background: self.background(), layers })
+		// Sort keys: tiled windows before floats and messages, then by Neovim's drawing order or grid id
+		let mut placed: Vec<(u32, &Placement)> =
+			self.placements.iter().map(|(&id, placement)| (id, placement)).collect();
+		placed.retain(|(id, placement)| *placement != &Placement::Hidden && self.grids.contains_key(id));
+		placed.sort_by_key(|&(id, placement)| match placement {
+			Placement::Tiled { .. } | Placement::Hidden => (0, id),
+			Placement::Float { compindex, .. } | Placement::Message { compindex, .. } => (1 + compindex, id),
+		});
+
+		let mut layers = Vec::with_capacity(placed.len() + 2);
+		if self.grids.contains_key(&1) {
+			layers.push(self.layer(1, 0, 0));
+		}
+		for (id, placement) in placed {
+			match placement {
+				Placement::Tiled { row, col } | Placement::Float { row, col, .. } => {
+					layers.push(self.layer(id, *row, *col))
+				},
+				Placement::Message { row, separator, .. } => {
+					if let Some(separator) = separator {
+						layers.push(self.separator(*row - 1, *separator));
+					}
+					let mut layer = self.layer(id, *row, 0);
+					// The message grid is as tall as the screen; only its rows from `row` down show.
+					clip_rows(&mut layer, screen_height.saturating_sub(*row));
+					layers.push(layer);
+				},
+				Placement::Hidden => (),
+			}
+		}
+		layers
+	}
+
+	/// Grid `id` as a layer at `row`, `col`, with the cursor if it's in this grid
+	fn layer(&self, id: u32, row: u32, col: u32) -> Layer {
+		let cursor = (id == self.cursor_grid).then(|| self.cursor.style()).flatten();
+		let mut layer = cell_layer(id, &self.grids[&id], &self.highlights, cursor);
+		(layer.row, layer.col) = (row, col);
+		Layer::Cells(layer)
+	}
+
+	/// The line the TUI draws above messages that scrolled over the windows: `separator` across the screen at `row`,
+	/// in the `MsgSeparator` highlight
+	fn separator(&self, row: u32, separator: CellText) -> Layer {
+		let width = self.grids.get(&1).map_or(0, |grid| grid.width);
+		let mut line = Grid::new(width, 1);
+		let hl_id = Some(self.highlights.group("MsgSeparator"));
+		line.set_line(0, 0, &[NvimGridCell { text: separator, hl_id, repeat: Some(width as u32) }]);
+
+		let mut layer = cell_layer(0, &line, &self.highlights, None);
+		// An id no grid has: Neovim's grid ids are 32-bit.
+		(layer.id, layer.row) = (u64::from(u32::MAX) + 1, row);
+		Layer::Cells(layer)
+	}
+}
+
+/// Keeps the first `height` rows of `layer`, if it's taller
+fn clip_rows(layer: &mut Layer, height: u32) {
+	let Layer::Cells(CellLayer { height: layer_height, width, cells, cursor, .. }) = layer;
+	if *layer_height <= height {
+		return;
+	}
+	*layer_height = height;
+	cells.truncate((height * *width) as usize);
+	if cursor.is_some_and(|cursor| cursor.row >= height) {
+		*cursor = None;
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use nvim::{
-		CellText, DefaultColorsSetEvent, GridCell, GridCursorGotoEvent, GridLineEvent, GridResizeEvent,
-		RedrawNotification,
+		CellText, DefaultColorsSetEvent, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
+		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, RedrawNotification,
+		WinCloseEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent,
 	};
-	use renderer::Layer;
+	use renderer::{CellLayer, Layer};
+	use serde::de::IgnoredAny;
 
 	use super::{Editor, Redraw};
 
@@ -272,5 +405,140 @@ mod tests {
 
 		// Moving the cursor is a change to draw.
 		assert!(editor.apply(vec![goto(1, 0, 0), RedrawNotification::Flush]).is_some());
+	}
+
+	fn win_pos(grid: u32, row: u32, col: u32) -> RedrawNotification {
+		let position = WinPosEvent { grid, win: IgnoredAny, start_row: row, start_col: col, width: 0, height: 0 };
+		RedrawNotification::WinPos(vec![position])
+	}
+
+	fn float(grid: u32, row: u32, col: u32, compindex: u32) -> RedrawNotification {
+		RedrawNotification::WinFloatPos(vec![WinFloatPosEvent {
+			grid,
+			win: IgnoredAny,
+			anchor: String::from("NW"),
+			anchor_grid: 1,
+			anchor_row: f64::from(row),
+			anchor_col: f64::from(col),
+			mouse_enabled: true,
+			zindex: 50,
+			compindex,
+			screen_row: row,
+			screen_col: col,
+		}])
+	}
+
+	fn messages(row: u32, scrolled: bool, compindex: u32) -> RedrawNotification {
+		let sep_char = String::from("─");
+		RedrawNotification::MsgSetPos(vec![MsgSetPosEvent { grid: 3, row, scrolled, sep_char, zindex: 200, compindex }])
+	}
+
+	/// Where each layer of `redraw` is: (id, row, col, height)
+	fn placement(redraw: &Redraw) -> Vec<(u64, u32, u32, u32)> {
+		redraw
+			.layers
+			.iter()
+			.map(|Layer::Cells(layer)| (layer.id, layer.row, layer.col, layer.height))
+			.collect()
+	}
+
+	fn flush(editor: &mut Editor, mut events: Vec<RedrawNotification>) -> Redraw {
+		events.push(RedrawNotification::Flush);
+		editor.apply(events).expect("something changed")
+	}
+
+	/// An editor with a 10×5 screen (grid 1) and a 4×3 window grid 2 that isn't placed yet
+	fn screen() -> Editor {
+		let mut editor = Editor::new();
+		editor.apply(vec![colors(), resize(1, 10, 5), resize(2, 4, 3)]);
+		editor
+	}
+
+	#[test]
+	fn windows_are_drawn_once_placed() {
+		let mut editor = screen();
+		assert_eq!(placement(&flush(&mut editor, vec![])), [(1, 0, 0, 5)]);
+		assert_eq!(placement(&flush(&mut editor, vec![win_pos(2, 0, 6)])), [(1, 0, 0, 5), (2, 0, 6, 3)]);
+	}
+
+	#[test]
+	fn floats_come_after_windows_in_neovims_order() {
+		let mut editor = screen();
+		let events = vec![
+			resize(6, 3, 2),
+			resize(7, 3, 2),
+			resize(9, 2, 2),
+			float(6, 1, 1, 2),
+			float(7, 2, 2, 1),
+			win_pos(9, 3, 0),
+			win_pos(2, 0, 6),
+		];
+		let ids: Vec<u64> = placement(&flush(&mut editor, events)).iter().map(|(id, ..)| *id).collect();
+		assert_eq!(ids, [1, 2, 9, 7, 6]);
+	}
+
+	#[test]
+	fn message_grid_shows_from_its_row_down() {
+		let mut editor = screen();
+		// Like Neovim, the message grid is as large as the screen.
+		editor.apply(vec![resize(3, 10, 5), line(3, 0, "hello")]);
+		assert_eq!(placement(&flush(&mut editor, vec![messages(4, false, 1)])), [(1, 0, 0, 5), (3, 4, 0, 1)]);
+
+		// Scrolled up over the windows: a separator line in MsgSeparator above the messages
+		let separator = HlAttrs { foreground: Some(0x00FF00), ..crate::highlight::tests::attrs() };
+		let events = vec![
+			RedrawNotification::HlAttrDefine(vec![HlAttrDefineEvent {
+				id: 9,
+				rgb_attr: separator.clone(),
+				cterm_attr: separator,
+				info: vec![],
+			}]),
+			RedrawNotification::HlGroupSet(vec![HlGroupSetEvent { name: String::from("MsgSeparator"), hl_id: 9 }]),
+			messages(2, true, 1),
+		];
+		let redraw = flush(&mut editor, events);
+		let separator_id = u64::from(u32::MAX) + 1;
+		assert_eq!(placement(&redraw), [(1, 0, 0, 5), (separator_id, 1, 0, 1), (3, 2, 0, 3)]);
+
+		let Layer::Cells(CellLayer { cells, .. }) = &redraw.layers[1];
+		assert!(
+			cells
+				.iter()
+				.all(|cell| cell.text.as_str() == "─" && cell.style.foreground == 0x00FF00)
+		);
+		assert_eq!(cells.len(), 10);
+	}
+
+	#[test]
+	fn hidden_closed_and_destroyed_grids() {
+		let mut editor = screen();
+		flush(&mut editor, vec![win_pos(2, 0, 6)]);
+
+		let hide = RedrawNotification::WinHide(vec![WinHideEvent { grid: 2 }]);
+		assert_eq!(placement(&flush(&mut editor, vec![hide])), [(1, 0, 0, 5)]);
+		assert_eq!(placement(&flush(&mut editor, vec![win_pos(2, 1, 6)])), [(1, 0, 0, 5), (2, 1, 6, 3)]);
+
+		let close = RedrawNotification::WinClose(vec![WinCloseEvent { grid: 2 }]);
+		let destroy = RedrawNotification::GridDestroy(vec![GridDestroyEvent { grid: 2 }]);
+		assert_eq!(placement(&flush(&mut editor, vec![close, destroy])), [(1, 0, 0, 5)]);
+		// A destroyed grid takes events no more.
+		assert_eq!(editor.apply(vec![line(2, 0, "x"), RedrawNotification::Flush]), None);
+	}
+
+	#[test]
+	fn cursor_is_drawn_in_its_window() {
+		let mut editor = screen();
+		let redraw = flush(&mut editor, vec![win_pos(2, 0, 6), line(2, 0, "ab"), goto(2, 0, 1)]);
+		let colors = |index: usize| {
+			let Layer::Cells(layer) = &redraw.layers[index];
+			layer
+				.cells
+				.iter()
+				.map(|cell| (cell.style.foreground, cell.background))
+				.collect::<Vec<_>>()
+		};
+		// The block cursor swaps the colors of "b" in the window, and nothing in grid 1.
+		assert_eq!(colors(1)[..2], [(FG, BG), (BG, FG)]);
+		assert!(colors(0).iter().all(|&cell| cell == (FG, BG)));
 	}
 }

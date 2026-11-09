@@ -115,10 +115,8 @@ impl App {
 	fn attach_ui(&mut self, window: &Window) -> Result<(), Error> {
 		let size = self.grid_size(window);
 
-		// TODO: Enable `ext_multigrid` once grids can be composited. With it, Neovim draws each window
-		// to its own grid and positions them with `win_pos` and related events; without it,
-		// everything is drawn to grid 1.
-		let options = NvimUiOptions { ext_multigrid: false, ..NvimUiOptions::all() };
+		// With multigrid, Neovim draws each window to its own grid, and nvui places and stacks them.
+		let options = NvimUiOptions::all();
 		let params = NvimUiAttachParams { width: size.width, height: size.height, options };
 
 		smol::block_on(self.nvim.ui_attach(params))?;
