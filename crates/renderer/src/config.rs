@@ -1,3 +1,5 @@
+use crate::Motion;
+
 #[derive(Debug, Clone)]
 pub struct RendererConfig {
 	/// Color the window is cleared to, as `0xRRGGBB` in sRGB, until [`crate::Renderer::set_clear_color`]
@@ -7,6 +9,9 @@ pub struct RendererConfig {
 	pub present_mode: Option<wgpu::PresentMode>,
 	pub prefer_srgb_surface_format: bool,
 	pub desired_maximum_frame_latency: u32,
+
+	/// How text that scrolled moves to its new place, until [`crate::Renderer::set_scroll_motion`] changes it
+	pub scroll: Motion,
 }
 
 impl Default for RendererConfig {
@@ -17,6 +22,7 @@ impl Default for RendererConfig {
 			present_mode: Some(wgpu::PresentMode::Fifo),
 			prefer_srgb_surface_format: true,
 			desired_maximum_frame_latency: 2,
+			scroll: Motion::Spring { stiffness: 400.0, damping: 32.0 },
 		}
 	}
 }

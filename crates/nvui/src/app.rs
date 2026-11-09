@@ -11,7 +11,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 
 use editor::Editor;
 use nvim::{Nvim, NvimNotification, NvimUiAttachParams, NvimUiOptions, NvimUiTryResizeParams};
-use renderer::{Fonts, Frame, Layer, Renderer, RendererConfig, RendererError};
+use renderer::{Fonts, Frame, Renderer, RendererConfig, RendererError};
 
 use crate::error::Error;
 use crate::input::neovim_keys;
@@ -36,14 +36,10 @@ pub struct App {
 	pub error: Option<Error>,
 }
 
-/// A window and what it shows
+/// A window and its renderer, which holds what the window shows
 pub struct WindowState {
 	pub window: Arc<Window>,
 	pub renderer: Renderer,
-
-	/// Layers from the last redraw Neovim finished, so events that arrive before the window redraws can't show
-	/// half-applied
-	pub layers: Vec<Layer>,
 }
 
 #[derive(Debug)]
@@ -91,7 +87,7 @@ impl App {
 	fn create_window(&mut self, event_loop: &ActiveEventLoop) -> Result<Arc<Window>, Error> {
 		let window = Arc::new(event_loop.create_window(Self::window_attributes(&self.config))?);
 		let renderer = Self::create_renderer(&window, self.editor.background())?;
-		self.window = Some(WindowState { window: window.clone(), renderer, layers: Vec::new() });
+		self.window = Some(WindowState { window: window.clone(), renderer });
 		Ok(window)
 	}
 
@@ -137,13 +133,14 @@ impl App {
 		Ok(())
 	}
 
-	/// Applies Neovim's redraws, and shows the result once Neovim finished one.
+	/// Applies Neovim's redraws, and shows the result once Neovim finished one, so events that arrive before the window
+	/// redraws can't show half-applied.
 	fn handle_nvim_notification(&mut self, notification: NvimNotification) {
 		let NvimNotification::Redraw(events) = notification else { return };
 		let (Some(redraw), Some(state)) = (self.editor.apply(events), &mut self.window) else { return };
 
 		state.renderer.set_clear_color(redraw.background);
-		state.layers = redraw.layers;
+		state.renderer.set_layers(redraw.layers);
 		state.window.request_redraw();
 	}
 
@@ -164,13 +161,17 @@ impl App {
 		let window = &state.window;
 		let frame = state
 			.renderer
-			.render(&mut self.fonts, &state.layers, font_size, || window.pre_present_notify());
+			.render(&mut self.fonts, font_size, || window.pre_present_notify());
 
 		match frame {
+			// Text that slides after scrolling moves on in the next frame.
+			Ok(Frame::Presented) if state.renderer.is_animating() => state.window.request_redraw(),
 			Ok(Frame::Presented | Frame::Skipped) => (),
 			Ok(Frame::Reconfigured) => state.window.request_redraw(),
 			Err(RendererError::SurfaceLost) => {
+				let layers = state.renderer.layers().to_vec();
 				state.renderer = Self::create_renderer(&state.window, background)?;
+				state.renderer.set_layers(layers);
 				state.window.request_redraw();
 			},
 			Err(err) => tracing::error!("Redraw renderer error: {err:?}"),

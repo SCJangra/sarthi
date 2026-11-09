@@ -36,6 +36,7 @@ pub fn cell_layer(id: u32, grid: &Grid, highlights: &HighlightState, cursor: Opt
 		height: grid.height as u32,
 		cells,
 		cursor: None,
+		scroll: None,
 	};
 	if let Some(style) = cursor {
 		draw_cursor(&mut layer, grid.cursor_row, grid.cursor_col, style, highlights);

@@ -25,6 +25,23 @@ pub struct CellLayer {
 	/// A cursor drawn over the text as a bar. A block cursor is drawn by giving the cells under it the cursor's
 	/// colors instead.
 	pub cursor: Option<BarCursor>,
+
+	/// How the text moved since the layer was last shown, so the renderer can slide it to its new place
+	pub scroll: Option<Scroll>,
+}
+
+/// Text of a [`CellLayer`] that moved since the layer was last shown, e.g. a window that scrolled
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Scroll {
+	/// Rows the text moved up, or down if negative
+	pub rows: i32,
+
+	/// The cells that scroll, in cells from the layer's top-left corner: rows `top..bottom` and columns
+	/// `left..right`. The rest, like a winbar or a border, stays in place.
+	pub top: u32,
+	pub bottom: u32,
+	pub left: u32,
+	pub right: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

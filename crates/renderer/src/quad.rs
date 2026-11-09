@@ -310,7 +310,16 @@ mod tests {
 	/// Rectangles of a bar cursor at (row 2, col 3) of a layer placed at (row 1, col 1), with 8×19 px cells
 	fn bar_rect(orientation: BarOrientation, width: u32, percentage: u32) -> [f32; 4] {
 		let cursor = BarCursor { row: 2, col: 3, width, orientation, percentage, color: 0xFFFFFF };
-		let layer = CellLayer { id: 1, row: 1, col: 1, width: 10, height: 5, cells: Vec::new(), cursor: Some(cursor) };
+		let layer = CellLayer {
+			id: 1,
+			row: 1,
+			col: 1,
+			width: 10,
+			height: 5,
+			cells: Vec::new(),
+			cursor: Some(cursor),
+			scroll: None,
+		};
 		let mut quads = Vec::new();
 		bar_cursor(&mut quads, &layer, CellSize { width: 8, height: 19 }, false);
 		quads[0].rect
@@ -330,7 +339,7 @@ mod tests {
 		for cell in &mut cells[2..5] {
 			cell.decoration = decoration;
 		}
-		let layer = CellLayer { id: 1, row: 1, col: 0, width: 6, height: 1, cells, cursor: None };
+		let layer = CellLayer { id: 1, row: 1, col: 0, width: 6, height: 1, cells, cursor: None, scroll: None };
 		let lines = LineMetrics { underline_top: 17.0, thickness: 1.0, strikeout_top: 10.0, strikeout_thickness: 1.0 };
 		let mut quads = Vec::new();
 		cell_decorations(&mut quads, &layer, CellSize { width: 8, height: 19 }, lines, false);

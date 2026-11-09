@@ -9,13 +9,14 @@ use glyphon::{
 use rustc_hash::FxHashMap;
 
 use crate::builtin_glyphs::{builtin_char, is_builtin, rasterize};
-use crate::{CellLayer, CellSize, Fonts, Layer, RenderCell, RendererError, TextStyle};
+use crate::renderer::Piece;
+use crate::{CellLayer, CellSize, Fonts, RenderCell, RendererError, TextStyle};
 
 /// Draws the text of cell layers with glyphon
 pub(crate) struct TextPipeline {
 	atlas: TextAtlas,
 
-	/// One per layer, by its index in the frame: glyphon prepares and draws each separately, so layers can be drawn
+	/// One per piece, by its index in the frame: glyphon prepares and draws each separately, so pieces can be drawn
 	/// one after another
 	renderers: Vec<TextRenderer>,
 
@@ -25,8 +26,8 @@ pub(crate) struct TextPipeline {
 	/// Font size the rows were laid out at
 	font_size: f32,
 
-	/// Laid-out rows of each cell layer, by layer id
-	layers: HashMap<u64, Vec<Row>>,
+	/// Laid-out rows of each piece, by layer id and whether it's a scrolling region
+	layers: HashMap<(u64, bool), Vec<Row>>,
 
 	/// Text areas need a buffer; this empty one carries a row's custom glyphs.
 	empty: Buffer,
@@ -65,7 +66,7 @@ impl TextPipeline {
 		}
 	}
 
-	/// Lays out the rows of `layers` that changed since the last frame, with text of `font_size` physical
+	/// Lays out the rows of `pieces` that changed since the last frame, with text of `font_size` physical
 	/// pixels, and uploads their glyphs.
 	pub(crate) fn prepare(
 		&mut self,
@@ -73,7 +74,7 @@ impl TextPipeline {
 		queue: &wgpu::Queue,
 		resolution: Resolution,
 		fonts: &mut Fonts,
-		layers: &[Layer],
+		pieces: &[Piece],
 		font_size: f32,
 	) -> Result<(), RendererError> {
 		let cell = fonts.cell_size(font_size);
@@ -82,24 +83,23 @@ impl TextPipeline {
 			self.layers.clear();
 		}
 
-		// Forget layers that are gone, e.g. closed floating windows.
-		self.layers
-			.retain(|id, _| layers.iter().any(|Layer::Cells(layer)| layer.id == *id));
-		for Layer::Cells(layer) in layers {
-			update_rows(self.layers.entry(layer.id).or_default(), layer, fonts, font_size, cell);
+		// Forget pieces that are gone, e.g. closed floating windows.
+		self.layers.retain(|key, _| pieces.iter().any(|piece| key_of(piece) == *key));
+		for piece in pieces {
+			update_rows(self.layers.entry(key_of(piece)).or_default(), &piece.layer, fonts, font_size, cell);
 		}
 
 		self.viewport.update(queue, resolution);
 
 		// Custom glyphs are the cells nvui draws itself, rasterized once per size.
 		let thickness = fonts.line_metrics(font_size).thickness;
-		for (index, Layer::Cells(layer)) in layers.iter().enumerate() {
+		for (index, piece) in pieces.iter().enumerate() {
 			if index == self.renderers.len() {
 				let renderer = TextRenderer::new(&mut self.atlas, device, wgpu::MultisampleState::default(), None);
 				self.renderers.push(renderer);
 			}
 
-			let text_areas = text_areas(&self.layers[&layer.id], layer, cell, &self.empty);
+			let text_areas = text_areas(&self.layers[&key_of(piece)], piece, cell, &self.empty);
 			self.renderers[index].prepare_with_custom(
 				device,
 				queue,
@@ -118,7 +118,7 @@ impl TextPipeline {
 		Ok(())
 	}
 
-	/// Draws the text of the layer at `index` in the frame last prepared.
+	/// Draws the text of the piece at `index` in the frame last prepared.
 	pub(crate) fn render(&self, pass: &mut wgpu::RenderPass<'_>, index: usize) -> Result<(), RendererError> {
 		if let Some(renderer) = self.renderers.get(index) {
 			renderer.render(&self.atlas, &self.viewport, pass)?;
@@ -132,28 +132,35 @@ impl TextPipeline {
 	}
 }
 
-/// The text areas of `layer`, whose rows are laid out in `rows`: a segment of text each, and the custom glyphs of
+/// Identifies the laid-out rows of `piece` across frames
+fn key_of(piece: &Piece) -> (u64, bool) {
+	(piece.layer.id, piece.region)
+}
+
+/// The text areas of `piece`, whose rows are laid out in `rows`: a segment of text each, and the custom glyphs of
 /// each row in an `empty` buffer
 fn text_areas<'a>(
 	rows: &'a [Row],
-	layer: &CellLayer,
+	piece: &Piece,
 	cell: CellSize,
 	empty: &'a Buffer,
 ) -> impl Iterator<Item = TextArea<'a>> {
-	let (left, top) = (layer.col * cell.width, layer.row * cell.height);
-	// Clipped to the layer, so e.g. a wide fallback glyph can't spill out of a floating window
+	let left = (piece.layer.col * cell.width) as f32;
+	let top = (piece.layer.row * cell.height) as f32 + piece.offset;
+	// Clipped like the rest of the piece, so e.g. a wide fallback glyph can't spill out of a floating window
+	let [clip_left, clip_top, width, height] = piece.clip;
 	let bounds = TextBounds {
-		left: left as i32,
-		top: top as i32,
-		right: (left + layer.width * cell.width) as i32,
-		bottom: (top + layer.height * cell.height) as i32,
+		left: clip_left as i32,
+		top: clip_top as i32,
+		right: (clip_left + width) as i32,
+		bottom: (clip_top + height) as i32,
 	};
 
 	rows.iter().zip(0..).flat_map(move |(row, y)| {
 		let area = move |col: u32, buffer, custom_glyphs| TextArea {
 			buffer,
-			left: (left + col * cell.width) as f32,
-			top: (top + y * cell.height) as f32,
+			left: left + (col * cell.width) as f32,
+			top: top + (y * cell.height) as f32,
 			scale: 1.0,
 			bounds,
 			default_color: Color::rgb(0xFF, 0xFF, 0xFF),
@@ -356,6 +363,7 @@ mod tests {
 			height: rows.len() as u32,
 			cells: cells(rows, PLAIN),
 			cursor: None,
+			scroll: None,
 		}
 	}
 

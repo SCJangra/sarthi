@@ -1,10 +1,13 @@
+use std::borrow::Cow;
 use std::ops::Range;
+use std::time::Instant;
 
 use crate::color::wgpu_color;
 use crate::font::LineMetrics;
 use crate::quad::{Quad, QuadPipeline, bar_cursor, cell_backgrounds, cell_decorations};
+use crate::scroll::ScrollAnimations;
 use crate::text::TextPipeline;
-use crate::{CellLayer, CellSize, Fonts, Layer, RendererConfig, RendererError};
+use crate::{CellLayer, CellSize, Fonts, Layer, Motion, RendererConfig, RendererError};
 
 pub struct Renderer {
 	surface: wgpu::Surface<'static>,
@@ -14,6 +17,10 @@ pub struct Renderer {
 	clear_color: wgpu::Color,
 	quads: QuadPipeline,
 	text: TextPipeline,
+
+	/// What to draw, and the text sliding in it after scrolling
+	layers: Vec<Layer>,
+	scrolls: ScrollAnimations,
 
 	/// Quads of the current frame, layer by layer, and each layer's ranges of them; kept to reuse the allocations
 	frame_quads: Vec<Quad>,
@@ -123,6 +130,8 @@ impl Renderer {
 			clear_color,
 			quads,
 			text,
+			layers: Vec::new(),
+			scrolls: ScrollAnimations::new(renderer_config.scroll),
 			frame_quads: Vec::new(),
 			layer_quads: Vec::new(),
 		})
@@ -139,15 +148,36 @@ impl Renderer {
 		self.clear_color = wgpu_color(rgb, self.config.format.is_srgb());
 	}
 
-	/// Draws `layers` on the clear color, in order, with text of `font_size` physical pixels. Laying out text
-	/// needs `fonts`, which all renderers share.
+	/// Shows `layers` from the next frame on, drawn in order so later ones cover earlier ones. Text that scrolled
+	/// since the layers shown until now slides to its new place.
+	pub fn set_layers(&mut self, layers: Vec<Layer>) {
+		self.scrolls.update(&self.layers, &layers, Instant::now());
+		self.layers = layers;
+	}
+
+	/// Sets how text that scrolls moves to its new place, from the next scroll on
+	pub fn set_scroll_motion(&mut self, motion: Motion) {
+		self.scrolls.set_motion(motion);
+	}
+
+	/// The layers shown, as last set
+	pub fn layers(&self) -> &[Layer] {
+		&self.layers
+	}
+
+	/// Whether text is still sliding, so the window should be drawn again
+	pub fn is_animating(&self) -> bool {
+		self.scrolls.is_animating(Instant::now())
+	}
+
+	/// Draws the layers on the clear color, with text of `font_size` physical pixels. Laying out text needs `fonts`,
+	/// which all renderers share.
 	///
 	/// `pre_present` runs right before the frame is handed to the window system, and only if it is, e.g. for
 	/// winit's `Window::pre_present_notify`.
 	pub fn render(
 		&mut self,
 		fonts: &mut Fonts,
-		layers: &[Layer],
 		font_size: f32,
 		pre_present: impl FnOnce(),
 	) -> Result<Frame, RendererError> {
@@ -165,17 +195,20 @@ impl Renderer {
 			wgpu::CurrentSurfaceTexture::Validation => return Err(RendererError::SurfaceValidation),
 		};
 
-		let resolution = glyphon::Resolution { width: self.config.width, height: self.config.height };
-		self.text
-			.prepare(&self.device, &self.queue, resolution, fonts, layers, font_size)?;
-
 		let (cell, lines, srgb) =
 			(fonts.cell_size(font_size), fonts.line_metrics(font_size), self.config.format.is_srgb());
+		let surface = (self.config.width, self.config.height);
+		let pieces = pieces(&self.layers, &self.scrolls, cell, surface, Instant::now());
+
+		let resolution = glyphon::Resolution { width: self.config.width, height: self.config.height };
+		self.text
+			.prepare(&self.device, &self.queue, resolution, fonts, &pieces, font_size)?;
+
 		self.frame_quads.clear();
 		self.layer_quads.clear();
-		for Layer::Cells(layer) in layers {
+		for piece in &pieces {
 			self.layer_quads
-				.push(layer_quads(&mut self.frame_quads, layer, cell, lines, srgb));
+				.push(layer_quads(&mut self.frame_quads, piece, cell, lines, srgb));
 		}
 		self.quads
 			.prepare(&self.device, &self.queue, self.config.width, self.config.height, &self.frame_quads);
@@ -233,21 +266,75 @@ pub enum Frame {
 	Reconfigured,
 }
 
+/// A cell layer as drawn in a frame: a whole layer, or the scrolling region of one whose text slides, drawn over it
+pub(crate) struct Piece<'a> {
+	pub layer: Cow<'a, CellLayer>,
+
+	/// Whether this is a scrolling region, which keeps its laid-out rows apart from its layer's
+	pub region: bool,
+
+	/// Pixels the layer is drawn below its row, or above if negative
+	pub offset: f32,
+
+	/// What's drawn outside this rectangle of the window is cut off: left, top, width, height in pixels
+	pub clip: [u32; 4],
+}
+
+/// The pieces to draw `layers` at `now`, in order, on a `surface` of width × height pixels
+fn pieces<'a>(
+	layers: &'a [Layer],
+	scrolls: &ScrollAnimations,
+	cell: CellSize,
+	surface: (u32, u32),
+	now: Instant,
+) -> Vec<Piece<'a>> {
+	// Cells to pixels, cut to the surface: a scissor rectangle can't reach outside it
+	let clip = |col: u32, row: u32, width: u32, height: u32| {
+		let (left, top) = ((col * cell.width).min(surface.0), (row * cell.height).min(surface.1));
+		let (right, bottom) =
+			(((col + width) * cell.width).min(surface.0), ((row + height) * cell.height).min(surface.1));
+		[left, top, right - left, bottom - top]
+	};
+
+	let mut pieces = Vec::with_capacity(layers.len());
+	for Layer::Cells(layer) in layers {
+		let whole = clip(layer.col, layer.row, layer.width, layer.height);
+		pieces.push(Piece { layer: Cow::Borrowed(layer), region: false, offset: 0.0, clip: whole });
+
+		if let Some(region) = scrolls.region(layer, now) {
+			let clip = clip(region.layer.col, region.layer.row, region.layer.width, region.height);
+			// Whole pixels keep the text sharp.
+			let offset = (region.offset * cell.height as f32).round();
+			pieces.push(Piece { layer: Cow::Owned(region.layer), region: true, offset, clip });
+		}
+	}
+	pieces
+}
+
 /// A layer's ranges of the frame's quads: its backgrounds, drawn under its text, and its decorations and bar cursor,
-/// drawn over it
+/// drawn over it; and the rectangle they and the text are cut to
 struct LayerQuads {
 	under_text: Range<u32>,
 	over_text: Range<u32>,
+	clip: [u32; 4],
 }
 
-/// Adds the quads of `layer` to `quads`
-fn layer_quads(quads: &mut Vec<Quad>, layer: &CellLayer, cell: CellSize, lines: LineMetrics, srgb: bool) -> LayerQuads {
-	let start = quads.len() as u32;
+/// Adds the quads of `piece` to `quads`
+fn layer_quads(quads: &mut Vec<Quad>, piece: &Piece, cell: CellSize, lines: LineMetrics, srgb: bool) -> LayerQuads {
+	let layer = &piece.layer;
+	let start = quads.len();
 	cell_backgrounds(quads, layer, cell, srgb);
-	let middle = quads.len() as u32;
+	let middle = quads.len();
 	cell_decorations(quads, layer, cell, lines, srgb);
 	bar_cursor(quads, layer, cell, srgb);
-	LayerQuads { under_text: start..middle, over_text: middle..quads.len() as u32 }
+	for quad in &mut quads[start..] {
+		quad.rect[1] += piece.offset;
+	}
+	LayerQuads {
+		under_text: start as u32..middle as u32,
+		over_text: middle as u32..quads.len() as u32,
+		clip: piece.clip,
+	}
 }
 
 /// Draws the layers one after another, each with its backgrounds, text, then decorations and cursor, so a later
@@ -259,6 +346,8 @@ fn draw_layers(
 	layers: &[LayerQuads],
 ) -> Result<(), RendererError> {
 	for (index, layer) in layers.iter().enumerate() {
+		let [left, top, width, height] = layer.clip;
+		pass.set_scissor_rect(left, top, width, height);
 		quads.render(pass, layer.under_text.clone());
 		text.render(pass, index)?;
 		quads.render(pass, layer.over_text.clone());
@@ -268,19 +357,31 @@ fn draw_layers(
 
 #[cfg(test)]
 mod tests {
+	use std::time::Instant;
+
 	use arrayvec::ArrayString;
 
-	use super::{draw_layers, layer_quads};
+	use super::{draw_layers, layer_quads, pieces};
 	use crate::quad::QuadPipeline;
+	use crate::scroll::ScrollAnimations;
 	use crate::text::TextPipeline;
-	use crate::{CellLayer, Decoration, Fonts, Layer, RenderCell, TextStyle};
+	use crate::{CellLayer, Decoration, Fonts, Layer, RenderCell, RendererConfig, TextStyle};
 
 	/// A one-cell layer at the top-left corner showing `text` in white on `background`
 	fn cell(id: u64, text: &str, background: u32) -> Layer {
 		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
 		let cell =
 			RenderCell { text: ArrayString::from(text).unwrap(), style, background, decoration: Decoration::default() };
-		Layer::Cells(CellLayer { id, row: 0, col: 0, width: 1, height: 1, cells: vec![cell], cursor: None })
+		Layer::Cells(CellLayer {
+			id,
+			row: 0,
+			col: 0,
+			width: 1,
+			height: 1,
+			cells: vec![cell],
+			cursor: None,
+			scroll: None,
+		})
 	}
 
 	/// Draws `layers` like the renderer does, into an 8×19 texture, and returns the pixel in the middle of the cell, or
@@ -308,14 +409,16 @@ mod tests {
 			let font_size = 14.0;
 			let (cell, lines) = (fonts.cell_size(font_size), fonts.line_metrics(font_size));
 			let mut text = TextPipeline::new(&device, &queue, format);
+			let scrolls = ScrollAnimations::new(RendererConfig::default().scroll);
+			let pieces = pieces(layers, &scrolls, cell, (width, height), Instant::now());
 			let resolution = glyphon::Resolution { width, height };
-			text.prepare(&device, &queue, resolution, &mut fonts, layers, font_size)
+			text.prepare(&device, &queue, resolution, &mut fonts, &pieces, font_size)
 				.unwrap();
 
 			let mut quads = Vec::new();
-			let ranges: Vec<_> = layers
+			let ranges: Vec<_> = pieces
 				.iter()
-				.map(|Layer::Cells(layer)| layer_quads(&mut quads, layer, cell, lines, false))
+				.map(|piece| layer_quads(&mut quads, piece, cell, lines, false))
 				.collect();
 			let mut pipeline = QuadPipeline::new(&device, format);
 			pipeline.prepare(&device, &queue, width, height, &quads);
