@@ -6,10 +6,7 @@ use std::{io, thread};
 use flume::{Receiver, Sender, WeakSender};
 
 use crate::rpc::frame::FrameReader;
-use crate::{
-	IncomingRpcMessage, NvimNotification, OutgoingRpcMessage, RpcError, RpcMethod, RpcRequest,
-	RpcResponse,
-};
+use crate::{IncomingRpcMessage, NvimNotification, OutgoingRpcMessage, RpcError, RpcMethod, RpcRequest, RpcResponse};
 
 /// A general msgpack RPC client
 pub struct RpcClient {
@@ -196,8 +193,7 @@ impl RpcClient {
 			return Err(RpcError::RequestDropped);
 		}
 
-		let req =
-			OutgoingRpcMessage::Request(RpcRequest { id, method: M::METHOD.to_string(), params });
+		let req = OutgoingRpcMessage::Request(RpcRequest { id, method: M::METHOD.to_string(), params });
 		let sent = rmp_serde::to_vec_named(&req)
 			.map_err(RpcError::from)
 			.and_then(|req| self.request.send(req).map_err(|_| RpcError::SendRequest));
@@ -386,8 +382,8 @@ mod tests {
 
 		let client = Arc::new(client);
 		let caller = client.clone();
-		let response = within_5s(move || caller.call::<NvimEval>(["1 + 1".into()]))
-			.expect("response after bad message was lost");
+		let response =
+			within_5s(move || caller.call::<NvimEval>(["1 + 1".into()])).expect("response after bad message was lost");
 
 		assert_eq!(response.unwrap(), rmpv::Value::from(2));
 
@@ -398,7 +394,6 @@ mod tests {
 		}])]);
 		assert_eq!(notifications.try_recv().unwrap(), expected);
 		assert!(notifications.try_recv().is_err());
-
 	}
 
 	#[test]
@@ -438,13 +433,13 @@ mod tests {
 		let (reader, pipe) = io::pipe().unwrap();
 		let (client, notifications) = RpcClient::start(reader, CloseOnWrite(Some(pipe)));
 
-		let response = within_5s(move || client.call::<NvimEval>(["1 + 1".into()])).expect("pending call hung after disconnect");
+		let response =
+			within_5s(move || client.call::<NvimEval>(["1 + 1".into()])).expect("pending call hung after disconnect");
 
 		assert!(matches!(response, Err(RpcError::RequestDropped)), "unexpected response: {response:?}");
 		assert!(matches!(
 			notifications.recv_timeout(Duration::from_secs(5)),
 			Err(flume::RecvTimeoutError::Disconnected)
 		));
-
 	}
 }

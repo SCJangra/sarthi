@@ -6,10 +6,16 @@ pub enum OutgoingRpcMessage<T> {
 	Request(RpcRequest<T>),
 
 	/// A call Neovim doesn't reply to. It reports errors from such calls with `nvim_error_event`.
-	Notification { method: &'static str, params: T },
+	Notification {
+		method: &'static str,
+		params: T,
+	},
 
 	/// Failed response to a request from the server
-	ErrorResponse { id: u32, message: String },
+	ErrorResponse {
+		id: u32,
+		message: String,
+	},
 }
 
 #[derive(Debug)]
@@ -99,38 +105,27 @@ mod ser_de {
 		where
 			A: SeqAccess<'de>,
 		{
-			let msg_type =
-				seq.next_element::<u8>()?.ok_or_else(|| DeError::invalid_length(0, &self))?;
+			let msg_type = seq.next_element::<u8>()?.ok_or_else(|| DeError::invalid_length(0, &self))?;
 
 			match msg_type {
 				0 => {
-					let id = seq
-						.next_element::<u32>()?
-						.ok_or_else(|| DeError::invalid_length(1, &self))?;
+					let id = seq.next_element::<u32>()?.ok_or_else(|| DeError::invalid_length(1, &self))?;
 
-					let method = seq
-						.next_element::<String>()?
-						.ok_or_else(|| DeError::invalid_length(2, &self))?;
+					let method = seq.next_element::<String>()?.ok_or_else(|| DeError::invalid_length(2, &self))?;
 
-					let params = seq
-						.next_element::<T>()?
-						.ok_or_else(|| DeError::invalid_length(3, &self))?;
+					let params = seq.next_element::<T>()?.ok_or_else(|| DeError::invalid_length(3, &self))?;
 
 					Ok(IncomingRpcMessage::Request(RpcRequest { id, method, params }))
 				},
 				1 => {
-					let id = seq
-						.next_element::<u32>()?
-						.ok_or_else(|| DeError::invalid_length(1, &self))?;
+					let id = seq.next_element::<u32>()?.ok_or_else(|| DeError::invalid_length(1, &self))?;
 
 					let error = seq
 						.next_element::<rmpv::Value>()?
 						.ok_or_else(|| DeError::invalid_length(2, &self))?;
 
 					if error == rmpv::Value::Nil {
-						let result = seq
-							.next_element::<T>()?
-							.ok_or_else(|| DeError::invalid_length(3, &self))?;
+						let result = seq.next_element::<T>()?.ok_or_else(|| DeError::invalid_length(3, &self))?;
 
 						Ok(IncomingRpcMessage::Response(RpcResponse { id, result: Ok(result) }))
 					} else {
@@ -180,16 +175,15 @@ mod tests {
 		});
 
 		let req_bytes = vec![
-			0x94, 0x00, 0x0A, 0xA4, 0x74, 0x65, 0x73, 0x74, 0x93, 0x01, 0xA3, 0x61, 0x62, 0x63,
-			0x91, 0xA3, 0x64, 0x65, 0x66,
+			0x94, 0x00, 0x0A, 0xA4, 0x74, 0x65, 0x73, 0x74, 0x93, 0x01, 0xA3, 0x61, 0x62, 0x63, 0x91, 0xA3, 0x64, 0x65,
+			0x66,
 		];
 
 		let req_serialized = rmp_serde::to_vec_named(&req).unwrap();
 
 		assert_eq!(req_serialized, req_bytes);
 
-		let req_deserialized: IncomingRpcMessage<Params> =
-			rmp_serde::from_slice(&req_bytes).unwrap();
+		let req_deserialized: IncomingRpcMessage<Params> = rmp_serde::from_slice(&req_bytes).unwrap();
 
 		match (req_deserialized, req) {
 			(IncomingRpcMessage::Request(req_deserialized), OutgoingRpcMessage::Request(req)) => {
@@ -222,17 +216,14 @@ mod tests {
 
 	#[test]
 	fn de_notification() {
-		let expected = IncomingRpcMessage::<()>::Notification(NvimNotification::Redraw(vec![
-			RedrawNotification::GridResize(vec![GridResizeEvent {
-				grid: 1,
-				width: 10,
-				height: 10,
-			}]),
-		]));
+		let expected =
+			IncomingRpcMessage::<()>::Notification(NvimNotification::Redraw(vec![RedrawNotification::GridResize(
+				vec![GridResizeEvent { grid: 1, width: 10, height: 10 }],
+			)]));
 
 		let notification = vec![
-			0x93, 0x02, 0xA6, 0x72, 0x65, 0x64, 0x72, 0x61, 0x77, 0x91, 0x92, 0xAB, 0x67, 0x72,
-			0x69, 0x64, 0x5F, 0x72, 0x65, 0x73, 0x69, 0x7A, 0x65, 0x93, 0x01, 0x0A, 0x0A,
+			0x93, 0x02, 0xA6, 0x72, 0x65, 0x64, 0x72, 0x61, 0x77, 0x91, 0x92, 0xAB, 0x67, 0x72, 0x69, 0x64, 0x5F, 0x72,
+			0x65, 0x73, 0x69, 0x7A, 0x65, 0x93, 0x01, 0x0A, 0x0A,
 		];
 
 		let deserialized: IncomingRpcMessage<()> = rmp_serde::from_slice(&notification).unwrap();

@@ -11,13 +11,7 @@ pub struct WindowConfig {
 
 impl Default for WindowConfig {
 	fn default() -> Self {
-		Self {
-			title: String::from("NvUI"),
-			width: 1280,
-			height: 720,
-			resizable: true,
-			font_size: 14.0,
-		}
+		Self { title: String::from("NvUI"), width: 1280, height: 720, resizable: true, font_size: 14.0 }
 	}
 }
 

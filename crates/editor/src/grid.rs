@@ -25,8 +25,7 @@ pub struct Grid {
 
 impl Grid {
 	pub fn new(width: usize, height: usize) -> Self {
-		let mut grid =
-			Self { width: 0, height: 0, cells: Vec::new(), cursor_row: 0, cursor_col: 0 };
+		let mut grid = Self { width: 0, height: 0, cells: Vec::new(), cursor_row: 0, cursor_col: 0 };
 		grid.resize(width, height);
 		grid
 	}

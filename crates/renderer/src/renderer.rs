@@ -100,8 +100,7 @@ impl Renderer {
 				.ok_or(RendererError::NoPresentMode)?,
 		};
 
-		let alpha_mode =
-			capabilities.alpha_modes.first().copied().ok_or(RendererError::NoAlphaMode)?;
+		let alpha_mode = capabilities.alpha_modes.first().copied().ok_or(RendererError::NoAlphaMode)?;
 
 		let config = wgpu::SurfaceConfiguration {
 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -226,10 +225,7 @@ impl Renderer {
 					view: &view,
 					resolve_target: None,
 					depth_slice: None,
-					ops: wgpu::Operations {
-						load: wgpu::LoadOp::Clear(self.clear_color),
-						store: wgpu::StoreOp::Store,
-					},
+					ops: wgpu::Operations { load: wgpu::LoadOp::Clear(self.clear_color), store: wgpu::StoreOp::Store },
 				})],
 				depth_stencil_attachment: None,
 				occlusion_query_set: None,
