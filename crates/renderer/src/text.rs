@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 
 use crate::builtin_glyphs::{builtin_char, is_builtin, rasterize};
 use crate::renderer::Piece;
-use crate::{CellLayer, CellSize, Fonts, RenderCell, RendererError, TextStyle};
+use crate::{CellLayer, CellSize, Fonts, RenderCell, RendererError, TextSize, TextStyle};
 
 /// Draws the text of cell layers with glyphon
 pub(crate) struct TextPipeline {
@@ -23,8 +23,8 @@ pub(crate) struct TextPipeline {
 	viewport: Viewport,
 	swash_cache: SwashCache,
 
-	/// Font size and fonts (their generation) the rows were laid out with
-	font_size: f32,
+	/// Text size and fonts (their generation) the rows were laid out with
+	size: TextSize,
 	fonts: u32,
 
 	/// Laid-out rows of each piece, by layer id and whether it's a scrolling region
@@ -61,15 +61,15 @@ impl TextPipeline {
 			renderers: Vec::new(),
 			viewport: Viewport::new(device, &cache),
 			swash_cache: SwashCache::new(),
-			font_size: 0.0,
+			size: TextSize::new(0.0),
 			fonts: 0,
 			layers: HashMap::new(),
 			empty: Buffer::new_empty(Metrics::new(1.0, 1.0)),
 		}
 	}
 
-	/// Lays out the rows of `pieces` that changed since the last frame, with text of `font_size` physical
-	/// pixels, and uploads their glyphs.
+	/// Lays out the rows of `pieces` that changed since the last frame, with text of `size`, and uploads their
+	/// glyphs.
 	pub(crate) fn prepare(
 		&mut self,
 		device: &wgpu::Device,
@@ -77,24 +77,24 @@ impl TextPipeline {
 		resolution: Resolution,
 		fonts: &mut Fonts,
 		pieces: &[Piece],
-		font_size: f32,
+		size: TextSize,
 	) -> Result<(), RendererError> {
-		let cell = fonts.cell_size(font_size);
-		if (font_size, fonts.generation) != (self.font_size, self.fonts) {
-			(self.font_size, self.fonts) = (font_size, fonts.generation);
+		let cell = fonts.cell_size(size);
+		if (size, fonts.generation) != (self.size, self.fonts) {
+			(self.size, self.fonts) = (size, fonts.generation);
 			self.layers.clear();
 		}
 
 		// Forget pieces that are gone, e.g. closed floating windows.
 		self.layers.retain(|key, _| pieces.iter().any(|piece| key_of(piece) == *key));
 		for piece in pieces {
-			update_rows(self.layers.entry(key_of(piece)).or_default(), &piece.layer, fonts, font_size, cell);
+			update_rows(self.layers.entry(key_of(piece)).or_default(), &piece.layer, fonts, size.font_size, cell);
 		}
 
 		self.viewport.update(queue, resolution);
 
 		// Custom glyphs are the cells nvui draws itself, rasterized once per size.
-		let thickness = fonts.line_metrics(font_size).thickness;
+		let thickness = fonts.line_metrics(size).thickness;
 		for (index, piece) in pieces.iter().enumerate() {
 			if index == self.renderers.len() {
 				let renderer = TextRenderer::new(&mut self.atlas, device, wgpu::MultisampleState::default(), None);
@@ -347,7 +347,7 @@ fn layout(fonts: &mut Fonts, font_size: f32, cell: CellSize, segment: &Segment) 
 mod tests {
 	use arrayvec::ArrayString;
 
-	use super::{CellLayer, Fonts, RenderCell, Segment, TextStyle, segments, update_rows};
+	use super::{CellLayer, Fonts, RenderCell, Segment, TextSize, TextStyle, segments, update_rows};
 	use crate::Decoration;
 
 	const PLAIN: TextStyle = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
@@ -492,7 +492,7 @@ mod tests {
 	#[test]
 	fn moved_rows_keep_their_layout() {
 		let mut fonts = Fonts::new();
-		let cell = fonts.cell_size(14.0);
+		let cell = fonts.cell_size(TextSize::new(14.0));
 		let mut rows = Vec::new();
 		update_rows(&mut rows, &column(&["a", "b", "c"]), &mut fonts, 14.0, cell);
 		let laid_out: Vec<_> = rows.iter().map(|row| row.layout.buffers.as_ptr()).collect();
@@ -509,7 +509,7 @@ mod tests {
 	#[test]
 	fn repeated_rows_each_keep_a_layout() {
 		let mut fonts = Fonts::new();
-		let cell = fonts.cell_size(14.0);
+		let cell = fonts.cell_size(TextSize::new(14.0));
 		let mut rows = Vec::new();
 		update_rows(&mut rows, &column(&["a", "}", "}"]), &mut fonts, 14.0, cell);
 		let mut braces = vec![rows[1].layout.buffers.as_ptr(), rows[2].layout.buffers.as_ptr()];
@@ -529,7 +529,7 @@ mod tests {
 			eprintln!("skipped: Iosevka isn't installed");
 			return;
 		}
-		let cell = fonts.cell_size(16.0);
+		let cell = fonts.cell_size(TextSize::new(16.0));
 
 		// Iosevka is often installed without a Bold (700) face, only Regular and Heavy. Bold text must still be
 		// drawn in Iosevka, not in another family that has a Bold face.

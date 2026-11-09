@@ -26,6 +26,22 @@ pub struct CellSize {
 	pub height: u32,
 }
 
+/// How large text is drawn, in physical pixels
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextSize {
+	pub font_size: f32,
+
+	/// Added to the height of each row, or taken from it if negative (Neovim's `linespace`)
+	pub line_space: i32,
+}
+
+impl TextSize {
+	/// Text of `font_size` pixels, without line space
+	pub fn new(font_size: f32) -> Self {
+		Self { font_size, line_space: 0 }
+	}
+}
+
 /// Which fonts to draw text with
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FontChoice {
@@ -146,28 +162,29 @@ impl Fonts {
 		self.generation = self.generation.wrapping_add(1);
 	}
 
-	/// Size of a grid cell for text of `font_size` physical pixels. The width is the advance of `M`, and the
-	/// height fits the font's ascent, descent and line gap. Both are whole pixels, so cells line up with the
-	/// pixel grid: the width is rounded, and the height rounded up so descenders aren't cut off.
-	pub fn cell_size(&self, font_size: f32) -> CellSize {
+	/// Size of a grid cell for text of `size`. The width is the advance of `M`, and the height fits the font's ascent,
+	/// descent and line gap, plus the line space. Both are whole pixels, so cells line up with the pixel grid: the
+	/// width is rounded, and the font's height rounded up so descenders aren't cut off.
+	pub fn cell_size(&self, size: TextSize) -> CellSize {
+		let font_height = (self.em.cell_height * size.font_size).ceil() as i64;
 		CellSize {
-			width: ((self.em.cell_width * font_size).round() as u32).max(1),
-			height: ((self.em.cell_height * font_size).ceil() as u32).max(1),
+			width: ((self.em.cell_width * size.font_size).round() as u32).max(1),
+			height: (font_height + i64::from(size.line_space)).clamp(1, i64::from(u32::MAX)) as u32,
 		}
 	}
 
 	/// Distance of the baseline from the top of a cell, like cosmic-text places it: the font's ascent and descent
-	/// are centered in the line.
-	fn baseline(&self, font_size: f32) -> f32 {
-		let cell_height = self.cell_size(font_size).height as f32;
+	/// are centered in the line, so line space goes half above the text and half below.
+	fn baseline(&self, size: TextSize) -> f32 {
+		let (cell_height, font_size) = (self.cell_size(size).height as f32, size.font_size);
 		(cell_height - (self.em.ascent + self.em.descent) * font_size) / 2.0 + self.em.ascent * font_size
 	}
 
-	/// Where underlines and strikethroughs go in a cell, for text of `font_size` physical pixels
-	pub(crate) fn line_metrics(&self, font_size: f32) -> LineMetrics {
+	/// Where underlines and strikethroughs go in a cell, for text of `size`
+	pub(crate) fn line_metrics(&self, size: TextSize) -> LineMetrics {
 		let em = &self.em;
-		let cell_height = self.cell_size(font_size).height as f32;
-		let baseline = self.baseline(font_size);
+		let (cell_height, font_size) = (self.cell_size(size).height as f32, size.font_size);
+		let baseline = self.baseline(size);
 
 		// Whole pixels, so lines are sharp, and inside the cell
 		let line = |(offset, thickness): (f32, f32)| {
@@ -319,16 +336,16 @@ mod tests {
 	use glyphon::fontdb::{Family, Query, Style, Weight};
 	use glyphon::{Attrs, Buffer, Metrics, Shaping};
 
-	use super::{BUNDLED, CellSize, FontChoice, FontError, Fonts, LineMetrics};
+	use super::{BUNDLED, CellSize, FontChoice, FontError, Fonts, LineMetrics, TextSize};
 
 	#[test]
 	fn cell_size() {
 		let fonts = Fonts::new();
 		// JetBrains Mono: 600 units wide, ascent 1020, descent 300, no line gap, 1000 units per em.
 		assert_eq!((fonts.em.cell_width, fonts.em.cell_height), (0.6, 1.32));
-		assert_eq!(fonts.cell_size(14.0), CellSize { width: 8, height: 19 });
-		assert_eq!(fonts.cell_size(28.0), CellSize { width: 17, height: 37 });
-		assert_eq!(fonts.cell_size(0.0), CellSize { width: 1, height: 1 });
+		assert_eq!(fonts.cell_size(TextSize::new(14.0)), CellSize { width: 8, height: 19 });
+		assert_eq!(fonts.cell_size(TextSize::new(28.0)), CellSize { width: 17, height: 37 });
+		assert_eq!(fonts.cell_size(TextSize::new(0.0)), CellSize { width: 1, height: 1 });
 	}
 
 	#[test]
@@ -340,25 +357,40 @@ mod tests {
 		// At 14 px the baseline is 14.54 px from the top of a 19 px cell.
 		let expected =
 			LineMetrics { underline_top: 17.0, thickness: 1.0, strikeout_top: 10.0, strikeout_thickness: 1.0 };
-		assert_eq!(fonts.line_metrics(14.0), expected);
+		assert_eq!(fonts.line_metrics(TextSize::new(14.0)), expected);
 
 		// Lines stay inside the cell, at least 1 px thick.
-		let tiny = fonts.line_metrics(1.0);
+		let tiny = fonts.line_metrics(TextSize::new(1.0));
 		assert!(tiny.thickness >= 1.0 && tiny.underline_top + tiny.thickness <= 2.0);
 	}
 
 	#[test]
 	fn baseline_matches_cosmic_text() {
 		let mut fonts = Fonts::new();
-		for font_size in [14.0, 28.0] {
-			let cell = fonts.cell_size(font_size);
+		for (font_size, line_space) in [(14.0, 0), (28.0, 0), (14.0, 5), (14.0, -3)] {
+			let size = TextSize { font_size, line_space };
+			let cell = fonts.cell_size(size);
 			let mut buffer = Buffer::new(&mut fonts.system, Metrics::new(font_size, cell.height as f32));
 			buffer.set_text("x", &Attrs::new().family(glyphon::Family::Monospace), Shaping::Advanced, None);
 			buffer.shape_until_scroll(&mut fonts.system, false);
 
 			let line_y = buffer.layout_runs().next().unwrap().line_y;
-			assert!((line_y - fonts.baseline(font_size)).abs() < 0.01, "{line_y} at {font_size} px");
+			assert!((line_y - fonts.baseline(size)).abs() < 0.01, "{line_y} at {size:?}");
 		}
+	}
+
+	#[test]
+	fn line_space() {
+		let fonts = Fonts::new();
+		let size = |line_space| TextSize { font_size: 14.0, line_space };
+		assert_eq!(fonts.cell_size(size(4)), CellSize { width: 8, height: 23 });
+		assert_eq!(fonts.cell_size(size(-5)), CellSize { width: 8, height: 14 });
+		// A cell is at least a pixel tall.
+		assert_eq!(fonts.cell_size(size(-100)).height, 1);
+
+		// The space goes half above the text and half below, and the underline moves with the text.
+		let (plain, spaced) = (fonts.line_metrics(size(0)), fonts.line_metrics(size(4)));
+		assert_eq!(spaced.underline_top - plain.underline_top, 2.0);
 	}
 
 	#[test]
@@ -413,7 +445,7 @@ mod tests {
 		}
 
 		// Measured from DejaVu Sans Mono: 1233 of 2048 units wide
-		assert_eq!(fonts.cell_size(14.0).width, 8);
+		assert_eq!(fonts.cell_size(TextSize::new(14.0)).width, 8);
 		assert!((fonts.em.cell_width - 1233.0 / 2048.0).abs() < 1e-6);
 		assert_eq!(fonts.family(Some(0)), "DejaVu Sans Mono");
 		assert_eq!(fonts.face_of("a"), Some(0));

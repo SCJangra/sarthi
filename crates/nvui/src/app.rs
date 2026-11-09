@@ -14,7 +14,7 @@ use nvim::{
 	Nvim, NvimClientInfo, NvimClientVersion, NvimMessage, NvimNotification, NvimRequest, NvimUiAttachParams,
 	NvimUiOptions, NvimUiTryResizeParams,
 };
-use renderer::{FontChoice, Fonts, Frame, Renderer, RendererConfig, RendererError};
+use renderer::{FontChoice, Fonts, Frame, Renderer, RendererConfig, RendererError, TextSize};
 
 use crate::clipboard::{self, Clipboard, Copied, Register};
 use crate::error::Error;
@@ -117,14 +117,14 @@ impl App {
 		Ok(smol::block_on(Renderer::with_config(window.clone(), size.width, size.height, config))?)
 	}
 
-	/// Font size in `window`, in physical pixels
-	fn font_size(&self, window: &Window) -> f32 {
-		self.font_size * window.scale_factor() as f32
+	/// Size of text in `window`, in physical pixels
+	fn text_size(&self, window: &Window) -> TextSize {
+		TextSize::new(self.font_size * window.scale_factor() as f32)
 	}
 
 	/// Number of grid cells that fit in `window`
 	fn grid_size(&self, window: &Window) -> GridSize {
-		let cell_size = self.fonts.cell_size(self.font_size(window));
+		let cell_size = self.fonts.cell_size(self.text_size(window));
 		GridSize::fit(window.inner_size(), cell_size)
 	}
 
@@ -239,15 +239,13 @@ impl App {
 
 	fn redraw(&mut self) -> Result<(), Error> {
 		let background = self.editor.background();
+		let Some(size) = self.window.as_ref().map(|state| self.text_size(&state.window)) else { return Ok(()) };
 		let Some(state) = &mut self.window else { return Ok(()) };
-		let font_size = self.font_size * state.window.scale_factor() as f32;
 
 		// Lets winit pace redraws to the display on Wayland (frame callbacks), so frames aren't drawn faster than
 		// they can be shown: with FIFO presentation, the extra frames queued up and made resizing lag.
 		let window = &state.window;
-		let frame = state
-			.renderer
-			.render(&mut self.fonts, font_size, || window.pre_present_notify());
+		let frame = state.renderer.render(&mut self.fonts, size, || window.pre_present_notify());
 
 		match frame {
 			// Text that slides after scrolling moves on in the next frame.

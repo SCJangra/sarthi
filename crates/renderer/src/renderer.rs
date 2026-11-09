@@ -7,7 +7,7 @@ use crate::font::LineMetrics;
 use crate::quad::{Quad, QuadPipeline, bar_cursor, cell_backgrounds, cell_decorations};
 use crate::scroll::ScrollAnimations;
 use crate::text::TextPipeline;
-use crate::{CellLayer, CellSize, Fonts, Layer, Motion, RendererConfig, RendererError};
+use crate::{CellLayer, CellSize, Fonts, Layer, Motion, RendererConfig, RendererError, TextSize};
 
 pub struct Renderer {
 	surface: wgpu::Surface<'static>,
@@ -169,15 +169,15 @@ impl Renderer {
 		self.scrolls.is_animating(Instant::now())
 	}
 
-	/// Draws the layers on the clear color, with text of `font_size` physical pixels. Laying out text needs `fonts`,
-	/// which all renderers share.
+	/// Draws the layers on the clear color, with text of `size`. Laying out text needs `fonts`, which all renderers
+	/// share.
 	///
 	/// `pre_present` runs right before the frame is handed to the window system, and only if it is, e.g. for
 	/// winit's `Window::pre_present_notify`.
 	pub fn render(
 		&mut self,
 		fonts: &mut Fonts,
-		font_size: f32,
+		size: TextSize,
 		pre_present: impl FnOnce(),
 	) -> Result<Frame, RendererError> {
 		let (frame, suboptimal) = match self.surface.get_current_texture() {
@@ -194,14 +194,12 @@ impl Renderer {
 			wgpu::CurrentSurfaceTexture::Validation => return Err(RendererError::SurfaceValidation),
 		};
 
-		let (cell, lines, srgb) =
-			(fonts.cell_size(font_size), fonts.line_metrics(font_size), self.config.format.is_srgb());
+		let (cell, lines, srgb) = (fonts.cell_size(size), fonts.line_metrics(size), self.config.format.is_srgb());
 		let surface = (self.config.width, self.config.height);
 		let pieces = pieces(&self.layers, &self.scrolls, cell, surface, Instant::now());
 
 		let resolution = glyphon::Resolution { width: self.config.width, height: self.config.height };
-		self.text
-			.prepare(&self.device, &self.queue, resolution, fonts, &pieces, font_size)?;
+		self.text.prepare(&self.device, &self.queue, resolution, fonts, &pieces, size)?;
 
 		self.frame_quads.clear();
 		self.layer_quads.clear();
@@ -361,7 +359,7 @@ mod tests {
 	use crate::quad::QuadPipeline;
 	use crate::scroll::ScrollAnimations;
 	use crate::text::TextPipeline;
-	use crate::{CellLayer, Decoration, Fonts, Layer, RenderCell, RendererConfig, TextStyle};
+	use crate::{CellLayer, Decoration, Fonts, Layer, RenderCell, RendererConfig, TextSize, TextStyle};
 
 	/// A one-cell layer at the top-left corner showing `text` in white on `background`
 	fn cell(id: u64, text: &str, background: u32) -> Layer {
@@ -402,14 +400,13 @@ mod tests {
 			});
 
 			let mut fonts = Fonts::new();
-			let font_size = 14.0;
-			let (cell, lines) = (fonts.cell_size(font_size), fonts.line_metrics(font_size));
+			let size = TextSize::new(14.0);
+			let (cell, lines) = (fonts.cell_size(size), fonts.line_metrics(size));
 			let mut text = TextPipeline::new(&device, &queue, format);
 			let scrolls = ScrollAnimations::new(RendererConfig::default().scroll);
 			let pieces = pieces(layers, &scrolls, cell, (width, height), Instant::now());
 			let resolution = glyphon::Resolution { width, height };
-			text.prepare(&device, &queue, resolution, &mut fonts, &pieces, font_size)
-				.unwrap();
+			text.prepare(&device, &queue, resolution, &mut fonts, &pieces, size).unwrap();
 
 			let mut quads = Vec::new();
 			let ranges: Vec<_> = pieces
