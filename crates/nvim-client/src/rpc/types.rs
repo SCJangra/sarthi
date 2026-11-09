@@ -5,6 +5,9 @@ use super::NvimNotification;
 pub enum OutgoingRpcMessage<T> {
 	Request(RpcRequest<T>),
 
+	/// A call Neovim doesn't reply to. It reports errors from such calls with `nvim_error_event`.
+	Notification { method: &'static str, params: T },
+
 	/// Failed response to a request from the server
 	ErrorResponse { id: u32, message: String },
 }
@@ -58,6 +61,13 @@ mod ser_de {
 					tuple.serialize_element(&req.id)?;
 					tuple.serialize_element(&req.method)?;
 					tuple.serialize_element(&req.params)?;
+					tuple.end()
+				},
+				Self::Notification { method, params } => {
+					let mut tuple = serializer.serialize_tuple(3)?;
+					tuple.serialize_element(&2)?;
+					tuple.serialize_element(method)?;
+					tuple.serialize_element(params)?;
 					tuple.end()
 				},
 				Self::ErrorResponse { id, message } => {
@@ -187,6 +197,17 @@ mod tests {
 			},
 			_ => unreachable!(),
 		};
+	}
+
+	#[test]
+	fn ser_notification() {
+		let notification = OutgoingRpcMessage::Notification { method: "nvim_input", params: ["ix"] };
+
+		// [2, "nvim_input", ["ix"]]
+		let expected =
+			vec![0x93, 0x02, 0xAA, b'n', b'v', b'i', b'm', b'_', b'i', b'n', b'p', b'u', b't', 0x91, 0xA2, b'i', b'x'];
+
+		assert_eq!(rmp_serde::to_vec_named(&notification).unwrap(), expected);
 	}
 
 	#[test]

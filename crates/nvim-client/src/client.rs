@@ -4,7 +4,7 @@ use std::{process, thread};
 use flume::Receiver;
 
 use crate::{
-	Error, NvimNotification, NvimUiAttach, NvimUiAttachParams, NvimUiTryResize,
+	Error, NvimInput, NvimNotification, NvimUiAttach, NvimUiAttachParams, NvimUiSetFocus, NvimUiTryResize,
 	NvimUiTryResizeParams, RpcClient,
 };
 
@@ -52,6 +52,16 @@ impl Nvim {
 
 	pub async fn ui_try_resize(&self, params: NvimUiTryResizeParams) -> Result<rmpv::Value, Error> {
 		self.rpc.call::<NvimUiTryResize>(params).await.map_err(Error::Rpc)
+	}
+
+	/// Types `keys`, in `:help key-notation`, without waiting for Neovim to process them
+	pub fn input(&self, keys: &str) -> Result<(), Error> {
+		self.rpc.notify::<NvimInput>([keys.to_owned()]).map_err(Error::Rpc)
+	}
+
+	/// Tells Neovim whether the UI has focus, for `FocusGained` and `FocusLost` autocommands
+	pub fn ui_set_focus(&self, focused: bool) -> Result<(), Error> {
+		self.rpc.notify::<NvimUiSetFocus>([focused]).map_err(Error::Rpc)
 	}
 }
 

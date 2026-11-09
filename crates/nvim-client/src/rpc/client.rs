@@ -215,6 +215,17 @@ impl RpcClient {
 		res
 	}
 
+	/// Calls `M` without waiting for a reply. Neovim processes it in order with other messages and reports errors
+	/// from it with `nvim_error_event`.
+	pub fn notify<M>(&self, params: M::Params) -> Result<(), RpcError>
+	where
+		M: RpcMethod,
+	{
+		let notification = OutgoingRpcMessage::Notification { method: M::METHOD, params };
+		let notification = rmp_serde::to_vec_named(&notification)?;
+		self.request.send(notification).map_err(|_| RpcError::SendRequest)
+	}
+
 	pub fn subscribe(&self) -> Result<Receiver<NvimNotification>, RpcError> {
 		if self.inner.subscription.load().is_some() {
 			return Err(RpcError::AlreadySubscribed);
@@ -246,7 +257,7 @@ mod tests {
 	use std::time::Duration;
 
 	use crate::{
-		GridCursorGotoEvent, NvimEval, NvimNotification, NvimUiAttach, NvimUiAttachParams, NvimUiOptions,
+		GridCursorGotoEvent, NvimEval, NvimInput, NvimNotification, NvimUiAttach, NvimUiAttachParams, NvimUiOptions,
 		RedrawNotification, RpcClient, RpcError,
 	};
 
@@ -273,6 +284,35 @@ mod tests {
 		let response = smol::block_on(future).unwrap();
 
 		assert_eq!(response, rmpv::Value::from(2));
+
+		client.stop();
+		nvim.kill().unwrap();
+		nvim.wait().unwrap();
+	}
+
+	#[test]
+	fn notify() {
+		let mut nvim = spawn_nvim();
+
+		let stdin = nvim.stdin.take().unwrap();
+		let stdout = nvim.stdout.take().unwrap();
+		let client = RpcClient::start(stdout, stdin);
+
+		// With --embed, Neovim finishes starting up, and only then handles typed keys, once a UI attaches.
+		let attach = NvimUiAttachParams { width: 20, height: 5, options: NvimUiOptions::all() };
+		smol::block_on(client.call::<NvimUiAttach>(attach)).unwrap();
+
+		client.notify::<NvimInput>(["ihello<lt>x<Esc>".into()]).unwrap();
+
+		// nvim_input only queues the keys, and Neovim types them when its event loop gets to it.
+		let typed = rmpv::Value::from("hello<x");
+		let deadline = std::time::Instant::now() + Duration::from_secs(5);
+		let mut line = rmpv::Value::Nil;
+		while line != typed && std::time::Instant::now() < deadline {
+			line = smol::block_on(client.call::<NvimEval>(["getline(1)".into()])).unwrap();
+		}
+
+		assert_eq!(line, typed);
 
 		client.stop();
 		nvim.kill().unwrap();
