@@ -11,6 +11,5 @@ smol = { workspace = true }
 wgpu = { workspace = true }
 winit = { workspace = true }
 thiserror = { workspace = true }
-dashmap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

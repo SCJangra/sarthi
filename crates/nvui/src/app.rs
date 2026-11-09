@@ -1,8 +1,6 @@
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::thread;
 
-use dashmap::DashMap;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
@@ -11,11 +9,8 @@ use winit::event_loop::EventLoopProxy;
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowAttributes, WindowId};
 
-use editor::compositor::cell_layer;
-use editor::cursor::CursorState;
-use editor::grid::Grid;
-use editor::highlight::HighlightState;
-use nvim::{Nvim, NvimNotification, NvimUiAttachParams, NvimUiOptions, NvimUiTryResizeParams, RedrawNotification};
+use editor::Editor;
+use nvim::{Nvim, NvimNotification, NvimUiAttachParams, NvimUiOptions, NvimUiTryResizeParams};
 use renderer::{Fonts, Frame, Layer, Renderer, RendererConfig, RendererError};
 
 use crate::error::Error;
@@ -24,12 +19,11 @@ use crate::windows::{GridSize, WindowConfig};
 
 pub struct App {
 	pub config: WindowConfig,
-	pub window: DashMap<WindowId, Arc<Window>>,
-	pub renderer: DashMap<WindowId, Renderer>,
-	pub grid: DashMap<u32, Grid>,
-	pub grid_window: DashMap<u32, WindowId>,
-	pub highlight_state: HighlightState,
-	pub cursor: CursorState,
+
+	/// The window, once created
+	pub window: Option<WindowState>,
+
+	pub editor: Editor,
 	pub fonts: Fonts,
 	pub nvim: Nvim,
 
@@ -39,15 +33,17 @@ pub struct App {
 	/// Modifier keys held right now, for the keys sent to Neovim
 	pub modifiers: ModifiersState,
 
-	/// Windows showing stale content: their grids changed since the last `flush`, and they're redrawn on the
-	/// next one
-	pub stale_windows: HashSet<WindowId>,
-
-	/// What each window shows: layers built from its grids on the last `flush`, so events that arrive before the
-	/// redraw can't show half-applied
-	pub layers: HashMap<WindowId, Vec<Layer>>,
-
 	pub error: Option<Error>,
+}
+
+/// A window and what it shows
+pub struct WindowState {
+	pub window: Arc<Window>,
+	pub renderer: Renderer,
+
+	/// Layers from the last redraw Neovim finished, so events that arrive before the window redraws can't show
+	/// half-applied
+	pub layers: Vec<Layer>,
 }
 
 #[derive(Debug)]
@@ -75,18 +71,12 @@ impl App {
 
 		Ok(Self {
 			config,
-			window: DashMap::new(),
-			renderer: DashMap::new(),
-			grid: DashMap::new(),
-			grid_window: DashMap::new(),
-			highlight_state: HighlightState::new(),
-			cursor: CursorState::default(),
+			window: None,
+			editor: Editor::new(),
 			fonts: Fonts::new(),
 			nvim,
 			ui_size: GridSize { width: 0, height: 0 },
 			modifiers: ModifiersState::empty(),
-			stale_windows: HashSet::new(),
-			layers: HashMap::new(),
 			error: None,
 		})
 	}
@@ -98,27 +88,17 @@ impl App {
 			.with_resizable(config.resizable)
 	}
 
-	fn create_window(&mut self, event_loop: &ActiveEventLoop, config: &WindowConfig) -> Result<Arc<Window>, Error> {
-		let attributes = Self::window_attributes(config);
-		let window = event_loop.create_window(attributes)?;
-		let window = Arc::new(window);
-		self.window.insert(window.id(), window.clone());
+	fn create_window(&mut self, event_loop: &ActiveEventLoop) -> Result<Arc<Window>, Error> {
+		let window = Arc::new(event_loop.create_window(Self::window_attributes(&self.config))?);
+		let renderer = Self::create_renderer(&window, self.editor.background())?;
+		self.window = Some(WindowState { window: window.clone(), renderer, layers: Vec::new() });
 		Ok(window)
 	}
 
-	fn create_renderer(&mut self, window: &Arc<Window>) -> Result<(), Error> {
+	fn create_renderer(window: &Arc<Window>, background: u32) -> Result<Renderer, Error> {
 		let size = window.inner_size();
-
-		let renderer = smol::block_on(Renderer::with_config(
-			window.clone(),
-			size.width,
-			size.height,
-			RendererConfig { background: self.highlight_state.defaults().background, ..RendererConfig::default() },
-		))?;
-
-		self.renderer.insert(window.id(), renderer);
-
-		Ok(())
+		let config = RendererConfig { background, ..RendererConfig::default() };
+		Ok(smol::block_on(Renderer::with_config(window.clone(), size.width, size.height, config))?)
 	}
 
 	/// Font size in `window`, in physical pixels
@@ -143,8 +123,6 @@ impl App {
 
 		smol::block_on(self.nvim.ui_attach(params))?;
 		self.ui_size = size;
-		self.grid.insert(1, Grid::new(0, 0));
-		self.grid_window.insert(1, window.id());
 		Ok(())
 	}
 
@@ -161,168 +139,41 @@ impl App {
 		Ok(())
 	}
 
+	/// Applies Neovim's redraws, and shows the result once Neovim finished one.
 	fn handle_nvim_notification(&mut self, notification: NvimNotification) {
-		match notification {
-			NvimNotification::Redraw(events) => self.apply_redraw_events(events),
-			NvimNotification::Other { .. } => (),
+		let NvimNotification::Redraw(events) = notification else { return };
+		let (Some(redraw), Some(state)) = (self.editor.apply(events), &mut self.window) else { return };
+
+		state.renderer.set_clear_color(redraw.background);
+		state.layers = redraw.layers;
+		state.window.request_redraw();
+	}
+
+	fn resize_renderer(&mut self) {
+		if let Some(state) = &mut self.window {
+			let size = state.window.inner_size();
+			state.renderer.resize(size.width, size.height);
 		}
 	}
 
-	fn apply_redraw_events(&mut self, events: Vec<RedrawNotification>) {
-		for event in events {
-			match event {
-				RedrawNotification::GridResize(resizes) => {
-					for resize in resizes {
-						let Some(mut grid) = self.grid.get_mut(&resize.grid) else {
-							tracing::warn!("GridResize: Unknown grid {}", resize.grid);
-							continue;
-						};
-						grid.resize(resize.width as usize, resize.height as usize);
-						drop(grid);
-						self.mark_stale(resize.grid);
-					}
-				},
-				RedrawNotification::GridClear(clears) => {
-					for clear in clears {
-						let Some(mut grid) = self.grid.get_mut(&clear.grid) else {
-							tracing::warn!("GridClear: Unknown grid {}", clear.grid);
-							continue;
-						};
-						grid.clear();
-						drop(grid);
-						self.mark_stale(clear.grid);
-					}
-				},
-				RedrawNotification::GridLine(lines) => {
-					for line in lines {
-						let Some(mut grid) = self.grid.get_mut(&line.grid) else {
-							tracing::warn!("GridLine: Unknown grid {}", line.grid);
-							continue;
-						};
-						grid.set_line(line.row as usize, line.col_start as usize, &line.cells);
-						drop(grid);
-						self.mark_stale(line.grid);
-					}
-				},
-				RedrawNotification::GridScroll(scrolls) => {
-					for scroll in scrolls {
-						let Some(mut grid) = self.grid.get_mut(&scroll.grid) else {
-							tracing::warn!("GridScroll: Unknown grid {}", scroll.grid);
-							continue;
-						};
-						let (top, bot) = (scroll.top as usize, scroll.bot as usize);
-						grid.scroll(top, bot, scroll.left as usize, scroll.right as usize, scroll.rows as isize);
-						drop(grid);
-						self.mark_stale(scroll.grid);
-					}
-				},
-				RedrawNotification::GridCursorGoto(cursors) => {
-					for cursor in cursors {
-						let Some(mut grid) = self.grid.get_mut(&cursor.grid) else {
-							tracing::warn!("GridCursorGoto: Unknown grid {}", cursor.grid);
-							continue;
-						};
-						grid.set_cursor(cursor.row as usize, cursor.col as usize);
-						drop(grid);
-						self.mark_stale(cursor.grid);
-					}
-				},
-				RedrawNotification::HlAttrDefine(attrs) => {
-					self.highlight_state.set_attrs(attrs);
-					self.mark_all_stale();
-				},
-				RedrawNotification::DefaultColorsSet(colors) => {
-					self.highlight_state.set_default_colors(colors);
-					let background = self.highlight_state.defaults().background;
-					for mut renderer in self.renderer.iter_mut() {
-						renderer.set_clear_color(background);
-					}
-					self.mark_all_stale();
-				},
-				RedrawNotification::HlGroupSet(groups) => {
-					self.highlight_state.set_hl_groups(groups);
-				},
-				RedrawNotification::ModeInfoSet(sets) => {
-					if let Some(set) = sets.into_iter().last() {
-						self.cursor.set_modes(set.cursor_style_enabled, set.mode_info);
-						self.mark_all_stale();
-					}
-				},
-				RedrawNotification::ModeChange(changes) => {
-					if let Some(change) = changes.last() {
-						self.cursor.set_mode(change.mode_idx as usize);
-						self.mark_all_stale();
-					}
-				},
-				RedrawNotification::BusyStart => {
-					self.cursor.set_hidden(true);
-					self.mark_all_stale();
-				},
-				RedrawNotification::BusyStop => {
-					self.cursor.set_hidden(false);
-					self.mark_all_stale();
-				},
-				RedrawNotification::Flush => self.flush(),
-				_ => (),
-			}
-		}
-	}
+	fn redraw(&mut self) -> Result<(), Error> {
+		let background = self.editor.background();
+		let Some(state) = &mut self.window else { return Ok(()) };
+		let font_size = self.config.font_size * state.window.scale_factor() as f32;
 
-	/// Marks the window showing `grid` as stale, so it's redrawn on the next `flush`
-	fn mark_stale(&mut self, grid: u32) {
-		let Some(window_id) = self.grid_window.get(&grid).map(|entry| *entry.value()) else {
-			tracing::error!("Unknown window for grid {grid}");
-			return;
-		};
-		self.stale_windows.insert(window_id);
-	}
-
-	/// Marks every window as stale, e.g. after highlights changed
-	fn mark_all_stale(&mut self) {
-		self.stale_windows.extend(self.window.iter().map(|entry| *entry.key()));
-	}
-
-	/// Neovim is done redrawing, so its state is consistent: snapshot the grids of the windows that changed and
-	/// redraw them.
-	fn flush(&mut self) {
-		for entry in self.grid_window.iter() {
-			let (grid_id, window_id) = (*entry.key(), *entry.value());
-			if !self.stale_windows.contains(&window_id) {
-				continue;
-			}
-			let (Some(grid), Some(window)) = (self.grid.get(&grid_id), self.window.get(&window_id)) else { continue };
-
-			let layer = cell_layer(grid_id, &grid, &self.highlight_state, self.cursor.style());
-			self.layers.insert(window_id, vec![Layer::Cells(layer)]);
-			window.request_redraw();
-		}
-		self.stale_windows.clear();
-	}
-
-	fn resize_renderer(&mut self, id: WindowId, window: &Window) -> Result<(), Error> {
-		let Some(mut renderer) = self.renderer.get_mut(&id) else { return Ok(()) };
-		let size = window.inner_size();
-
-		renderer.resize(size.width, size.height);
-		Ok(())
-	}
-
-	fn redraw_renderer(&mut self, id: WindowId, window: &Arc<Window>) -> Result<(), Error> {
-		let Some(mut renderer) = self.renderer.get_mut(&id) else { return Ok(()) };
-		// Until the first `flush`, there is nothing to draw but the background.
-		let layers = self.layers.get(&id).map_or(&[][..], Vec::as_slice);
-		let font_size = self.font_size(window);
 		// Lets winit pace redraws to the display on Wayland (frame callbacks), so frames aren't drawn faster than
 		// they can be shown: with FIFO presentation, the extra frames queued up and made resizing lag.
-		let frame = renderer.render(&mut self.fonts, layers, font_size, || window.pre_present_notify());
-		drop(renderer);
+		let window = &state.window;
+		let frame = state
+			.renderer
+			.render(&mut self.fonts, &state.layers, font_size, || window.pre_present_notify());
 
 		match frame {
 			Ok(Frame::Presented | Frame::Skipped) => (),
-			Ok(Frame::Reconfigured) => window.request_redraw(),
+			Ok(Frame::Reconfigured) => state.window.request_redraw(),
 			Err(RendererError::SurfaceLost) => {
-				self.create_renderer(window)?;
-				window.request_redraw();
+				state.renderer = Self::create_renderer(&state.window, background)?;
+				state.window.request_redraw();
 			},
 			Err(err) => tracing::error!("Redraw renderer error: {err:?}"),
 		}
@@ -349,40 +200,21 @@ impl App {
 		self.error.get_or_insert(error);
 		event_loop.exit();
 	}
-
-	fn close_window(&mut self, event_loop: &ActiveEventLoop, id: WindowId) {
-		self.renderer.remove(&id);
-		self.window.remove(&id);
-		self.stale_windows.remove(&id);
-		self.layers.remove(&id);
-
-		if self.window.is_empty() {
-			self.grid.clear();
-			self.grid_window.clear();
-			event_loop.exit();
-		}
-	}
 }
 
 impl ApplicationHandler<AppEvent> for App {
 	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-		if !self.window.is_empty() {
+		if self.window.is_some() {
 			return;
 		}
 
-		let config = self.config.clone();
-		let window = match self.create_window(event_loop, &config) {
+		let window = match self.create_window(event_loop) {
 			Ok(window) => window,
 			Err(error) => {
 				self.exit_with_error(event_loop, error);
 				return;
 			},
 		};
-
-		if let Err(error) = self.create_renderer(&window) {
-			self.exit_with_error(event_loop, error);
-			return;
-		}
 
 		if let Err(error) = self.attach_ui(&window) {
 			self.exit_with_error(event_loop, error);
@@ -397,31 +229,24 @@ impl ApplicationHandler<AppEvent> for App {
 			return;
 		}
 
-		#[rustfmt::skip]
-		let Some(window) = self
-			.window
-			.get(&window_id)
-			.map(|entry| entry.value().clone())
-			 else { return };
+		let Some(window) = self.window.as_ref().map(|state| state.window.clone()) else { return };
+		if window.id() != window_id {
+			return;
+		}
 
 		match event {
 			WindowEvent::CloseRequested => {
-				self.close_window(event_loop, window_id);
+				self.window = None;
+				event_loop.exit();
 			},
 			WindowEvent::Resized(_) => {
-				if let Err(error) = self.resize_renderer(window_id, &window) {
-					self.exit_with_error(event_loop, error);
-					return;
-				}
+				self.resize_renderer();
 				if let Err(error) = self.resize_nvim_ui(&window) {
 					self.exit_with_error(event_loop, error);
 				}
 			},
 			WindowEvent::ScaleFactorChanged { .. } => {
-				if let Err(error) = self.resize_renderer(window_id, &window) {
-					self.exit_with_error(event_loop, error);
-					return;
-				}
+				self.resize_renderer();
 				if let Err(error) = self.resize_nvim_ui(&window) {
 					self.exit_with_error(event_loop, error);
 					return;
@@ -438,7 +263,7 @@ impl ApplicationHandler<AppEvent> for App {
 				}
 			},
 			WindowEvent::RedrawRequested => {
-				if let Err(error) = self.redraw_renderer(window_id, &window) {
+				if let Err(error) = self.redraw() {
 					self.exit_with_error(event_loop, error);
 				}
 			},

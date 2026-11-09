@@ -1295,7 +1295,6 @@ dependencies = [
 name = "nvui"
 version = "0.1.0"
 dependencies = [
- "dashmap",
  "nvui-editor",
  "nvui-nvim-client",
  "nvui-renderer",
@@ -1328,6 +1327,7 @@ version = "0.1.0"
 dependencies = [
  "nvui-nvim-client",
  "nvui-renderer",
+ "tracing",
 ]
 
 [[package]]
