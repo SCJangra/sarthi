@@ -481,7 +481,7 @@ mod tests {
 		RedrawNotification, WinCloseEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent, WinViewportEvent,
 		WinViewportMarginsEvent,
 	};
-	use renderer::{CellLayer, Layer};
+	use renderer::{CellLayer, Cursor, CursorShape, Layer};
 	use serde::de::IgnoredAny;
 
 	use super::{Editor, GridPosition, Redraw};
@@ -563,13 +563,9 @@ mod tests {
 		let events = vec![colors(), resize(1, 2, 1), line(1, 0, "ab"), goto(1, 0, 1), RedrawNotification::Flush];
 		let redraw = editor.apply(events).unwrap();
 		let [Layer::Cells(layer)] = redraw.layers.as_slice() else { panic!("expected one layer") };
-		// A block cursor in the cell's swapped colors, on "b" only
-		let colors: Vec<_> = layer
-			.cells
-			.iter()
-			.map(|cell| (cell.style.foreground, cell.background))
-			.collect();
-		assert_eq!(colors, [(FG, BG), (BG, FG)]);
+		// A block cursor in the cell's swapped colors, on "b"
+		let cursor = Cursor { row: 0, col: 1, width: 1, shape: CursorShape::Block, color: FG, text_color: BG };
+		assert_eq!(layer.cursor, Some(cursor));
 
 		// Moving the cursor is a change to draw.
 		assert!(editor.apply(vec![goto(1, 0, 0), RedrawNotification::Flush]).is_some());
@@ -697,17 +693,12 @@ mod tests {
 	fn cursor_is_drawn_in_its_window() {
 		let mut editor = screen();
 		let redraw = flush(&mut editor, vec![win_pos(2, 0, 6), line(2, 0, "ab"), goto(2, 0, 1)]);
-		let colors = |index: usize| {
+		let cursor = |index: usize| {
 			let Layer::Cells(layer) = &redraw.layers[index];
-			layer
-				.cells
-				.iter()
-				.map(|cell| (cell.style.foreground, cell.background))
-				.collect::<Vec<_>>()
+			layer.cursor.map(|cursor| (cursor.row, cursor.col))
 		};
-		// The block cursor swaps the colors of "b" in the window, and nothing in grid 1.
-		assert_eq!(colors(1)[..2], [(FG, BG), (BG, FG)]);
-		assert!(colors(0).iter().all(|&cell| cell == (FG, BG)));
+		// On "b" in the window, and not in grid 1
+		assert_eq!((cursor(0), cursor(1)), (None, Some((0, 1))));
 	}
 
 	fn viewport(grid: u32, line_count: u32, scroll_delta: i64) -> RedrawNotification {

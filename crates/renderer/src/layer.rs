@@ -22,9 +22,8 @@ pub struct CellLayer {
 	/// Row by row, `width * height` cells
 	pub cells: Vec<RenderCell>,
 
-	/// A cursor drawn over the text as a bar. A block cursor is drawn by giving the cells under it the cursor's
-	/// colors instead.
-	pub cursor: Option<BarCursor>,
+	/// The cursor, drawn over the text where the layer's cells are, even while scrolled text slides
+	pub cursor: Option<Cursor>,
 
 	/// How the text moved since the layer was last shown, so the renderer can slide it to its new place
 	pub scroll: Option<Scroll>,
@@ -88,9 +87,9 @@ pub struct TextStyle {
 	pub italic: bool,
 }
 
-/// A thin cursor in a cell of a [`CellLayer`], drawn over the text
+/// The cursor in a cell of a [`CellLayer`], drawn over the text
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BarCursor {
+pub struct Cursor {
 	/// Position of the cell, in cells from the layer's top-left corner
 	pub row: u32,
 	pub col: u32,
@@ -98,13 +97,22 @@ pub struct BarCursor {
 	/// Cells covered, 2 for a double-width character
 	pub width: u32,
 
-	pub orientation: BarOrientation,
+	pub shape: CursorShape,
 
-	/// How much of the cell the bar covers, in percent
-	pub percentage: u32,
-
-	/// As `0xRRGGBB` in sRGB
+	/// The cursor's color: a block's background, or a bar's color. As `0xRRGGBB` in sRGB.
 	pub color: u32,
+
+	/// Color of the character under a block cursor, so it stays readable. As `0xRRGGBB` in sRGB.
+	pub text_color: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CursorShape {
+	/// The whole cell, with its character drawn again in the cursor's text color
+	Block,
+
+	/// A bar covering `percentage` percent of the cell
+	Bar { orientation: BarOrientation, percentage: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

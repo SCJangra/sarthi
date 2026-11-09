@@ -1,12 +1,12 @@
 use nvim::CursorShape;
-use renderer::{BarCursor, BarOrientation, CellLayer, Decoration, RenderCell, TextStyle};
+use renderer::{BarOrientation, CellLayer, Cursor, Decoration, RenderCell, TextStyle};
 
 use crate::cursor::CursorStyle;
 use crate::grid::Grid;
 use crate::highlight::HighlightState;
 
 /// A snapshot of grid `id` for the renderer, with every cell's highlight resolved and, unless `cursor` is `None`,
-/// the cursor drawn at the grid's cursor position. Without multigrid, Neovim draws everything to grid 1, which fills
+/// the cursor at the grid's cursor position. Without multigrid, Neovim draws everything to grid 1, which fills
 /// the window.
 pub fn cell_layer(id: u32, grid: &Grid, highlights: &HighlightState, cursor: Option<CursorStyle>) -> CellLayer {
 	let cells = grid
@@ -44,9 +44,8 @@ pub fn cell_layer(id: u32, grid: &Grid, highlights: &HighlightState, cursor: Opt
 	layer
 }
 
-/// Draws a block cursor by giving the cells under it the cursor's colors, so the character stays readable, and
-/// a bar cursor as the layer's [`BarCursor`]. The colors come from the cursor's highlight, or are the cell's
-/// swapped when it has none (`:help ui-event-mode_info_set`).
+/// Gives `layer` its cursor, at `row`, `col`, in `style`. The colors come from the cursor's highlight, or are the
+/// cell's swapped when it has none (`:help ui-event-mode_info_set`).
 fn draw_cursor(layer: &mut CellLayer, row: usize, col: usize, style: CursorStyle, highlights: &HighlightState) {
 	let width = layer.width as usize;
 	let index = row * width + col;
@@ -54,41 +53,29 @@ fn draw_cursor(layer: &mut CellLayer, row: usize, col: usize, style: CursorStyle
 
 	// A double-width character also covers the next cell, which is empty.
 	let double_width = col + 1 < width && layer.cells[index + 1].text.is_empty();
-	let covered = if double_width { 2 } else { 1 };
 
-	let (foreground, background) = if style.attr_id == 0 {
+	let (text_color, color) = if style.attr_id == 0 {
 		(cell.background, cell.style.foreground)
 	} else {
 		let colors = highlights.resolve(style.attr_id);
 		(colors.foreground, colors.background)
 	};
 
-	let orientation = match style.shape {
-		CursorShape::Block => {
-			for cell in &mut layer.cells[index..index + covered] {
-				cell.style.foreground = foreground;
-				cell.background = background;
-			}
-			return;
-		},
-		CursorShape::Vertical => BarOrientation::Vertical,
-		CursorShape::Horizontal => BarOrientation::Horizontal,
+	let bar = |orientation| renderer::CursorShape::Bar { orientation, percentage: style.percentage };
+	let shape = match style.shape {
+		CursorShape::Block => renderer::CursorShape::Block,
+		CursorShape::Vertical => bar(BarOrientation::Vertical),
+		CursorShape::Horizontal => bar(BarOrientation::Horizontal),
 	};
 
-	layer.cursor = Some(BarCursor {
-		row: row as u32,
-		col: col as u32,
-		width: covered as u32,
-		orientation,
-		percentage: style.percentage,
-		color: background,
-	});
+	let (row, col, width) = (row as u32, col as u32, if double_width { 2 } else { 1 });
+	layer.cursor = Some(Cursor { row, col, width, shape, color, text_color });
 }
 
 #[cfg(test)]
 mod tests {
 	use nvim::{CellText, CursorShape, DefaultColorsSetEvent, GridCell, HlAttrDefineEvent, HlAttrs};
-	use renderer::{BarCursor, BarOrientation, TextStyle};
+	use renderer::{BarOrientation, Cursor, TextStyle};
 
 	use super::cell_layer;
 	use crate::cursor::CursorStyle;
@@ -169,46 +156,48 @@ mod tests {
 			.collect()
 	}
 
+	fn cursor(col: u32, width: u32, shape: renderer::CursorShape, color: u32, text_color: u32) -> Option<Cursor> {
+		Some(Cursor { row: 0, col, width, shape, color, text_color })
+	}
+
 	#[test]
 	fn block_cursor_swaps_the_cell_colors() {
 		let layer = cell_layer(1, &grid_with_cursor(1), &highlights(), Some(style(CursorShape::Block, 0, 0)));
 		// "b" is 0x112233 on the default background, so the cursor is the default background on 0x112233.
-		assert_eq!(colors(&layer), [(FG, BG), (BG, 0x112233), (FG, BG), (FG, BG)]);
-		assert_eq!(layer.cursor, None);
+		assert_eq!(layer.cursor, cursor(1, 1, renderer::CursorShape::Block, 0x112233, BG));
+		// The cells keep their own colors: the renderer draws the cursor over them.
+		assert_eq!(colors(&layer), [(FG, BG), (0x112233, BG), (FG, BG), (FG, BG)]);
 	}
 
 	#[test]
 	fn block_cursor_uses_its_highlight() {
 		let layer = cell_layer(1, &grid_with_cursor(0), &highlights(), Some(style(CursorShape::Block, 0, 3)));
-		assert_eq!(colors(&layer)[0], (CURSOR_FG, CURSOR_BG));
+		assert_eq!(layer.cursor, cursor(0, 1, renderer::CursorShape::Block, CURSOR_BG, CURSOR_FG));
 	}
 
 	#[test]
 	fn block_cursor_covers_both_halves_of_a_double_width_character() {
 		let layer = cell_layer(1, &grid_with_cursor(2), &highlights(), Some(style(CursorShape::Block, 0, 3)));
-		assert_eq!(colors(&layer), [(FG, BG), (0x112233, BG), (CURSOR_FG, CURSOR_BG), (CURSOR_FG, CURSOR_BG)]);
+		assert_eq!(layer.cursor.map(|cursor| (cursor.col, cursor.width)), Some((2, 2)));
 	}
 
 	#[test]
 	fn bar_cursors() {
+		let bar = |orientation| renderer::CursorShape::Bar { orientation, percentage: 25 };
 		let layer = cell_layer(1, &grid_with_cursor(1), &highlights(), Some(style(CursorShape::Vertical, 25, 0)));
-		let bar = |orientation, col, width, color| BarCursor { row: 0, col, width, orientation, percentage: 25, color };
-		// The cell keeps its colors; the bar takes the swapped background, i.e. the cell's text color.
-		assert_eq!(colors(&layer)[1], (0x112233, BG));
-		assert_eq!(layer.cursor, Some(bar(BarOrientation::Vertical, 1, 1, 0x112233)));
+		// The bar takes the swapped background, i.e. the cell's text color.
+		assert_eq!(layer.cursor, cursor(1, 1, bar(BarOrientation::Vertical), 0x112233, BG));
 
 		let layer = cell_layer(1, &grid_with_cursor(2), &highlights(), Some(style(CursorShape::Horizontal, 25, 3)));
-		assert_eq!(layer.cursor, Some(bar(BarOrientation::Horizontal, 2, 2, CURSOR_BG)));
+		assert_eq!(layer.cursor, cursor(2, 2, bar(BarOrientation::Horizontal), CURSOR_BG, CURSOR_FG));
 	}
 
 	#[test]
 	fn no_cursor_when_hidden_or_outside_the_grid() {
-		let plain = cell_layer(1, &grid_with_cursor(1), &highlights(), None);
-		assert_eq!(colors(&plain), [(FG, BG), (0x112233, BG), (FG, BG), (FG, BG)]);
+		assert_eq!(cell_layer(1, &grid_with_cursor(1), &highlights(), None).cursor, None);
 
 		let mut grid = grid_with_cursor(0);
 		grid.cursor_col = 7;
-		let layer = cell_layer(1, &grid, &highlights(), Some(style(CursorShape::Block, 0, 0)));
-		assert_eq!(colors(&layer), colors(&plain));
+		assert_eq!(cell_layer(1, &grid, &highlights(), Some(style(CursorShape::Block, 0, 0))).cursor, None);
 	}
 }

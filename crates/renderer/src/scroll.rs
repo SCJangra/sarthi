@@ -5,7 +5,7 @@ use std::ops::Range;
 use std::time::Instant;
 
 use crate::animation::{Approach, Motion};
-use crate::{BarCursor, CellLayer, Decoration, Layer, RenderCell, Scroll};
+use crate::{CellLayer, Decoration, Layer, RenderCell, Scroll};
 
 /// The layers whose text is sliding, by layer id
 pub(crate) struct ScrollAnimations {
@@ -167,15 +167,7 @@ impl Animation {
 		let cells = cells.concat();
 
 		let width = region.right - region.left;
-		let cursor = layer.cursor.filter(|cursor| {
-			(region.top..region.bottom).contains(&cursor.row) && (region.left..region.right).contains(&cursor.col)
-		});
-		let cursor = cursor.map(|cursor| BarCursor {
-			row: (cursor.row - region.top) + (-first) as u32,
-			col: cursor.col - region.left,
-			..cursor
-		});
-
+		// The cursor doesn't slide: it's drawn where Neovim put it, over the region.
 		let region_layer = CellLayer {
 			id: layer.id,
 			row: layer.row + region.top,
@@ -183,7 +175,7 @@ impl Animation {
 			width,
 			height: cells.len() as u32 / width,
 			cells,
-			cursor,
+			cursor: None,
 			scroll: None,
 		};
 		SlidingRegion { layer: region_layer, offset: first as f32 + offset, height: self.height() as u32 }
@@ -219,7 +211,7 @@ mod tests {
 
 	use super::ScrollAnimations;
 	use crate::animation::{Easing, Motion};
-	use crate::{BarCursor, BarOrientation, CellLayer, Decoration, Layer, RenderCell, Scroll, TextStyle};
+	use crate::{BarOrientation, CellLayer, Cursor, CursorShape, Decoration, Layer, RenderCell, Scroll, TextStyle};
 
 	const DURATION: Duration = Duration::from_millis(150);
 
@@ -328,21 +320,15 @@ mod tests {
 		let shown = [layer(&["w", "a", "b", "c"], 0, 1, 4)];
 		let mut scrolled = layer(&["w", "b", "c", "d"], 1, 1, 4);
 		let Layer::Cells(cells) = &mut scrolled;
-		cells.cursor = Some(BarCursor {
-			row: 2,
-			col: 0,
-			width: 1,
-			orientation: BarOrientation::Vertical,
-			percentage: 25,
-			color: 0,
-		});
+		let shape = CursorShape::Bar { orientation: BarOrientation::Vertical, percentage: 25 };
+		cells.cursor = Some(Cursor { row: 2, col: 0, width: 1, shape, color: 0, text_color: 0 });
 		scrolls.update(&shown, std::slice::from_ref(&scrolled), now);
 
 		let Layer::Cells(cells) = &scrolled;
 		let region = scrolls.region(cells, now).unwrap();
 		assert_eq!((region.layer.row, region.layer.height, region.height), (1, 4, 3));
-		// The cursor moves with the text: below the row that scrolled out and the row above it.
-		assert_eq!(region.layer.cursor.map(|cursor| cursor.row), Some(2));
+		// The cursor doesn't slide with the text: it's drawn where Neovim put it, over the region.
+		assert_eq!(region.layer.cursor, None);
 	}
 
 	#[test]

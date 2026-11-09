@@ -11,7 +11,7 @@ use rustc_hash::FxHashMap;
 use crate::builtin_glyphs::{builtin_char, is_builtin, rasterize};
 use crate::font::LineMetrics;
 use crate::quad::underline_band;
-use crate::renderer::Piece;
+use crate::renderer::{Piece, PieceKind};
 use crate::{CellLayer, CellSize, Fonts, RenderCell, RendererError, TextSize, TextStyle};
 
 /// Draws the text of cell layers with glyphon
@@ -29,8 +29,8 @@ pub(crate) struct TextPipeline {
 	size: TextSize,
 	fonts: u32,
 
-	/// Laid-out rows of each piece, by layer id and whether it's a scrolling region
-	layers: HashMap<(u64, bool), Vec<Row>>,
+	/// Laid-out rows of each piece, by layer id and which part of the layer it is
+	layers: HashMap<(u64, PieceKind), Vec<Row>>,
 
 	/// Text areas need a buffer; this empty one carries a row's custom glyphs.
 	empty: Buffer,
@@ -147,8 +147,8 @@ impl TextPipeline {
 }
 
 /// Identifies the laid-out rows of `piece` across frames
-fn key_of(piece: &Piece) -> (u64, bool) {
-	(piece.layer.id, piece.region)
+fn key_of(piece: &Piece) -> (u64, PieceKind) {
+	(piece.layer.id, piece.kind)
 }
 
 /// The text areas of `piece`, whose rows are laid out in `rows`: a segment of text each, and the custom glyphs of

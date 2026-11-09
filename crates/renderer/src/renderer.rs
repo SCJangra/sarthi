@@ -7,7 +7,10 @@ use crate::font::LineMetrics;
 use crate::quad::{Quad, QuadPipeline, bar_cursor, cell_backgrounds, cell_decorations};
 use crate::scroll::ScrollAnimations;
 use crate::text::TextPipeline;
-use crate::{CellLayer, CellSize, Fonts, Layer, Motion, RendererConfig, RendererError, TextSize};
+use crate::{
+	CellLayer, CellSize, Cursor, CursorShape, Fonts, Layer, Motion, RenderCell, RendererConfig, RendererError,
+	TextSize, TextStyle,
+};
 
 pub struct Renderer {
 	surface: wgpu::Surface<'static>,
@@ -260,18 +263,33 @@ pub enum Frame {
 	Reconfigured,
 }
 
-/// A cell layer as drawn in a frame: a whole layer, or the scrolling region of one whose text slides, drawn over it
+/// A cell layer as drawn in a frame: a whole layer, then over it the scrolling region of one whose text slides, and its
+/// cursor
 pub(crate) struct Piece<'a> {
 	pub layer: Cow<'a, CellLayer>,
 
-	/// Whether this is a scrolling region, which keeps its laid-out rows apart from its layer's
-	pub region: bool,
+	/// Which part of its layer this is, which keeps its laid-out rows apart from the others'
+	pub kind: PieceKind,
 
 	/// Pixels the layer is drawn below its row, or above if negative
 	pub offset: f32,
 
 	/// What's drawn outside this rectangle of the window is cut off: left, top, width, height in pixels
 	pub clip: [u32; 4],
+}
+
+/// Which part of a layer a [`Piece`] draws
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum PieceKind {
+	/// The whole layer, without its cursor
+	Layer,
+
+	/// The scrolling region of a layer whose text slides
+	Region,
+
+	/// The layer's cursor, where Neovim put it: drawn over text that's still sliding into place, so it never leaves the
+	/// window or crosses `scrolloff`
+	Cursor,
 }
 
 /// The pieces to draw `layers` at `now`, in order, on a `surface` of width × height pixels
@@ -293,16 +311,43 @@ fn pieces<'a>(
 	let mut pieces = Vec::with_capacity(layers.len());
 	for Layer::Cells(layer) in layers {
 		let whole = clip(layer.col, layer.row, layer.width, layer.height);
-		pieces.push(Piece { layer: Cow::Borrowed(layer), region: false, offset: 0.0, clip: whole });
+		pieces.push(Piece { layer: Cow::Borrowed(layer), kind: PieceKind::Layer, offset: 0.0, clip: whole });
 
 		if let Some(region) = scrolls.region(layer, now) {
 			let clip = clip(region.layer.col, region.layer.row, region.layer.width, region.height);
 			// Whole pixels keep the text sharp.
 			let offset = (region.offset * cell.height as f32).round();
-			pieces.push(Piece { layer: Cow::Owned(region.layer), region: true, offset, clip });
+			pieces.push(Piece { layer: Cow::Owned(region.layer), kind: PieceKind::Region, offset, clip });
+		}
+
+		if let Some(cursor) = layer.cursor {
+			let layer = Cow::Owned(cursor_layer(layer, cursor));
+			pieces.push(Piece { layer, kind: PieceKind::Cursor, offset: 0.0, clip: whole });
 		}
 	}
 	pieces
+}
+
+/// The cursor of `layer` as a layer of its own. A block is the cells under it, in the cursor's colors, so its
+/// character stays readable; a bar is drawn over nothing.
+fn cursor_layer(layer: &CellLayer, cursor: Cursor) -> CellLayer {
+	let (row, col) = (layer.row + cursor.row, layer.col + cursor.col);
+	let empty = CellLayer { row, col, width: 0, height: 0, cells: Vec::new(), cursor: None, scroll: None, ..*layer };
+	if cursor.shape != CursorShape::Block {
+		return CellLayer { row: layer.row, col: layer.col, cursor: Some(cursor), ..empty };
+	}
+
+	let start = (cursor.row * layer.width + cursor.col) as usize;
+	let Some(cells) = layer.cells.get(start..start + cursor.width as usize) else { return empty };
+	let cells = cells
+		.iter()
+		.map(|cell| RenderCell {
+			style: TextStyle { foreground: cursor.text_color, ..cell.style },
+			background: cursor.color,
+			..*cell
+		})
+		.collect();
+	CellLayer { width: cursor.width, height: 1, cells, ..empty }
 }
 
 /// A layer's ranges of the frame's quads: its backgrounds, drawn under its text, and its decorations and bar cursor,
@@ -327,7 +372,9 @@ fn layer_quads(
 	cell_backgrounds(quads, layer, cell, srgb);
 	let middle = quads.len();
 	cell_decorations(quads, layer, cell, lines, srgb, |row| text.ink(piece, row));
-	bar_cursor(quads, layer, cell, srgb);
+	if piece.kind == PieceKind::Cursor {
+		bar_cursor(quads, layer, cell, srgb);
+	}
 	for quad in &mut quads[start..] {
 		quad.rect[1] += piece.offset;
 	}
@@ -362,7 +409,7 @@ mod tests {
 
 	use arrayvec::ArrayString;
 
-	use super::{draw_layers, layer_quads, pieces};
+	use super::{PieceKind, draw_layers, layer_quads, pieces};
 	use crate::quad::QuadPipeline;
 	use crate::scroll::ScrollAnimations;
 	use crate::text::TextPipeline;
@@ -479,5 +526,77 @@ mod tests {
 		// The other way around, the block covers the red.
 		let block_on_top = middle_pixel(&[cell(2, " ", 0xFF0000), cell(1, "█", 0x000000)]).unwrap();
 		assert_eq!(block_on_top, [255, 255, 255, 255]);
+	}
+
+	/// `layer` with a cursor of `shape` on its top-left cell, red with white text
+	fn with_cursor(layer: Layer, shape: crate::CursorShape) -> Layer {
+		let Layer::Cells(mut layer) = layer;
+		layer.cursor = Some(crate::Cursor { row: 0, col: 0, width: 1, shape, color: 0xFF0000, text_color: 0xFFFFFF });
+		Layer::Cells(layer)
+	}
+
+	#[test]
+	fn the_cursor_is_a_piece_over_its_layer() {
+		let layer = with_cursor(cell(1, "a", 0x000000), crate::CursorShape::Block);
+		let cell_size = crate::CellSize { width: 8, height: 19 };
+		let scrolls = ScrollAnimations::new(RendererConfig::default().scroll);
+		let pieces = pieces(std::slice::from_ref(&layer), &scrolls, cell_size, (64, 19), Instant::now());
+
+		let kinds: Vec<_> = pieces.iter().map(|piece| piece.kind).collect();
+		assert_eq!(kinds, [PieceKind::Layer, PieceKind::Cursor]);
+		// A block: the cell under it, in the cursor's colors, where Neovim put it
+		let cursor = &pieces[1].layer;
+		assert_eq!((cursor.row, cursor.col, cursor.width, cursor.height, pieces[1].offset), (0, 0, 1, 1, 0.0));
+		assert_eq!((cursor.cells[0].text.as_str(), cursor.cells[0].background), ("a", 0xFF0000));
+		assert_eq!(cursor.cells[0].style.foreground, 0xFFFFFF);
+
+		// A bar: drawn as a quad, over no cells
+		let bar = crate::CursorShape::Bar { orientation: crate::BarOrientation::Vertical, percentage: 25 };
+		let layer = with_cursor(cell(1, "a", 0x000000), bar);
+		let drawn = super::pieces(std::slice::from_ref(&layer), &scrolls, cell_size, (64, 19), Instant::now());
+		assert_eq!((drawn[1].layer.cells.len(), drawn[1].layer.cursor.is_some()), (0, true));
+	}
+
+	#[test]
+	fn gpu_block_cursor_covers_its_cell() {
+		// A full block in white under a red block cursor: the cursor's red covers it, and its text color is white.
+		let layer = with_cursor(cell(1, " ", 0x000000), crate::CursorShape::Block);
+		let Some(pixel) = middle_pixel(&[layer]) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		assert_eq!(pixel, [255, 0, 0, 255]);
+
+		let layer = with_cursor(cell(1, "█", 0x000000), crate::CursorShape::Block);
+		assert_eq!(middle_pixel(&[layer]).unwrap(), [255, 255, 255, 255]);
+	}
+
+	#[test]
+	fn the_cursor_stays_put_while_text_slides() {
+		// A 1×3 layer that scrolled up by a row, with the cursor on its last row
+		let column = |rows: [&str; 3], scroll: bool| {
+			let Layer::Cells(top) = cell(1, rows[0], 0);
+			let cells = rows
+				.iter()
+				.map(|text| RenderCell { text: ArrayString::from(text).unwrap(), ..top.cells[0] });
+			let scroll = scroll.then_some(crate::Scroll { rows: 1, top: 0, bottom: 3, left: 0, right: 1 });
+			let cursor =
+				crate::Cursor { row: 2, col: 0, width: 1, shape: crate::CursorShape::Block, color: 0, text_color: 0 };
+			Layer::Cells(CellLayer { height: 3, cells: cells.collect(), cursor: Some(cursor), scroll, ..top })
+		};
+		let (shown, scrolled) = (column(["a", "b", "c"], false), column(["b", "c", "d"], true));
+		let mut scrolls = ScrollAnimations::new(RendererConfig::default().scroll);
+		let now = Instant::now();
+		scrolls.update(std::slice::from_ref(&shown), std::slice::from_ref(&scrolled), now);
+
+		let cell_size = crate::CellSize { width: 8, height: 19 };
+		let later = now + std::time::Duration::from_millis(50);
+		let drawn = pieces(std::slice::from_ref(&scrolled), &scrolls, cell_size, (8, 57), later);
+		let kinds: Vec<_> = drawn.iter().map(|piece| piece.kind).collect();
+		assert_eq!(kinds, [PieceKind::Layer, PieceKind::Region, PieceKind::Cursor]);
+		// The text is still sliding, but the cursor is on the last row, on "d", where Neovim put it.
+		assert!(drawn[1].offset != 0.0, "{}", drawn[1].offset);
+		assert_eq!(drawn[2].offset, 0.0);
+		assert_eq!((drawn[2].layer.row, drawn[2].layer.cells[0].text.as_str()), (2, "d"));
 	}
 }

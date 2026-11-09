@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::color::rgba;
 use crate::font::LineMetrics;
-use crate::{BarOrientation, CellLayer, CellSize, Decoration, RenderCell, Underline};
+use crate::{BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, RenderCell, Underline};
 
 /// A rectangle in physical pixels, with optional rounded corners and border
 #[repr(C)]
@@ -295,13 +295,16 @@ fn cut(quads: &mut Vec<Quad>, start: usize, gaps: &[Range<f32>]) {
 	quads.extend(pieces);
 }
 
-/// Adds a quad for the bar cursor of `layer`, if it has one
+/// Adds a quad for the cursor of `layer`, if it's a bar. A block cursor is drawn as the cells under it (see
+/// `cursor_piece` in the renderer).
 pub(crate) fn bar_cursor(quads: &mut Vec<Quad>, layer: &CellLayer, cell: CellSize, srgb_surface: bool) {
-	let Some(cursor) = layer.cursor else { return };
+	let Some(cursor @ Cursor { shape: CursorShape::Bar { orientation, percentage }, .. }) = layer.cursor else {
+		return;
+	};
 
 	let (left, top) = ((layer.col + cursor.col) * cell.width, (layer.row + cursor.row) * cell.height);
-	let thickness = |size: u32| (size * cursor.percentage).div_ceil(100).clamp(1, size);
-	let rect = match cursor.orientation {
+	let thickness = |size: u32| (size * percentage).div_ceil(100).clamp(1, size);
+	let rect = match orientation {
 		BarOrientation::Vertical => [left, top, thickness(cell.width), cell.height],
 		BarOrientation::Horizontal => {
 			let height = thickness(cell.height);
@@ -326,7 +329,9 @@ mod tests {
 
 	use super::{DASHES, DOTS, Quad, QuadPipeline, WAVE, background_runs, bar_cursor, cell_decorations};
 	use crate::font::LineMetrics;
-	use crate::{BarCursor, BarOrientation, CellLayer, CellSize, Decoration, RenderCell, TextStyle, Underline};
+	use crate::{
+		BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, RenderCell, TextStyle, Underline,
+	};
 
 	fn cells(backgrounds: &[u32]) -> Vec<RenderCell> {
 		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
@@ -362,7 +367,8 @@ mod tests {
 
 	/// Rectangles of a bar cursor at (row 2, col 3) of a layer placed at (row 1, col 1), with 8×19 px cells
 	fn bar_rect(orientation: BarOrientation, width: u32, percentage: u32) -> [f32; 4] {
-		let cursor = BarCursor { row: 2, col: 3, width, orientation, percentage, color: 0xFFFFFF };
+		let shape = CursorShape::Bar { orientation, percentage };
+		let cursor = Cursor { row: 2, col: 3, width, shape, color: 0xFFFFFF, text_color: 0 };
 		let layer = CellLayer {
 			id: 1,
 			row: 1,
