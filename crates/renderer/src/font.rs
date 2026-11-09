@@ -4,7 +4,7 @@ use glyphon::FontSystem;
 use glyphon::cosmic_text::Font;
 use glyphon::cosmic_text::skrifa::instance::{LocationRef, Size};
 use glyphon::cosmic_text::skrifa::metrics::Decoration;
-use glyphon::cosmic_text::skrifa::{FontRef, MetadataProvider};
+use glyphon::cosmic_text::skrifa::{FontRef, MetadataProvider, Tag};
 use glyphon::fontdb::{Family, Query, Source, Style, Weight};
 use rustc_hash::FxHashMap;
 
@@ -61,6 +61,9 @@ pub struct Fonts {
 	/// Which of `faces` have each character seen so far, as a bit per face
 	coverage: FxHashMap<char, u32>,
 
+	/// The weight and style to lay out text in with each chosen font, by face, bold and italic (see [`Fonts::variant`])
+	variants: FxHashMap<(Option<u8>, bool, bool), (Weight, Style)>,
+
 	/// Metrics of the main font at a font size of 1 pixel
 	em: EmMetrics,
 
@@ -101,6 +104,7 @@ impl Fonts {
 			system,
 			faces: Vec::new(),
 			coverage: FxHashMap::default(),
+			variants: FxHashMap::default(),
 			em,
 			bold: false,
 			italic: false,
@@ -138,6 +142,7 @@ impl Fonts {
 		self.system.db_mut().set_monospace_family(faces[0].family.clone());
 		(self.faces, self.em, self.bold, self.italic) = (faces, em, choice.bold, choice.italic);
 		self.coverage.clear();
+		self.variants.clear();
 		self.generation = self.generation.wrapping_add(1);
 	}
 
@@ -190,6 +195,33 @@ impl Fonts {
 				})
 		});
 		(coverage != 0).then(|| coverage.trailing_zeros() as u8)
+	}
+
+	/// The weight and style to lay out `bold` or `italic` text in, in chosen font `face` (see [`Fonts::face_of`]):
+	/// those of the face its family has closest to them, found like CSS and fontconfig do, e.g. Heavy for bold in a
+	/// family without Bold, or Oblique for italic. cosmic-text only takes a face of a family at the exact weight asked
+	/// for, and otherwise draws the text in another family. A variable font has every weight, so it keeps the one asked.
+	pub(crate) fn variant(&mut self, face: Option<u8>, bold: bool, italic: bool) -> (Weight, Style) {
+		let asked =
+			(if bold { Weight::BOLD } else { Weight::NORMAL }, if italic { Style::Italic } else { Style::Normal });
+		if let Some(&variant) = self.variants.get(&(face, bold, italic)) {
+			return variant;
+		}
+
+		let family = self.family(face).to_owned();
+		let query = Query { families: &[Family::Name(&family)], weight: asked.0, style: asked.1, ..Query::default() };
+		let closest = self.system.db().query(&query).and_then(|id| {
+			let info = self.system.db().face(id)?;
+			let (index, weight, style) = (info.index, info.weight, info.style);
+			let font = self.system.get_font(id, asked.0)?;
+			let variable = FontRef::from_index(font.data(), index)
+				.is_ok_and(|font| font.axes().iter().any(|axis| axis.tag() == Tag::new(b"wght")));
+			Some((if variable { asked.0 } else { weight }, style))
+		});
+
+		let variant = closest.unwrap_or(asked);
+		self.variants.insert((face, bold, italic), variant);
+		variant
 	}
 
 	/// The family of chosen font `face` (see [`Fonts::face_of`]), or of the main font for `None`, which the
@@ -408,5 +440,38 @@ mod tests {
 			assert_eq!(face.families[0].0, BUNDLED);
 			assert_eq!(face.style, style);
 		}
+	}
+
+	#[test]
+	fn a_variable_font_keeps_the_weight_asked() {
+		let mut fonts = Fonts::new();
+		assert_eq!(fonts.variant(Some(0), true, false), (Weight::BOLD, Style::Normal));
+		assert_eq!(fonts.variant(Some(0), true, true), (Weight::BOLD, Style::Italic));
+		assert_eq!(fonts.variant(None, false, false), (Weight::NORMAL, Style::Normal));
+	}
+
+	#[test]
+	fn the_closest_face_of_the_family() {
+		let mut fonts = Fonts::new();
+		let choice = FontChoice { families: vec!["Iosevka".into()], ..FontChoice::default() };
+		if fonts.choose(&choice).is_err() {
+			eprintln!("skipped: Iosevka isn't installed");
+			return;
+		}
+		// Iosevka without a Bold face: bold is Heavy, the closest heavier one.
+		let weights: Vec<_> = fonts
+			.system
+			.db()
+			.faces()
+			.filter(|face| face.families[0].0 == "Iosevka")
+			.map(|face| face.weight)
+			.collect();
+		if weights.contains(&Weight::BOLD) {
+			eprintln!("skipped: this Iosevka has a Bold face");
+			return;
+		}
+		assert_eq!(fonts.variant(Some(0), true, false), (Weight::BLACK, Style::Normal));
+		assert_eq!(fonts.variant(Some(0), true, true), (Weight::BLACK, Style::Italic));
+		assert_eq!(fonts.variant(Some(0), false, true), (Weight::NORMAL, Style::Italic));
 	}
 }

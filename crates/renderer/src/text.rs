@@ -314,29 +314,33 @@ fn segments(cells: &[RenderCell], mut face_of: impl FnMut(&str) -> Option<u8>) -
 
 /// Lays out `segment` in its font, with all text bold or italic if the fonts were chosen so
 fn layout(fonts: &mut Fonts, font_size: f32, cell: CellSize, segment: &Segment) -> Buffer {
-	let (family, bold, italic) = (fonts.family(segment.face).to_owned(), fonts.bold, fonts.italic);
+	let family = fonts.family(segment.face).to_owned();
+	let (bold, italic) = (fonts.bold, fonts.italic);
+	// The face of the segment's font each span is drawn with
+	let variants: Vec<(Weight, Style)> = segment
+		.spans
+		.iter()
+		.map(|(_, style)| fonts.variant(segment.face, style.bold || bold, style.italic || italic))
+		.collect();
+
 	let mut buffer = Buffer::new(&mut fonts.system, Metrics::new(font_size, cell.height as f32));
 	buffer.set_wrap(Wrap::None);
 	// Rounds advances to whole pixels, like the cell width, so the main font's glyphs line up with cells.
 	buffer.set_hinting(Hinting::Enabled);
 
 	let attrs = Attrs::new().family(Family::Name(&family));
-	let spans = segment.spans.iter().map(|(range, style)| {
-		let style = TextStyle { bold: style.bold || bold, italic: style.italic || italic, ..*style };
-		(&segment.text[range.clone()], text_attrs(&attrs, &style))
-	});
+	let spans = segment
+		.spans
+		.iter()
+		.zip(variants)
+		.map(|((range, style), (weight, font_style))| {
+			let [_, r, g, b] = style.foreground.to_be_bytes();
+			let span = attrs.clone().color(Color::rgb(r, g, b)).weight(weight).style(font_style);
+			(&segment.text[range.clone()], span)
+		});
 	buffer.set_rich_text(spans, &attrs, Shaping::Advanced, None);
 	buffer.shape_until_scroll(&mut fonts.system, false);
 	buffer
-}
-
-fn text_attrs<'a>(attrs: &Attrs<'a>, style: &TextStyle) -> Attrs<'a> {
-	let [_, r, g, b] = style.foreground.to_be_bytes();
-	attrs
-		.clone()
-		.color(Color::rgb(r, g, b))
-		.weight(if style.bold { Weight::BOLD } else { Weight::NORMAL })
-		.style(if style.italic { Style::Italic } else { Style::Normal })
 }
 
 #[cfg(test)]
@@ -515,5 +519,29 @@ mod tests {
 		braces.sort();
 		moved.sort();
 		assert_eq!(moved, braces);
+	}
+
+	#[test]
+	fn bold_and_italic_stay_in_the_family() {
+		let mut fonts = Fonts::new();
+		let choice = crate::FontChoice { families: vec!["Iosevka".into()], ..crate::FontChoice::default() };
+		if fonts.choose(&choice).is_err() {
+			eprintln!("skipped: Iosevka isn't installed");
+			return;
+		}
+		let cell = fonts.cell_size(16.0);
+
+		// Iosevka is often installed without a Bold (700) face, only Regular and Heavy. Bold text must still be
+		// drawn in Iosevka, not in another family that has a Bold face.
+		for (bold, italic) in [(true, false), (false, true), (true, true)] {
+			let style = TextStyle { bold, italic, ..PLAIN };
+			let segment = Segment { col: 0, face: Some(0), text: String::from("af"), spans: vec![(0..2, style)] };
+			let buffer = super::layout(&mut fonts, 16.0, cell, &segment);
+			for glyph in buffer.layout_runs().flat_map(|run| run.glyphs) {
+				let face = fonts.system.db().face(glyph.font_id).unwrap();
+				assert_eq!(face.families[0].0, "Iosevka", "bold {bold}, italic {italic}: {}", face.post_script_name);
+				assert_eq!(face.style == glyphon::fontdb::Style::Italic, italic, "{}", face.post_script_name);
+			}
+		}
 	}
 }
