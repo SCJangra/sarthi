@@ -1,4 +1,5 @@
 mod app;
+mod compositor;
 mod error;
 mod grid;
 mod highlight;

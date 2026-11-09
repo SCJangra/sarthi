@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::thread;
 
@@ -11,8 +11,9 @@ use winit::event_loop::EventLoopProxy;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use nvim::{Nvim, NvimNotification, NvimUiAttachParams, NvimUiOptions, NvimUiTryResizeParams, RedrawNotification};
-use renderer::{Fonts, Frame, Renderer, RendererConfig, RendererError};
+use renderer::{Fonts, Frame, Layer, Renderer, RendererConfig, RendererError};
 
+use crate::compositor::cell_layer;
 use crate::error::Error;
 use crate::grid::Grid;
 use crate::highlight::HighlightState;
@@ -34,6 +35,10 @@ pub struct App {
 	/// Windows showing stale content: their grids changed since the last `flush`, and they're redrawn on the
 	/// next one
 	pub stale_windows: HashSet<WindowId>,
+
+	/// What each window shows: layers built from its grids on the last `flush`, so events that arrive before the
+	/// redraw can't show half-applied
+	pub layers: HashMap<WindowId, Vec<Layer>>,
 
 	pub error: Option<Error>,
 }
@@ -72,6 +77,7 @@ impl App {
 			nvim,
 			ui_size: GridSize { width: 0, height: 0 },
 			stale_windows: HashSet::new(),
+			layers: HashMap::new(),
 			error: None,
 		})
 	}
@@ -106,9 +112,14 @@ impl App {
 		Ok(())
 	}
 
+	/// Font size in `window`, in physical pixels
+	fn font_size(&self, window: &Window) -> f32 {
+		self.config.font_size * window.scale_factor() as f32
+	}
+
 	/// Number of grid cells that fit in `window`
 	fn grid_size(&self, window: &Window) -> GridSize {
-		let cell_size = self.fonts.cell_size(self.config.font_size * window.scale_factor() as f32);
+		let cell_size = self.fonts.cell_size(self.font_size(window));
 		GridSize::fit(window.inner_size(), cell_size)
 	}
 
@@ -230,13 +241,21 @@ impl App {
 		self.stale_windows.extend(self.window.iter().map(|entry| *entry.key()));
 	}
 
-	/// Neovim is done redrawing, so its state is consistent: redraw the windows that changed.
+	/// Neovim is done redrawing, so its state is consistent: snapshot the grids of the windows that changed and
+	/// redraw them.
 	fn flush(&mut self) {
-		for window_id in self.stale_windows.drain() {
-			if let Some(window) = self.window.get(&window_id) {
-				window.request_redraw();
+		for entry in self.grid_window.iter() {
+			let (grid_id, window_id) = (*entry.key(), *entry.value());
+			if !self.stale_windows.contains(&window_id) {
+				continue;
 			}
+			let (Some(grid), Some(window)) = (self.grid.get(&grid_id), self.window.get(&window_id)) else { continue };
+
+			let layer = cell_layer(grid_id, &grid, &self.highlight_state);
+			self.layers.insert(window_id, vec![Layer::Cells(layer)]);
+			window.request_redraw();
 		}
+		self.stale_windows.clear();
 	}
 
 	fn resize_renderer(&mut self, id: WindowId, window: &Window) -> Result<(), Error> {
@@ -249,7 +268,10 @@ impl App {
 
 	fn redraw_renderer(&mut self, id: WindowId, window: &Arc<Window>) -> Result<(), Error> {
 		let Some(mut renderer) = self.renderer.get_mut(&id) else { return Ok(()) };
-		let frame = renderer.render_clear();
+		// Until the first `flush`, there is nothing to draw but the background.
+		let layers = self.layers.get(&id).map_or(&[][..], Vec::as_slice);
+		let font_size = self.font_size(window);
+		let frame = renderer.render(&mut self.fonts, layers, font_size);
 		drop(renderer);
 
 		match frame {
@@ -276,6 +298,7 @@ impl App {
 		self.renderer.remove(&id);
 		self.window.remove(&id);
 		self.stale_windows.remove(&id);
+		self.layers.remove(&id);
 
 		if self.window.is_empty() {
 			self.grid.clear();
@@ -345,7 +368,10 @@ impl ApplicationHandler<AppEvent> for App {
 				}
 				if let Err(error) = self.resize_nvim_ui(&window) {
 					self.exit_with_error(event_loop, error);
+					return;
 				}
+				// The text size changed, even if the grid size didn't.
+				window.request_redraw();
 			},
 			WindowEvent::RedrawRequested => {
 				if let Err(error) = self.redraw_renderer(window_id, &window) {

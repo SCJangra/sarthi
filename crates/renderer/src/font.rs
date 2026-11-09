@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use glyphon::FontSystem;
+use glyphon::cosmic_text::skrifa::charmap::Charmap;
 use glyphon::cosmic_text::skrifa::instance::{LocationRef, Size};
 use glyphon::cosmic_text::skrifa::{FontRef, MetadataProvider};
 use glyphon::fontdb::Source;
@@ -21,8 +22,10 @@ pub struct CellSize {
 /// The fonts text is drawn with: the bundled font, and the system's fonts as fallback for characters it
 /// doesn't have (e.g. CJK and emoji)
 pub struct Fonts {
-	#[cfg_attr(not(test), expect(dead_code, reason = "used once the renderer draws text"))]
-	system: FontSystem,
+	pub(crate) system: FontSystem,
+
+	/// Which characters the bundled font has
+	charmap: Charmap<'static>,
 
 	/// Cell width and height at a font size of 1 pixel
 	cell_em: (f32, f32),
@@ -38,7 +41,9 @@ impl Fonts {
 		}
 		db.set_monospace_family(FAMILY);
 
-		Self { system, cell_em: measure_cell(REGULAR).expect("the bundled font has metrics") }
+		let regular = FontRef::new(REGULAR).expect("the bundled font is valid");
+		let cell_em = measure_cell(&regular).expect("the bundled font has metrics");
+		Self { system, charmap: regular.charmap(), cell_em }
 	}
 
 	/// Size of a grid cell for text of `font_size` physical pixels. The width is the advance of `M`, and the
@@ -51,6 +56,12 @@ impl Fonts {
 			height: ((height * font_size).ceil() as u32).max(1),
 		}
 	}
+
+	/// Whether the bundled font has every character of `text`. Its glyphs are exactly one cell wide, while
+	/// glyphs from fallback fonts can have any width.
+	pub(crate) fn covers(&self, text: &str) -> bool {
+		text.chars().all(|c| self.charmap.map(c).is_some())
+	}
 }
 
 impl Default for Fonts {
@@ -61,9 +72,8 @@ impl Default for Fonts {
 
 /// Cell width and height of `font` at a font size of 1 pixel, at its default weight (a monospace font is
 /// equally wide at every weight)
-fn measure_cell(font: &[u8]) -> Option<(f32, f32)> {
+fn measure_cell(font: &FontRef<'_>) -> Option<(f32, f32)> {
 	// In font units, and scaled here: skrifa scales in fixed point, which gives e.g. 0.59996 for 0.6.
-	let font = FontRef::new(font).ok()?;
 	let metrics = font.metrics(Size::unscaled(), LocationRef::default());
 	let width = font
 		.glyph_metrics(Size::unscaled(), LocationRef::default())
@@ -88,6 +98,16 @@ mod tests {
 		assert_eq!(fonts.cell_size(14.0), CellSize { width: 8, height: 19 });
 		assert_eq!(fonts.cell_size(28.0), CellSize { width: 17, height: 37 });
 		assert_eq!(fonts.cell_size(0.0), CellSize { width: 1, height: 1 });
+	}
+
+	#[test]
+	fn covers() {
+		let fonts = Fonts::new();
+		assert!(fonts.covers("a"));
+		assert!(fonts.covers("│─é→λ"));
+		assert!(!fonts.covers("漢"));
+		assert!(!fonts.covers("😀"));
+		assert!(!fonts.covers("a漢"));
 	}
 
 	#[test]

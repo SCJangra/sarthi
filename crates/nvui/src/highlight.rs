@@ -15,7 +15,6 @@ pub struct DefaultColors {
 }
 
 /// How a cell looks, with every color resolved to `0xRRGGBB`
-#[cfg_attr(not(test), expect(dead_code, reason = "used once the renderer draws cells"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellStyle {
 	pub foreground: u32,
@@ -67,7 +66,6 @@ impl HighlightState {
 
 	/// The style of cells with highlight `hl_id`. Id 0 is the default highlight: the default colors and no
 	/// styles. An id that hasn't been defined is treated the same way.
-	#[cfg_attr(not(test), expect(dead_code, reason = "used once the renderer draws cells"))]
 	pub fn resolve(&self, hl_id: u32) -> CellStyle {
 		let defaults = self.defaults;
 		let attrs = (hl_id != 0).then(|| self.attrs.get(&hl_id)).flatten();
@@ -99,7 +97,7 @@ impl HighlightState {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
 	use nvim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs};
 
 	use super::{CellStyle, DefaultColors, HighlightState, INITIAL_DEFAULT_COLORS};
@@ -116,7 +114,8 @@ mod tests {
 		HlAttrDefineEvent { id, rgb_attr: rgb_attr.clone(), cterm_attr: rgb_attr, info: vec![] }
 	}
 
-	fn attrs() -> HlAttrs {
+	/// Attributes that set nothing
+	pub(crate) fn attrs() -> HlAttrs {
 		HlAttrs {
 			foreground: None,
 			background: None,

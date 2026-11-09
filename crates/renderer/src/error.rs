@@ -27,4 +27,10 @@ pub enum RendererError {
 
 	#[error("SurfaceValidation")]
 	SurfaceValidation,
+
+	#[error("PrepareText({0})")]
+	PrepareText(#[from] glyphon::PrepareError),
+
+	#[error("RenderText({0})")]
+	RenderText(#[from] glyphon::RenderError),
 }

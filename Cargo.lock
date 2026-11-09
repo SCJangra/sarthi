@@ -1345,6 +1345,7 @@ dependencies = [
 name = "nvui-renderer"
 version = "0.1.0"
 dependencies = [
+ "arrayvec",
  "cosmic-text",
  "glyphon",
  "thiserror 2.0.18",

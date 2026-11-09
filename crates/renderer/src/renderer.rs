@@ -1,5 +1,6 @@
 use crate::color::wgpu_color;
-use crate::{RendererConfig, RendererError};
+use crate::text::TextPipeline;
+use crate::{Fonts, Layer, RendererConfig, RendererError};
 
 pub struct Renderer {
 	surface: wgpu::Surface<'static>,
@@ -7,6 +8,7 @@ pub struct Renderer {
 	queue: wgpu::Queue,
 	config: wgpu::SurfaceConfiguration,
 	clear_color: wgpu::Color,
+	text: TextPipeline,
 }
 
 impl Renderer {
@@ -101,7 +103,9 @@ impl Renderer {
 
 		let clear_color = wgpu_color(renderer_config.background, config.format.is_srgb());
 
-		Ok(Self { surface, device, queue, config, clear_color })
+		let text = TextPipeline::new(&device, &queue, config.format);
+
+		Ok(Self { surface, device, queue, config, clear_color, text })
 	}
 
 	pub fn resize(&mut self, width: u32, height: u32) {
@@ -115,7 +119,9 @@ impl Renderer {
 		self.clear_color = wgpu_color(rgb, self.config.format.is_srgb());
 	}
 
-	pub fn render_clear(&mut self) -> Result<Frame, RendererError> {
+	/// Draws `layers` on the clear color, in order, with text of `font_size` physical pixels. Laying out text
+	/// needs `fonts`, which all renderers share.
+	pub fn render(&mut self, fonts: &mut Fonts, layers: &[Layer], font_size: f32) -> Result<Frame, RendererError> {
 		let (frame, suboptimal) = match self.surface.get_current_texture() {
 			wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
 			wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
@@ -130,15 +136,19 @@ impl Renderer {
 			wgpu::CurrentSurfaceTexture::Validation => return Err(RendererError::SurfaceValidation),
 		};
 
+		let resolution = glyphon::Resolution { width: self.config.width, height: self.config.height };
+		self.text
+			.prepare(&self.device, &self.queue, resolution, fonts, layers, font_size)?;
+
 		let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-			label: Some("nvui-renderer-clear-encoder"),
-		});
+		let mut encoder = self
+			.device
+			.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("nvui-renderer-encoder") });
 
 		{
-			let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-				label: Some("nvui-renderer-clear-pass"),
+			let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+				label: Some("nvui-renderer-pass"),
 				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
 					view: &view,
 					resolve_target: None,
@@ -153,10 +163,12 @@ impl Renderer {
 				timestamp_writes: None,
 				multiview_mask: None,
 			});
+			self.text.render(&mut pass)?;
 		}
 
 		self.queue.submit(Some(encoder.finish()));
 		self.queue.present(frame);
+		self.text.trim();
 
 		// The frame was still shown, but the next ones should use a surface that matches again.
 		if suboptimal {
