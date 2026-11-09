@@ -261,10 +261,10 @@ mod tests {
 		RedrawNotification, RpcClient, RpcError,
 	};
 
-	/// Starts an embedded Neovim that doesn't touch the user's config or ShaDa.
+	/// Starts an embedded Neovim that doesn't touch the user's config, ShaDa or swap files.
 	fn spawn_nvim() -> std::process::Child {
 		std::process::Command::new("nvim")
-			.args(["--embed", "--clean", "-i", "NONE"])
+			.args(["--embed", "--clean", "-i", "NONE", "-n"])
 			.stdin(std::process::Stdio::piped())
 			.stdout(std::process::Stdio::piped())
 			.spawn()

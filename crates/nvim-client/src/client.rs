@@ -96,7 +96,7 @@ mod tests {
 	#[test]
 	fn drop_waits_for_neovim_to_exit() {
 		// Isolated from the user's config and ShaDa.
-		let nvim = Nvim::spawn(&["--embed", "--clean", "-i", "NONE"]).unwrap();
+		let nvim = Nvim::spawn(&["--embed", "--clean", "-i", "NONE", "-n"]).unwrap();
 		let pid = nvim.process.0.id();
 
 		let start = Instant::now();
