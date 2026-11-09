@@ -6,6 +6,7 @@ mod grid_resize;
 mod grid_scroll;
 mod hl_attr_define;
 mod hl_group_set;
+mod mode_change;
 mod mode_info_set;
 
 use nvui_derive::DeserializeTaggedEnum;
@@ -18,6 +19,7 @@ pub use grid_resize::*;
 pub use grid_scroll::*;
 pub use hl_attr_define::*;
 pub use hl_group_set::*;
+pub use mode_change::*;
 pub use mode_info_set::*;
 
 #[derive(Debug, DeserializeTaggedEnum)]
@@ -40,6 +42,13 @@ pub enum RedrawNotification {
 	HlGroupSet(#[tagged_enum(flatten)] Vec<HlGroupSetEvent>),
 
 	ModeInfoSet(#[tagged_enum(flatten)] Vec<ModeInfoSetEvent>),
+
+	ModeChange(#[tagged_enum(flatten)] Vec<ModeChangeEvent>),
+
+	/// The UI must stop drawing the cursor until `BusyStop` (`:help ui-global`)
+	BusyStart,
+
+	BusyStop,
 
 	/// Neovim is done redrawing the screen, so this is the time to show the result (`:help ui-global`)
 	Flush,
@@ -84,6 +93,16 @@ mod tests {
 		let deserialized: RedrawNotification = rmp_serde::from_slice(&event).unwrap();
 
 		assert_eq!(deserialized, RedrawNotification::Flush)
+	}
+
+	#[test]
+	fn de_busy_start_and_stop() {
+		// ["busy_start", []] and ["busy_stop", []]
+		let start = [&[0x92, 0xAA][..], b"busy_start", &[0x90]].concat();
+		let stop = [&[0x92, 0xA9][..], b"busy_stop", &[0x90]].concat();
+
+		assert_eq!(rmp_serde::from_slice::<RedrawNotification>(&start).unwrap(), RedrawNotification::BusyStart);
+		assert_eq!(rmp_serde::from_slice::<RedrawNotification>(&stop).unwrap(), RedrawNotification::BusyStop);
 	}
 
 	#[test]
