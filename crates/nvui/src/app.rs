@@ -37,6 +37,9 @@ pub struct App {
 	/// The `guifont` value last applied, so each value is applied (or reported as wrong) once
 	pub guifont: String,
 
+	/// The `linespace` value last applied, in logical pixels
+	pub linespace: i64,
+
 	pub nvim: Nvim,
 
 	/// Grid size last sent to Neovim, so resizes that don't change it aren't sent again
@@ -87,6 +90,7 @@ impl App {
 			editor: Editor::new(),
 			fonts: Fonts::new(),
 			guifont: String::new(),
+			linespace: 0,
 			nvim,
 			ui_size: GridSize { width: 0, height: 0 },
 			modifiers: ModifiersState::empty(),
@@ -119,7 +123,12 @@ impl App {
 
 	/// Size of text in `window`, in physical pixels
 	fn text_size(&self, window: &Window) -> TextSize {
-		TextSize::new(self.font_size * window.scale_factor() as f32)
+		let scale = window.scale_factor();
+		// Logical pixels like the font size, in whole physical ones
+		let line_space = (self.linespace as f64 * scale)
+			.round()
+			.clamp(f64::from(i32::MIN), f64::from(i32::MAX));
+		TextSize { font_size: self.font_size * scale as f32, line_space: line_space as i32 }
 	}
 
 	/// Number of grid cells that fit in `window`
@@ -165,8 +174,17 @@ impl App {
 	fn handle_nvim_notification(&mut self, notification: NvimNotification) {
 		let NvimNotification::Redraw(events) = notification else { return };
 		let Some(redraw) = self.editor.apply(events) else { return };
-		if self.editor.guifont() != self.guifont {
+		let fonts_changed = self.editor.guifont() != self.guifont;
+		if fonts_changed {
 			self.apply_guifont();
+		}
+		// Either can change the cell size, so how many cells fit in the window.
+		if fonts_changed || self.editor.linespace() != self.linespace {
+			self.linespace = self.editor.linespace();
+			let window = self.window.as_ref().map(|state| state.window.clone());
+			if let Some(Err(error)) = window.map(|window| self.resize_nvim_ui(&window)) {
+				tracing::warn!("Couldn't resize Neovim's grid to the new cell size: {error}");
+			}
 		}
 
 		let Some(state) = &mut self.window else { return };
@@ -175,8 +193,8 @@ impl App {
 		state.window.request_redraw();
 	}
 
-	/// Draws text with the fonts and size `guifont` asks for, and resizes Neovim's grid to the new cell size. A value
-	/// that can't be used is shown as an error in Neovim, and the fonts stay as they were.
+	/// Draws text with the fonts and size `guifont` asks for. A value that can't be used is shown as an error in Neovim,
+	/// and the fonts stay as they were.
 	fn apply_guifont(&mut self) {
 		self.guifont = self.editor.guifont().to_owned();
 		let applied = GuiFont::parse(&self.guifont).and_then(|font| {
@@ -192,13 +210,7 @@ impl App {
 				if let Err(error) = self.nvim.show_error(&format!("guifont: {error}")) {
 					tracing::warn!("Couldn't report a guifont error to Neovim: {error}");
 				}
-				return;
 			},
-		}
-
-		let Some(window) = self.window.as_ref().map(|state| state.window.clone()) else { return };
-		if let Err(error) = self.resize_nvim_ui(&window) {
-			tracing::warn!("Couldn't resize Neovim's grid to the new font: {error}");
 		}
 	}
 
