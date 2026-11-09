@@ -14,10 +14,11 @@ use nvim::{
 	Nvim, NvimClientInfo, NvimClientVersion, NvimMessage, NvimNotification, NvimRequest, NvimUiAttachParams,
 	NvimUiOptions, NvimUiTryResizeParams,
 };
-use renderer::{Fonts, Frame, Renderer, RendererConfig, RendererError};
+use renderer::{FontChoice, Fonts, Frame, Renderer, RendererConfig, RendererError};
 
 use crate::clipboard::{self, Clipboard, Copied, Register};
 use crate::error::Error;
+use crate::guifont::GuiFont;
 use crate::input::neovim_keys;
 use crate::windows::{GridSize, WindowConfig};
 
@@ -29,6 +30,13 @@ pub struct App {
 
 	pub editor: Editor,
 	pub fonts: Fonts,
+
+	/// Font size in logical pixels: from `guifont`, or the configured one
+	pub font_size: f32,
+
+	/// The `guifont` value last applied, so each value is applied (or reported as wrong) once
+	pub guifont: String,
+
 	pub nvim: Nvim,
 
 	/// Grid size last sent to Neovim, so resizes that don't change it aren't sent again
@@ -73,10 +81,12 @@ impl App {
 		});
 
 		Ok(Self {
+			font_size: config.font_size,
 			config,
 			window: None,
 			editor: Editor::new(),
 			fonts: Fonts::new(),
+			guifont: String::new(),
 			nvim,
 			ui_size: GridSize { width: 0, height: 0 },
 			modifiers: ModifiersState::empty(),
@@ -109,7 +119,7 @@ impl App {
 
 	/// Font size in `window`, in physical pixels
 	fn font_size(&self, window: &Window) -> f32 {
-		self.config.font_size * window.scale_factor() as f32
+		self.font_size * window.scale_factor() as f32
 	}
 
 	/// Number of grid cells that fit in `window`
@@ -154,11 +164,42 @@ impl App {
 	/// redraws can't show half-applied.
 	fn handle_nvim_notification(&mut self, notification: NvimNotification) {
 		let NvimNotification::Redraw(events) = notification else { return };
-		let (Some(redraw), Some(state)) = (self.editor.apply(events), &mut self.window) else { return };
+		let Some(redraw) = self.editor.apply(events) else { return };
+		if self.editor.guifont() != self.guifont {
+			self.apply_guifont();
+		}
 
+		let Some(state) = &mut self.window else { return };
 		state.renderer.set_clear_color(redraw.background);
 		state.renderer.set_layers(redraw.layers);
 		state.window.request_redraw();
+	}
+
+	/// Draws text with the fonts and size `guifont` asks for, and resizes Neovim's grid to the new cell size. A value
+	/// that can't be used is shown as an error in Neovim, and the fonts stay as they were.
+	fn apply_guifont(&mut self) {
+		self.guifont = self.editor.guifont().to_owned();
+		let applied = GuiFont::parse(&self.guifont).and_then(|font| {
+			let pixels = font.pixels();
+			let choice = FontChoice { families: font.families, bold: font.bold, italic: font.italic };
+			self.fonts.choose(&choice).map_err(|error| error.to_string())?;
+			Ok(pixels)
+		});
+
+		match applied {
+			Ok(pixels) => self.font_size = pixels.unwrap_or(self.config.font_size),
+			Err(error) => {
+				if let Err(error) = self.nvim.show_error(&format!("guifont: {error}")) {
+					tracing::warn!("Couldn't report a guifont error to Neovim: {error}");
+				}
+				return;
+			},
+		}
+
+		let Some(window) = self.window.as_ref().map(|state| state.window.clone()) else { return };
+		if let Err(error) = self.resize_nvim_ui(&window) {
+			tracing::warn!("Couldn't resize Neovim's grid to the new font: {error}");
+		}
 	}
 
 	/// Answers a request from Neovim, which waits for the answer, so this must not wait for Neovim. Dropping a request
@@ -199,7 +240,7 @@ impl App {
 	fn redraw(&mut self) -> Result<(), Error> {
 		let background = self.editor.background();
 		let Some(state) = &mut self.window else { return Ok(()) };
-		let font_size = self.config.font_size * state.window.scale_factor() as f32;
+		let font_size = self.font_size * state.window.scale_factor() as f32;
 
 		// Lets winit pace redraws to the display on Wayland (frame callbacks), so frames aren't drawn faster than
 		// they can be shown: with FIFO presentation, the extra frames queued up and made resizing lag.

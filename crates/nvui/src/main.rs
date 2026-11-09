@@ -1,6 +1,7 @@
 mod app;
 mod clipboard;
 mod error;
+mod guifont;
 mod input;
 mod windows;
 
