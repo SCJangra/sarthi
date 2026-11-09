@@ -8,7 +8,6 @@ editor = { workspace = true }
 renderer = { workspace = true }
 nvim = { workspace = true }
 smol = { workspace = true }
-wgpu = { workspace = true }
 winit = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
