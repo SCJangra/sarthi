@@ -8,6 +8,7 @@ mod hl_attr_define;
 mod hl_group_set;
 mod mode_change;
 mod mode_info_set;
+mod win_pos;
 
 use nvui_derive::DeserializeTaggedEnum;
 
@@ -21,6 +22,7 @@ pub use hl_attr_define::*;
 pub use hl_group_set::*;
 pub use mode_change::*;
 pub use mode_info_set::*;
+pub use win_pos::*;
 
 #[derive(Debug, DeserializeTaggedEnum)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -34,6 +36,18 @@ pub enum RedrawNotification {
 	GridLine(#[tagged_enum(flatten)] Vec<GridLineEvent>),
 
 	GridScroll(#[tagged_enum(flatten)] Vec<GridScrollEvent>),
+
+	GridDestroy(#[tagged_enum(flatten)] Vec<GridDestroyEvent>),
+
+	WinPos(#[tagged_enum(flatten)] Vec<WinPosEvent>),
+
+	WinFloatPos(#[tagged_enum(flatten)] Vec<WinFloatPosEvent>),
+
+	WinHide(#[tagged_enum(flatten)] Vec<WinHideEvent>),
+
+	WinClose(#[tagged_enum(flatten)] Vec<WinCloseEvent>),
+
+	MsgSetPos(#[tagged_enum(flatten)] Vec<MsgSetPosEvent>),
 
 	DefaultColorsSet(#[tagged_enum(flatten)] Vec<DefaultColorsSetEvent>),
 
