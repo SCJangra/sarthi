@@ -289,7 +289,9 @@ impl App {
 		// Until the first `flush`, there is nothing to draw but the background.
 		let layers = self.layers.get(&id).map_or(&[][..], Vec::as_slice);
 		let font_size = self.font_size(window);
-		let frame = renderer.render(&mut self.fonts, layers, font_size);
+		// Lets winit pace redraws to the display on Wayland (frame callbacks), so frames aren't drawn faster than
+		// they can be shown: with FIFO presentation, the extra frames queued up and made resizing lag.
+		let frame = renderer.render(&mut self.fonts, layers, font_size, || window.pre_present_notify());
 		drop(renderer);
 
 		match frame {

@@ -127,7 +127,16 @@ impl Renderer {
 
 	/// Draws `layers` on the clear color, in order, with text of `font_size` physical pixels. Laying out text
 	/// needs `fonts`, which all renderers share.
-	pub fn render(&mut self, fonts: &mut Fonts, layers: &[Layer], font_size: f32) -> Result<Frame, RendererError> {
+	///
+	/// `pre_present` runs right before the frame is handed to the window system, and only if it is, e.g. for
+	/// winit's `Window::pre_present_notify`.
+	pub fn render(
+		&mut self,
+		fonts: &mut Fonts,
+		layers: &[Layer],
+		font_size: f32,
+		pre_present: impl FnOnce(),
+	) -> Result<Frame, RendererError> {
 		let (frame, suboptimal) = match self.surface.get_current_texture() {
 			wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
 			wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
@@ -179,6 +188,7 @@ impl Renderer {
 		}
 
 		self.queue.submit(Some(encoder.finish()));
+		pre_present();
 		self.queue.present(frame);
 		self.text.trim();
 
