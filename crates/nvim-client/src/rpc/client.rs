@@ -76,7 +76,12 @@ impl RpcClientInner {
 
 			while self.running.load(Ordering::SeqCst) {
 				let frame = match frames.next_frame() {
-					Ok(frame) => frame,
+					Ok(Some(frame)) => frame,
+					// E.g. Neovim exited after `:qa`
+					Ok(None) => {
+						tracing::debug!("RPC stream closed");
+						break;
+					},
 					Err(err) => {
 						tracing::error!("RPC stream closed: {err}");
 						break;

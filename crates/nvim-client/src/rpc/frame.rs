@@ -30,23 +30,29 @@ where
 		Self { reader, buf: vec![0; READ_CHUNK], start: 0, end: 0 }
 	}
 
-	/// Returns the next complete frame.
+	/// Returns the next complete frame, or `None` once the stream ended after the last one.
 	///
-	/// Fails on I/O errors, at the end of the stream, and on bytes that aren't valid msgpack.
-	pub(crate) fn next_frame(&mut self) -> io::Result<&[u8]> {
+	/// Fails on I/O errors, when the stream ends in the middle of a frame, and on bytes that aren't valid msgpack.
+	pub(crate) fn next_frame(&mut self) -> io::Result<Option<&[u8]>> {
 		loop {
 			if let Some(len) = frame_len(&self.buf[self.start..self.end])? {
 				let frame = self.start..self.start + len;
 				self.start += len;
-				return Ok(&self.buf[frame]);
+				return Ok(Some(&self.buf[frame]));
 			}
 
-			self.fill()?;
+			if !self.fill()? {
+				if self.start == self.end {
+					return Ok(None);
+				}
+				return Err(io::ErrorKind::UnexpectedEof.into());
+			}
 		}
 	}
 
-	/// Moves the incomplete frame at the end of the buffer to the front and reads more data after it.
-	fn fill(&mut self) -> io::Result<()> {
+	/// Moves the incomplete frame at the end of the buffer to the front and reads more data after it. Returns false at
+	/// the end of the stream.
+	fn fill(&mut self) -> io::Result<bool> {
 		if self.start > 0 {
 			self.buf.copy_within(self.start..self.end, 0);
 			self.end -= self.start;
@@ -67,12 +73,8 @@ where
 			}
 		};
 
-		if read == 0 {
-			return Err(io::ErrorKind::UnexpectedEof.into());
-		}
-
 		self.end += read;
-		Ok(())
+		Ok(read > 0)
 	}
 }
 
@@ -220,10 +222,11 @@ mod tests {
 		let stream = vec![0x92, 0x01, 0xA1, b'a', 0xC3, 0x91, 0x02];
 		let mut frames = FrameReader::new(ByteReader(io::Cursor::new(stream)));
 
-		assert_eq!(frames.next_frame().unwrap(), [0x92, 0x01, 0xA1, b'a']);
-		assert_eq!(frames.next_frame().unwrap(), [0xC3]);
-		assert_eq!(frames.next_frame().unwrap(), [0x91, 0x02]);
-		assert_eq!(frames.next_frame().unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
+		assert_eq!(frames.next_frame().unwrap().unwrap(), [0x92, 0x01, 0xA1, b'a']);
+		assert_eq!(frames.next_frame().unwrap().unwrap(), [0xC3]);
+		assert_eq!(frames.next_frame().unwrap().unwrap(), [0x91, 0x02]);
+		// The stream ended between frames.
+		assert_eq!(frames.next_frame().unwrap(), None);
 	}
 
 	#[test]
@@ -243,7 +246,7 @@ mod tests {
 
 		let mut frames = FrameReader::new(io::Cursor::new(stream));
 
-		assert_eq!(frames.next_frame().unwrap().len(), 1 + 4 + len);
-		assert_eq!(frames.next_frame().unwrap(), [0xC3]);
+		assert_eq!(frames.next_frame().unwrap().unwrap().len(), 1 + 4 + len);
+		assert_eq!(frames.next_frame().unwrap().unwrap(), [0xC3]);
 	}
 }
