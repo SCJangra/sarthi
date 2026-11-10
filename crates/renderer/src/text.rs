@@ -10,6 +10,7 @@ use rustc_hash::FxHashMap;
 
 use crate::builtin_glyphs::{builtin_char, is_builtin, rasterize};
 use crate::font::LineMetrics;
+use crate::font::Run;
 use crate::quad::underline_band;
 use crate::renderer::{Piece, PieceKind};
 use crate::{CellLayer, CellSize, Fonts, RenderCell, RendererError, TextSize, TextStyle};
@@ -219,7 +220,7 @@ fn update_rows(
 	for index in changed {
 		let cells = &layer.cells[index * width..(index + 1) * width];
 		let layout = moved.get_mut(cells).and_then(Vec::pop).unwrap_or_else(|| {
-			let buffers: Vec<(u32, Buffer)> = segments(cells, |text| fonts.face_of(text))
+			let buffers: Vec<(u32, Buffer)> = segments(cells, |text| fonts.run_of(text))
 				.iter()
 				.map(|segment| (segment.col, layout(fonts, size.font_size, cell, segment)))
 				.collect();
@@ -355,13 +356,14 @@ impl Segment {
 	}
 }
 
-/// Splits a row into segments that each start at their own column. With hinting, glyphs of the main font advance
+/// Splits a row into segments that each start at their own column. With hinting, most glyphs of the main font advance
 /// exactly one cell, so a segment of its text only ends after a cell that may not: a double-width character. A cell
-/// that `face_of` says another font draws, whose glyphs can have any width, is a segment of its own.
+/// whose glyph may have another width, as `run_of` says, is a segment of its own: one another font draws, or one the
+/// main font draws wider than a cell.
 ///
 /// Spaces draw nothing (cell backgrounds are drawn separately), so segments start and end with text. Leaving
 /// out the spaces that fill the rest of a row halves the time to lay it out.
-fn segments(cells: &[RenderCell], mut face_of: impl FnMut(&str) -> Option<u8>) -> Vec<Segment> {
+fn segments(cells: &[RenderCell], mut run_of: impl FnMut(&str) -> Run) -> Vec<Segment> {
 	let mut segments = Vec::new();
 	let mut current: Option<Segment> = None;
 	// Spaces after the current segment's text, added once more text follows
@@ -379,8 +381,7 @@ fn segments(cells: &[RenderCell], mut face_of: impl FnMut(&str) -> Option<u8>) -
 			_ => (),
 		}
 
-		let face = face_of(&cell.text);
-		if face != Some(0) {
+		if let Run::Alone(face) = run_of(&cell.text) {
 			segments.extend(current.take());
 			spaces = 0;
 			let mut segment = Segment { col, face, text: String::new(), spans: Vec::new() };
@@ -394,7 +395,8 @@ fn segments(cells: &[RenderCell], mut face_of: impl FnMut(&str) -> Option<u8>) -
 		}
 		spaces = 0;
 
-		let segment = current.get_or_insert_with(|| Segment { col, face, text: String::new(), spans: Vec::new() });
+		let segment =
+			current.get_or_insert_with(|| Segment { col, face: Some(0), text: String::new(), spans: Vec::new() });
 		segment.push(&cell.text, cell.style);
 
 		let double_width = cells.get(col as usize + 1).is_some_and(|next| next.text.is_empty());
@@ -442,7 +444,7 @@ fn layout(fonts: &mut Fonts, font_size: f32, cell: CellSize, segment: &Segment) 
 mod tests {
 	use arrayvec::ArrayString;
 
-	use super::{CellLayer, Fonts, RenderCell, Segment, TextSize, TextStyle, segments, update_rows};
+	use super::{CellLayer, Fonts, RenderCell, Run, Segment, TextSize, TextStyle, segments, update_rows};
 	use crate::Decoration;
 
 	const PLAIN: TextStyle = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
@@ -466,13 +468,13 @@ mod tests {
 	}
 
 	/// A main font with ASCII only, and no other chosen fonts
-	fn ascii_only(text: &str) -> Option<u8> {
-		text.is_ascii().then_some(0)
+	fn ascii_only(text: &str) -> Run {
+		if text.is_ascii() { Run::Main } else { Run::Alone(None) }
 	}
 
-	/// Every character in the main font
-	fn main_font(_: &str) -> Option<u8> {
-		Some(0)
+	/// Every character in the main font, one cell wide
+	fn main_font(_: &str) -> Run {
+		Run::Main
 	}
 
 	/// A layer one cell wide, with one row per string
@@ -523,8 +525,17 @@ mod tests {
 		);
 
 		// In the second chosen font
-		let face = |text: &str| if text == "é" { Some(1) } else { Some(0) };
+		let face = |text: &str| if text == "é" { Run::Alone(Some(1)) } else { Run::Main };
 		assert_eq!(segments(&row, face)[1].face, Some(1));
+	}
+
+	#[test]
+	fn a_main_font_glyph_wider_than_a_cell_is_a_segment_of_its_own() {
+		// Like Iosevka's ➜, two cells wide while Neovim gives it one: in a run, the text after it would move.
+		let wide = |text: &str| if text == "➜" { Run::Alone(Some(0)) } else { Run::Main };
+		let row = cells(&["e", " ", "➜", " ", "N"], PLAIN);
+		let arrow = Segment { col: 2, face: Some(0), text: String::from("➜"), spans: vec![(0..3, PLAIN)] };
+		assert_eq!(segments(&row, wide), [segment(0, "e", &[(0..1, PLAIN)]), arrow, segment(4, "N", &[(0..1, PLAIN)])]);
 	}
 
 	#[test]
@@ -665,7 +676,7 @@ mod tests {
 		// "g" and "y" reach below the baseline; "a" and "e" don't. Each case gives the gaps' cells.
 		let gaps = |fonts: &mut Fonts, swash: &mut glyphon::SwashCache, text: &str, underline, lines| {
 			let layer = underlined(text, underline);
-			let buffers: Vec<_> = segments(&layer.cells, |text| fonts.face_of(text))
+			let buffers: Vec<_> = segments(&layer.cells, |text| fonts.run_of(text))
 				.iter()
 				.map(|segment| (segment.col, super::layout(fonts, size.font_size, cell, segment)))
 				.collect();

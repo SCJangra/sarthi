@@ -114,6 +114,9 @@ pub struct Fonts {
 	/// Which of `faces` have each character seen so far, as a bit per face
 	coverage: FxHashMap<char, u32>,
 
+	/// Whether the main font draws each character seen so far exactly one cell wide
+	one_cell: FxHashMap<char, bool>,
+
 	/// The weight and style to lay out text in with each chosen font, by face, bold and italic (see [`Fonts::variant`])
 	variants: FxHashMap<(Option<u8>, bool, bool), (Weight, Style)>,
 
@@ -141,6 +144,13 @@ impl Face {
 	fn has(&self, c: char) -> bool {
 		FontRef::from_index(self.font.data(), self.index).is_ok_and(|font| font.charmap().map(c).is_some())
 	}
+
+	/// The advance of `c`'s glyph at a font size of 1 pixel, if the font has it
+	fn advance(&self, c: char) -> Option<f32> {
+		let font = FontRef::from_index(self.font.data(), self.index).ok()?;
+		let glyph = font.charmap().map(c)?;
+		font.glyph_metrics(Size::new(1.0), LocationRef::default()).advance_width(glyph)
+	}
 }
 
 impl Fonts {
@@ -157,6 +167,7 @@ impl Fonts {
 			system,
 			faces: Vec::new(),
 			coverage: FxHashMap::default(),
+			one_cell: FxHashMap::default(),
 			variants: FxHashMap::default(),
 			em,
 			bold: false,
@@ -195,6 +206,7 @@ impl Fonts {
 		self.system.db_mut().set_monospace_family(faces[0].family.clone());
 		(self.faces, self.em, self.bold, self.italic) = (faces, em, choice.bold, choice.italic);
 		self.coverage.clear();
+		self.one_cell.clear();
 		self.variants.clear();
 		self.generation = self.generation.wrapping_add(1);
 	}
@@ -265,6 +277,27 @@ impl Fonts {
 		(coverage != 0).then(|| coverage.trailing_zeros() as u8)
 	}
 
+	/// Where `text`, one cell's characters, goes when a row is laid out: into a run of the main font's text if the main
+	/// font draws it exactly one cell wide, otherwise into a run of its own, at its own cell. Some glyphs of a monospace
+	/// font are wider, like Iosevka's ➜ (two cells), while Neovim gives the character one cell: in a run, everything after
+	/// it would move.
+	pub(crate) fn run_of(&mut self, text: &str) -> Run {
+		match self.face_of(text) {
+			Some(0) if self.one_cell(text) => Run::Main,
+			face => Run::Alone(face),
+		}
+	}
+
+	/// Whether the main font draws `text` exactly one cell wide: its first character, which combining ones follow
+	fn one_cell(&mut self, text: &str) -> bool {
+		let Some(c) = text.chars().next() else { return true };
+		let (main, cell_width) = (&self.faces[0], self.em.cell_width);
+		*self
+			.one_cell
+			.entry(c)
+			.or_insert_with(|| main.advance(c).is_some_and(|advance| (advance - cell_width).abs() < 1e-4))
+	}
+
 	/// The weight and style to lay out `bold` or `italic` text in, in chosen font `face` (see [`Fonts::face_of`]):
 	/// those of the face its family has closest to them, found like CSS and fontconfig do, e.g. Heavy for bold in a
 	/// family without Bold, or Oblique for italic. cosmic-text only takes a face of a family at the exact weight asked
@@ -304,6 +337,16 @@ impl Face {
 	fn metrics(&self) -> Option<EmMetrics> {
 		EmMetrics::measure(&FontRef::from_index(self.font.data(), self.index).ok()?)
 	}
+}
+
+/// Where a cell's text goes when a row is laid out (see [`Fonts::run_of`])
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Run {
+	/// Into a run of the main font's text
+	Main,
+
+	/// Into a run of its own, drawn with chosen font `face`, or the system's fonts for `None`
+	Alone(Option<u8>),
 }
 
 /// The regular face of `family`, whose name may differ in case from the font's
@@ -393,7 +436,7 @@ mod tests {
 	use glyphon::fontdb::{Family, Query, Style, Weight};
 	use glyphon::{Attrs, Buffer, Metrics, Shaping};
 
-	use super::{BUNDLED, CellSize, FontChoice, FontError, Fonts, LineMetrics, TextSize, UnderlineSize};
+	use super::{BUNDLED, CellSize, FontChoice, FontError, Fonts, LineMetrics, Run, TextSize, UnderlineSize};
 
 	#[test]
 	fn cell_size() {
@@ -464,6 +507,21 @@ mod tests {
 		assert_eq!(fonts.face_of("漢"), None);
 		assert_eq!(fonts.face_of("😀"), None);
 		assert_eq!(fonts.face_of("a漢"), None);
+	}
+
+	#[test]
+	fn glyphs_wider_than_a_cell_are_runs_of_their_own() {
+		let mut fonts = Fonts::new();
+		assert_eq!((fonts.run_of("a"), fonts.run_of("─")), (Run::Main, Run::Main));
+		assert_eq!(fonts.run_of("漢"), Run::Alone(None));
+
+		// Iosevka draws ➜ two cells wide.
+		let choice = FontChoice { families: vec![String::from("Iosevka")], ..FontChoice::default() };
+		if fonts.choose(&choice).is_err() {
+			eprintln!("skipped: Iosevka isn't installed");
+			return;
+		}
+		assert_eq!((fonts.run_of("a"), fonts.run_of("➜")), (Run::Main, Run::Alone(Some(0))));
 	}
 
 	#[test]
