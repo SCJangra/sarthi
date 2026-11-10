@@ -64,9 +64,17 @@ impl RpcClientInner {
 			while self_clone.running.load(Ordering::SeqCst) {
 				let Ok(request) = request.recv() else { break };
 
-				if let Err(err) = Self::send_request(request, &mut writer) {
-					tracing::error!("Failed to send request: {err}");
-					break;
+				match Self::send_request(request, &mut writer) {
+					Ok(()) => (),
+					// Neovim exited, e.g. after `:qa`, while something was still on its way to it.
+					Err(RpcError::FlushRequest(err)) if err.kind() == io::ErrorKind::BrokenPipe => {
+						tracing::debug!("Neovim's input closed: {err}");
+						break;
+					},
+					Err(err) => {
+						tracing::error!("Failed to send request: {err}");
+						break;
+					},
 				}
 			}
 		});
