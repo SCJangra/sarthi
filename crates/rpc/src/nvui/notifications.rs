@@ -15,7 +15,6 @@ pub struct WinScrolledArgs {
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct ScrolledWindow {
-	/// Lua's handles are plain numbers.
 	#[serde(deserialize_with = "window_number")]
 	pub win: Window,
 
@@ -27,6 +26,28 @@ pub struct ScrolledWindow {
 	pub smooth_scroll: Option<bool>,
 }
 
+/// Floating windows whose filetype or variables changed since they were last sent, sent before Neovim draws them
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct FloatsChangedArgs {
+	pub windows: Vec<FloatWindow>,
+}
+
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct FloatWindow {
+	#[serde(deserialize_with = "window_number")]
+	pub win: Window,
+
+	/// Of the buffer the window shows
+	pub filetype: String,
+
+	/// The window's `w:nvui_shadow`, if set
+	#[serde(default)]
+	pub shadow: Option<bool>,
+}
+
+/// Lua's window handles are plain numbers.
 fn window_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Window, D::Error> {
 	i64::deserialize(deserializer).map(Window)
 }
@@ -35,7 +56,7 @@ fn window_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Window, D
 mod tests {
 	use rmpv::Value;
 
-	use super::{ScrolledWindow, WinScrolledArgs};
+	use super::{FloatWindow, FloatsChangedArgs, ScrolledWindow, WinScrolledArgs};
 	use crate::{Notification, Window};
 
 	#[test]
@@ -58,5 +79,21 @@ mod tests {
 			],
 		};
 		assert_eq!(decoded, Notification::WinScrolled(expected));
+	}
+
+	#[test]
+	fn floats_changed() {
+		// `rpcnotify(channel, 'floats_changed', { { win = 1002, filetype = '', shadow = false } })`
+		let fields = vec![
+			(Value::from("win"), Value::from(1002)),
+			(Value::from("filetype"), Value::from("")),
+			(Value::from("shadow"), Value::from(false)),
+		];
+		let windows = Value::Array(vec![Value::Map(fields)]);
+		let notification = Value::Array(vec![Value::from("floats_changed"), Value::Array(vec![windows])]);
+		let decoded: Notification = rmp_serde::from_slice(&rmp_serde::to_vec(&notification).unwrap()).unwrap();
+
+		let window = FloatWindow { win: Window(1002), filetype: String::new(), shadow: Some(false) };
+		assert_eq!(decoded, Notification::FloatsChanged(FloatsChangedArgs { windows: vec![window] }));
 	}
 }

@@ -9,6 +9,7 @@ use serde::de::{self, Deserializer, Visitor};
 pub struct Settings {
 	pub scroll: ScrollSettings,
 	pub cursor: CursorSettings,
+	pub shadow: ShadowSettings,
 	pub underline: UnderlineSettings,
 	pub touchpad: TouchpadSettings,
 }
@@ -117,6 +118,32 @@ impl Default for CursorSettings {
 	}
 }
 
+/// The shadow under floating windows, in logical pixels
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ShadowSettings {
+	pub enabled: bool,
+
+	/// How far the edge fades out, like CSS's blur radius
+	pub blur: f32,
+
+	/// How far the shadow is moved from the window: right and down, or left and up if negative
+	pub offset: [f32; 2],
+
+	/// From 0, invisible, to 1, black where fully shadowed
+	pub opacity: f32,
+
+	/// Floating windows showing these filetypes have no shadow, e.g. scrollbars. A window's `w:nvui_shadow` overrides
+	/// this.
+	pub exclude_filetypes: Vec<String>,
+}
+
+impl Default for ShadowSettings {
+	fn default() -> Self {
+		Self { enabled: true, blur: 16.0, offset: [0.0, 4.0], opacity: 0.3, exclude_filetypes: Vec::new() }
+	}
+}
+
 /// How underlines are drawn, as adjustments to the font's own, in logical pixels
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -162,6 +189,8 @@ impl Settings {
 		validate_animation("cursor.animation", self.cursor.animation)?;
 		validate_animation("cursor.short_animation", self.cursor.short_animation)?;
 		check((0.0..=1.0).contains(&self.cursor.trail), "cursor.trail must be from 0 to 1")?;
+		check(self.shadow.blur >= 0.0, "shadow.blur can't be negative")?;
+		check((0.0..=1.0).contains(&self.shadow.opacity), "shadow.opacity must be from 0 to 1")?;
 
 		let underline = &self.underline;
 		check(underline.thickness.is_none_or(|thickness| thickness > 0.0), "underline.thickness must be more than 0")?;
@@ -308,6 +337,21 @@ mod tests {
 		let error = underline(vec![("wave_height", Value::from(0))]).unwrap_err();
 		assert_eq!(error, "underline.wave_height must be more than 0");
 		let error = underline(vec![("offset", Value::from("down"))]).unwrap_err();
+		assert!(error.contains("invalid type"), "{error}");
+	}
+
+	#[test]
+	fn shadow() {
+		let shadow = |pairs| parse(table(vec![("shadow", table(pairs))]));
+		let offset = Value::Array(vec![Value::from(2), Value::from(6)]);
+		let settings = shadow(vec![("offset", offset), ("enabled", Value::from(false))])
+			.unwrap()
+			.shadow;
+		assert_eq!((settings.offset, settings.enabled, settings.blur), ([2.0, 6.0], false, 16.0));
+
+		let error = shadow(vec![("opacity", Value::from(1.5))]).unwrap_err();
+		assert_eq!(error, "shadow.opacity must be from 0 to 1");
+		let error = shadow(vec![("offset", Value::from(3))]).unwrap_err();
 		assert!(error.contains("invalid type"), "{error}");
 	}
 

@@ -17,8 +17,8 @@ use rpc::neovim::{
 	UiTryResizeParams,
 };
 use rpc::nvui::{
-	ChangeFontSizeArgs, Copied, GetClipboardArgs, MODULES, Request, ResetFontSizeArgs, STARTUP, SetClipboardArgs,
-	SetFontSizeArgs, Settings, SetupArgs, WinScrolledArgs,
+	ChangeFontSizeArgs, Copied, FloatsChangedArgs, GetClipboardArgs, MODULES, Request, ResetFontSizeArgs, STARTUP,
+	SetClipboardArgs, SetFontSizeArgs, Settings, SetupArgs, WinScrolledArgs,
 };
 
 use crate::clipboard::Clipboard;
@@ -131,6 +131,7 @@ impl App {
 			.inspect_err(|error| tracing::warn!("Couldn't connect to the clipboard: {error}"))
 			.ok();
 		self.window = Some(WindowState { clipboard, window: window.clone(), renderer });
+		self.update_shadow();
 		Ok(window)
 	}
 
@@ -211,8 +212,21 @@ impl App {
 					self.editor.set_smooth_scroll(window.win, smooth);
 				}
 			},
+			// Before Neovim draws them
+			Notification::FloatsChanged(FloatsChangedArgs { windows }) => {
+				for window in windows {
+					let shadow = settings::float_shadow(&self.settings, &window);
+					self.editor.set_float_shadow(window.win, shadow);
+				}
+			},
 			Notification::Other { .. } => (),
 		}
+	}
+
+	/// Gives the editor the shadow for floating windows, in physical pixels of the window's display
+	fn update_shadow(&mut self) {
+		let scale = self.window.as_ref().map_or(1.0, |state| state.window.scale_factor()) as f32;
+		self.editor.set_shadow(settings::shadow(&self.settings, scale));
 	}
 
 	/// Applies Neovim's redraws, and shows the result once Neovim finished one, so events that arrive before the window
@@ -309,6 +323,7 @@ impl App {
 			state.window.request_redraw();
 		}
 		self.settings = settings;
+		self.update_shadow();
 		Ok(())
 	}
 
@@ -421,6 +436,7 @@ impl ApplicationHandler<AppEvent> for App {
 			},
 			WindowEvent::ScaleFactorChanged { .. } => {
 				self.resize_renderer();
+				self.update_shadow();
 				if let Err(error) = self.resize_nvim_ui(&window) {
 					self.exit_with_error(event_loop, error);
 					return;

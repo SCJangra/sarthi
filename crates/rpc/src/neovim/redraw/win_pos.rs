@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
+use crate::Window;
+
 /// Shows `grid` as a window at `start_row`, `start_col` of grid 1, `width` × `height` cells (`:help ui-multigrid`).
 /// Also shows it again after `win_hide`.
 #[derive(Debug, Deserialize)]
@@ -24,8 +26,7 @@ pub struct WinPosEvent {
 pub struct WinFloatPosEvent {
 	pub grid: u32,
 
-	/// The window handle, unused
-	pub win: IgnoredAny,
+	pub win: Window,
 
 	/// "NW", "NE", "SW" or "SE"
 	pub anchor: String,
@@ -91,7 +92,7 @@ mod tests {
 	use serde::de::IgnoredAny;
 
 	use super::{MsgSetPosEvent, WinCloseEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent};
-	use crate::RedrawNotification;
+	use crate::{RedrawNotification, Window};
 
 	/// Decodes `[name, args...]` the way Neovim sends it
 	fn decode(name: &str, args: Vec<Vec<Value>>) -> RedrawNotification {
@@ -133,7 +134,7 @@ mod tests {
 		let event = decode("win_float_pos", vec![float]);
 		let expected = WinFloatPosEvent {
 			grid: 6,
-			win: IgnoredAny,
+			win: Window(0x3EB),
 			anchor: String::from("NW"),
 			anchor_grid: 1,
 			anchor_row: 3.0,

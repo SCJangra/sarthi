@@ -7,7 +7,7 @@ pub mod highlight;
 
 use std::collections::{HashMap, HashSet};
 
-use renderer::{CellLayer, Layer, Scroll};
+use renderer::{CellLayer, Layer, Scroll, Shadow};
 use rpc::neovim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification, Window};
 
 use crate::compositor::cell_layer;
@@ -30,6 +30,10 @@ pub struct Editor {
 
 	/// Windows whose text jumps to its new place when it scrolls, rather than sliding
 	jumping: HashSet<Window>,
+
+	/// The shadow under floating windows, if any, and the floating windows without one
+	shadow: Option<Shadow>,
+	shadowless: HashSet<Window>,
 
 	highlights: HighlightState,
 	cursor: CursorState,
@@ -62,9 +66,9 @@ enum Placement {
 	/// A window at a cell of grid 1 (`win_pos`)
 	Tiled { row: u32, col: u32 },
 
-	/// A floating window at a cell of the screen, in Neovim's drawing order of floats (`win_float_pos`). Without
+	/// Floating window `win` at a cell of the screen, in Neovim's drawing order of floats (`win_float_pos`). Without
 	/// `mouse`, clicks go to what's below it.
-	Float { row: u32, col: u32, compindex: u32, mouse: bool },
+	Float { win: Window, row: u32, col: u32, compindex: u32, mouse: bool },
 
 	/// The message grid, across the screen from `row` down (`msg_set_pos`). When messages scrolled over the windows,
 	/// a line of `separator` goes above them.
@@ -122,6 +126,8 @@ impl Editor {
 			placements: HashMap::new(),
 			viewports: HashMap::new(),
 			jumping: HashSet::new(),
+			shadow: None,
+			shadowless: HashSet::new(),
 			highlights: HighlightState::new(),
 			cursor: CursorState::default(),
 			cursor_grid: 1,
@@ -158,6 +164,18 @@ impl Editor {
 	/// Whether the cursor's moves animate in insert and replace mode, and into and out of the command line
 	pub fn set_cursor_animation(&mut self, insert_mode: bool, cmdline: bool) {
 		self.cursor.set_animation(insert_mode, cmdline);
+	}
+
+	/// The shadow under floating windows, in physical pixels, or `None` for none
+	pub fn set_shadow(&mut self, shadow: Option<Shadow>) {
+		self.shadow = shadow;
+		self.stale = true;
+	}
+
+	/// Whether floating window `win` has the shadow
+	pub fn set_float_shadow(&mut self, win: Window, shadow: bool) {
+		let changed = if shadow { self.shadowless.remove(&win) } else { self.shadowless.insert(win) };
+		self.stale |= changed;
 	}
 
 	/// A `guifont` value the way [`Editor::guifont`] gives it: empty if it's Neovim's default
@@ -242,7 +260,9 @@ impl Editor {
 					if let Some(win) = self.viewports.remove(&destroy.grid).and_then(|viewport| viewport.win) {
 						self.jumping.remove(&win);
 					}
-					self.placements.remove(&destroy.grid);
+					if let Some(Placement::Float { win, .. }) = self.placements.remove(&destroy.grid) {
+						self.shadowless.remove(&win);
+					}
 					self.stale = true;
 				}
 			},
@@ -282,8 +302,8 @@ impl Editor {
 			RedrawNotification::WinFloatPos(positions) => {
 				for position in positions {
 					let (row, col, compindex) = (position.screen_row, position.screen_col, position.compindex);
-					let mouse = position.mouse_enabled;
-					self.place(position.grid, Placement::Float { row, col, compindex, mouse });
+					let (win, mouse) = (position.win, position.mouse_enabled);
+					self.place(position.grid, Placement::Float { win, row, col, compindex, mouse });
 				}
 			},
 			RedrawNotification::WinHide(hides) => {
@@ -438,8 +458,12 @@ impl Editor {
 		}
 		for (id, placement) in placed {
 			match placement {
-				Placement::Tiled { row, col } | Placement::Float { row, col, .. } => {
-					layers.push(self.layer(id, *row, *col))
+				Placement::Tiled { row, col } => layers.push(self.layer(id, *row, *col)),
+				Placement::Float { win, row, col, .. } => {
+					let mut layer = self.layer(id, *row, *col);
+					let Layer::Cells(cells) = &mut layer;
+					cells.shadow = self.shadow.filter(|_| !self.shadowless.contains(win));
+					layers.push(layer);
 				},
 				Placement::Message { row, separator, .. } => {
 					if let Some(separator) = separator {
@@ -512,7 +536,7 @@ fn clip_rows(layer: &mut Layer, height: u32) {
 
 #[cfg(test)]
 mod tests {
-	use renderer::{CellLayer, Cursor, CursorShape, Layer};
+	use renderer::{CellLayer, Cursor, CursorShape, Layer, Shadow};
 	use rpc::neovim::{
 		CellText, DefaultColorsSetEvent, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
 		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, OptionSetEvent, OptionValue,
@@ -617,7 +641,7 @@ mod tests {
 	fn float(grid: u32, row: u32, col: u32, compindex: u32) -> RedrawNotification {
 		RedrawNotification::WinFloatPos(vec![WinFloatPosEvent {
 			grid,
-			win: IgnoredAny,
+			win: win_of(grid),
 			anchor: String::from("NW"),
 			anchor_grid: 1,
 			anchor_row: f64::from(row),
@@ -803,6 +827,37 @@ mod tests {
 		assert_eq!(scroll_of(&redraw, 2), None);
 		let redraw = flush(&mut editor, vec![viewport(2, 300, -294), line(2, 0, "a")]);
 		assert_eq!(scroll_of(&redraw, 2), None);
+	}
+
+	#[test]
+	fn floating_windows_have_the_shadow() {
+		let shadow = Shadow { blur: 8.0, offset: [0.0, 2.0], color: 0, opacity: 0.5 };
+		let shadow_of = |redraw: &Redraw, id: u64| {
+			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
+			layer.shadow
+		};
+		let mut editor = screen();
+		flush(&mut editor, vec![resize(3, 2, 1), win_pos(2, 0, 0), float(3, 1, 1, 1)]);
+
+		// None until set
+		let redraw = flush(&mut editor, vec![line(3, 0, "a")]);
+		assert_eq!(shadow_of(&redraw, 3), None);
+
+		editor.set_shadow(Some(shadow));
+		let redraw = flush(&mut editor, vec![line(3, 0, "b")]);
+		// The float has it, the window doesn't.
+		assert_eq!((shadow_of(&redraw, 3), shadow_of(&redraw, 2)), (Some(shadow), None));
+
+		// A float left out, until it isn't: either is a change to draw.
+		editor.set_float_shadow(win_of(3), false);
+		assert_eq!(shadow_of(&flush(&mut editor, vec![]), 3), None);
+		editor.set_float_shadow(win_of(3), true);
+		assert_eq!(shadow_of(&flush(&mut editor, vec![]), 3), Some(shadow));
+
+		// Forgotten with the float's grid
+		editor.set_float_shadow(win_of(3), false);
+		flush(&mut editor, vec![RedrawNotification::GridDestroy(vec![GridDestroyEvent { grid: 3 }])]);
+		assert!(editor.shadowless.is_empty());
 	}
 
 	#[test]

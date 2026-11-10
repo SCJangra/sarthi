@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use renderer::{CursorMotion, Easing, Motion, UnderlineSize};
-use rpc::nvui::{Animation, ScrolledWindow, Settings};
+use renderer::{CursorMotion, Easing, Motion, Shadow, UnderlineSize};
+use rpc::nvui::{Animation, FloatWindow, ScrolledWindow, Settings};
 
 /// How the renderer moves scrolled text
 pub fn scroll_motion(settings: &Settings) -> Motion {
@@ -39,6 +39,22 @@ pub fn smooth_scroll(settings: &Settings, window: &ScrolledWindow) -> bool {
 	window.smooth_scroll.unwrap_or(!excluded)
 }
 
+/// The shadow under floating windows, in physical pixels for a display of `scale`, unless it's off
+pub fn shadow(settings: &Settings, scale: f32) -> Option<Shadow> {
+	let shadow = &settings.shadow;
+	let [x, y] = shadow.offset;
+	let shadow =
+		Shadow { blur: shadow.blur * scale, offset: [x * scale, y * scale], color: 0x000000, opacity: shadow.opacity };
+	settings.shadow.enabled.then_some(shadow)
+}
+
+/// Whether floating window `window` has the shadow: unless its filetype is excluded, or its `w:nvui_shadow` says
+/// otherwise
+pub fn float_shadow(settings: &Settings, window: &FloatWindow) -> bool {
+	let excluded = settings.shadow.exclude_filetypes.contains(&window.filetype);
+	window.shadow.unwrap_or(!excluded)
+}
+
 /// How the renderer draws underlines, in logical pixels
 pub fn underlines(settings: &Settings) -> UnderlineSize {
 	let underline = &settings.underline;
@@ -53,9 +69,26 @@ pub fn underlines(settings: &Settings) -> UnderlineSize {
 #[cfg(test)]
 mod tests {
 	use rpc::neovim::Window;
-	use rpc::nvui::{ScrolledWindow, Settings};
+	use rpc::nvui::{FloatWindow, ScrolledWindow, Settings};
 
 	use super::smooth_scroll;
+
+	#[test]
+	fn shadows() {
+		let mut settings = Settings::default();
+		let shadow = super::shadow(&settings, 2.0).unwrap();
+		assert_eq!((shadow.blur, shadow.offset, shadow.opacity), (32.0, [0.0, 8.0], 0.3));
+		settings.shadow.enabled = false;
+		assert_eq!(super::shadow(&settings, 2.0), None);
+
+		settings.shadow.exclude_filetypes = vec![String::from("satellite")];
+		let window = |filetype: &str, shadow| FloatWindow { win: Window(1000), filetype: filetype.into(), shadow };
+		assert!(super::float_shadow(&settings, &window("TelescopeResults", None)));
+		assert!(!super::float_shadow(&settings, &window("satellite", None)));
+		// The window's variable wins.
+		assert!(super::float_shadow(&settings, &window("satellite", Some(true))));
+		assert!(!super::float_shadow(&settings, &window("lua", Some(false))));
+	}
 
 	#[test]
 	fn which_windows_slide() {

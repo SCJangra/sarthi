@@ -39,6 +39,8 @@ function M.setup(opts)
     error('nvui: ' .. mistake, 2)
   end
   current = merged
+  -- Floating windows open already get the new settings too.
+  require('nvui.floats').resend()
 end
 
 --- Sets the font size, in points (4 to 96), by setting `:h` in `guifont`.

@@ -14,11 +14,12 @@ pub use settings::*;
 pub const STARTUP: &str = include_str!("../../../../runtime/startup.lua");
 
 /// nvui's Lua modules (`runtime/lua/`), by module name, preloaded at startup
-pub const MODULES: [(&str, &str); 4] = [
+pub const MODULES: [(&str, &str); 5] = [
 	("nvui", include_str!("../../../../runtime/lua/nvui/init.lua")),
 	("nvui.rpc", include_str!("../../../../runtime/lua/nvui/rpc.lua")),
 	("nvui.clipboard", include_str!("../../../../runtime/lua/nvui/clipboard.lua")),
 	("nvui.scroll", include_str!("../../../../runtime/lua/nvui/scroll.lua")),
+	("nvui.floats", include_str!("../../../../runtime/lua/nvui/floats.lua")),
 ];
 
 #[cfg(test)]
