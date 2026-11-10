@@ -33,9 +33,8 @@ impl NvimRequest {
 		&self.method
 	}
 
-	/// The request's arguments as `T`, e.g. a tuple for positional arguments
-	pub fn params<T: DeserializeOwned>(&self) -> Result<T, rmpv::ext::Error> {
-		rmpv::ext::from_value(self.params.clone())
+	pub fn params<T: DeserializeOwned>(&self) -> Result<T, String> {
+		rmpv::ext::from_value(self.params.clone()).map_err(|rmpv::ext::Error::Syntax(message)| message)
 	}
 
 	/// Answers the request: with `result`, or with an error carrying the message

@@ -158,7 +158,7 @@ impl App {
 		self.nvim.set_client_info(client_info())?;
 
 		// Before attaching, so it runs before the user's config, which Neovim sources once a UI attached.
-		if let Err(error) = self.nvim.exec_lua(clipboard::SETUP) {
+		if let Err(error) = self.nvim.exec_lua::<()>(clipboard::SETUP, ()) {
 			tracing::warn!("Couldn't set up the clipboard: {error}");
 		}
 		self.nvim.ui_attach(params)?;

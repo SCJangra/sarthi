@@ -2,11 +2,13 @@ use std::time::{Duration, Instant};
 use std::{process, thread};
 
 use flume::Receiver;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::{
-	Error, NvimClientInfo, NvimExecLua, NvimInput, NvimInputMouse, NvimInputMouseParams, NvimMessage,
-	NvimSetClientInfo, NvimUiAttach, NvimUiAttachParams, NvimUiSetFocus, NvimUiTryResize, NvimUiTryResizeParams,
-	RpcClient,
+	Error, NvimClientInfo, NvimExecLua, NvimGetChanInfo, NvimInput, NvimInputMouse, NvimInputMouseParams, NvimMessage,
+	NvimSetClientInfo, NvimSetVar, NvimUiAttach, NvimUiAttachParams, NvimUiSetFocus, NvimUiTryResize,
+	NvimUiTryResizeParams, RpcClient,
 };
 
 /// How long to wait for Neovim to exit on its own before killing it. Generous, since killing it
@@ -45,6 +47,16 @@ impl Nvim {
 		Ok((Self { rpc, process: NvimProcess(nvim) }, messages))
 	}
 
+	/// The id of the channel nvui and Neovim talk on, e.g. for Lua code that calls back with `rpcrequest()`
+	pub fn channel(&self) -> Result<u64, Error> {
+		Ok(self.rpc.call::<NvimGetChanInfo>([0]).map_err(Error::Rpc)?.id)
+	}
+
+	/// Sets the global variable `g:name` (`vim.g.name` in Lua) to `value`, without waiting for Neovim
+	pub fn set_var<V: Serialize>(&self, name: &str, value: V) -> Result<(), Error> {
+		self.rpc.notify::<NvimSetVar<V>>((name.to_owned(), value)).map_err(Error::Rpc)
+	}
+
 	/// Identifies the client to Neovim, e.g. for Lua code looking for its channel
 	pub fn set_client_info(&self, info: NvimClientInfo) -> Result<(), Error> {
 		self.rpc.notify::<NvimSetClientInfo>(info).map_err(Error::Rpc)
@@ -56,9 +68,15 @@ impl Nvim {
 		self.rpc.notify::<NvimExecLua>((code, vec![message.into()])).map_err(Error::Rpc)
 	}
 
-	/// Runs Lua `code` in Neovim and waits for its result
-	pub fn exec_lua(&self, code: &str) -> Result<rmpv::Value, Error> {
-		self.rpc.call::<NvimExecLua>((code.to_owned(), Vec::new())).map_err(Error::Rpc)
+	/// Runs Lua `code` in Neovim with `args`, a tuple (`()` for none) the code gets as `...`, and waits for its result
+	pub fn exec_lua<R: DeserializeOwned>(&self, code: &str, args: impl Serialize) -> Result<R, Error> {
+		let args = match rmpv::ext::to_value(args).map_err(|error| Error::Rpc(error.into()))? {
+			rmpv::Value::Array(args) => args,
+			rmpv::Value::Nil => Vec::new(),
+			arg => vec![arg],
+		};
+		let result = self.rpc.call::<NvimExecLua>((code.to_owned(), args)).map_err(Error::Rpc)?;
+		rmpv::ext::from_value(result).map_err(|error| Error::Rpc(error.into()))
 	}
 
 	/// Attaches as a UI and waits until Neovim accepted it
@@ -134,10 +152,28 @@ mod tests {
 		let (nvim, _messages) = Nvim::spawn(&["--embed", "--clean", "-i", "NONE", "-n"]).unwrap();
 		nvim.show_error("guifont: font not found: X").unwrap();
 		// Neovim handles the notification first, then this call.
-		let error = nvim.exec_lua("return vim.v.errmsg").unwrap();
-		assert_eq!(error, rmpv::Value::from("guifont: font not found: X"));
+		let error: String = nvim.exec_lua("return vim.v.errmsg", ()).unwrap();
+		assert_eq!(error, "guifont: font not found: X");
 
 		// With an error shown, Neovim doesn't exit right away when its input closes; quitting spares the test the wait.
-		nvim.exec_lua("vim.schedule(function() vim.cmd('qa!') end)").unwrap();
+		nvim.exec_lua::<()>("vim.schedule(function() vim.cmd('qa!') end)", ()).unwrap();
+	}
+
+	#[test]
+	fn channel_and_set_var() {
+		let (nvim, _messages) = Nvim::spawn(&["--embed", "--clean", "-i", "NONE", "-n"]).unwrap();
+		// The channel Neovim says we're on is the one Lua sees for us.
+		let channel = nvim.channel().unwrap();
+		let listed: u64 = nvim
+			.exec_lua(
+				"for _, chan in ipairs(vim.api.nvim_list_chans()) do if chan.mode == 'rpc' then return chan.id end end",
+				(),
+			)
+			.unwrap();
+		assert_eq!(channel, listed);
+
+		nvim.set_var("nvui_test", (true, 3)).unwrap();
+		let value: (bool, u32) = nvim.exec_lua("return vim.g.nvui_test", ()).unwrap();
+		assert_eq!(value, (true, 3));
 	}
 }
