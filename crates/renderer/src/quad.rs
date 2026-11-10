@@ -548,9 +548,8 @@ mod tests {
 	/// Draws `quads` on black into a `SIZE`×`SIZE` texture and returns its pixels row by row, or `None` without a GPU
 	fn draw(quads: &[Quad]) -> Option<Vec<[u8; 4]>> {
 		smol::block_on(async {
-			let instance = wgpu::Instance::default();
-			let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await.ok()?;
-			let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.ok()?;
+			let gpu = crate::test_gpu::gpu()?;
+			let (device, queue) = (&gpu.device, &gpu.queue);
 
 			let format = wgpu::TextureFormat::Rgba8Unorm;
 			let extent = wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 };
@@ -565,8 +564,8 @@ mod tests {
 				view_formats: &[],
 			});
 
-			let mut pipeline = QuadPipeline::new(&device, format);
-			pipeline.prepare(&device, &queue, SIZE, SIZE, quads);
+			let mut pipeline = QuadPipeline::new(device, format);
+			pipeline.prepare(device, queue, SIZE, SIZE, quads);
 
 			let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 			let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());

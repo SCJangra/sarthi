@@ -552,9 +552,8 @@ mod tests {
 	fn drawn(layers: &[Layer], shape: Option<([[f32; 2]; 4], u32)>) -> Option<(Vec<[u8; 4]>, crate::CellSize)> {
 		let (width, height) = (WIDTH, 19);
 		smol::block_on(async {
-			let instance = wgpu::Instance::default();
-			let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await.ok()?;
-			let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.ok()?;
+			let gpu = crate::test_gpu::gpu()?;
+			let (device, queue) = (&gpu.device, &gpu.queue);
 			let format = wgpu::TextureFormat::Rgba8Unorm;
 			let extent = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
 			let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -571,11 +570,11 @@ mod tests {
 			let mut fonts = Fonts::new();
 			let size = TextSize::new(14.0);
 			let (cell, lines) = (fonts.cell_size(size), fonts.line_metrics(size));
-			let mut text = TextPipeline::new(&device, &queue, format);
+			let mut text = TextPipeline::new(device, queue, format);
 			let scrolls = ScrollAnimations::new(RendererConfig::default().scroll);
 			let pieces = pieces(layers, &scrolls, cell, (width, height), Instant::now());
 			let resolution = glyphon::Resolution { width, height };
-			text.prepare(&device, &queue, resolution, &mut fonts, &pieces, size).unwrap();
+			text.prepare(device, queue, resolution, &mut fonts, &pieces, size).unwrap();
 
 			let mut quads = Vec::new();
 			let ranges: Vec<_> = pieces
@@ -589,12 +588,12 @@ mod tests {
 					shape: true,
 				}))
 				.collect();
-			let shape_pipeline = ShapePipeline::new(&device, format);
+			let shape_pipeline = ShapePipeline::new(device, format);
 			if let Some((corners, color)) = shape {
-				shape_pipeline.prepare(&queue, width, height, corners, crate::color::rgba(color, false));
+				shape_pipeline.prepare(queue, width, height, corners, crate::color::rgba(color, false));
 			}
-			let mut pipeline = QuadPipeline::new(&device, format);
-			pipeline.prepare(&device, &queue, width, height, &quads);
+			let mut pipeline = QuadPipeline::new(device, format);
+			pipeline.prepare(device, queue, width, height, &quads);
 
 			let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 			let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());

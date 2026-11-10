@@ -10,6 +10,8 @@ mod quad;
 mod renderer;
 mod scroll;
 mod shape;
+#[cfg(test)]
+mod test_gpu;
 mod text;
 
 pub use animation::{Easing, Motion};
