@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::color::{rgba, wgpu_color};
 use crate::cursor::{CursorAnimation, cursor_rect};
 use crate::font::LineMetrics;
-use crate::quad::{Quad, QuadPipeline, bar_cursor, cell_backgrounds, cell_decorations};
+use crate::quad::{Quad, QuadPipeline, area_shadow, bar_cursor, cell_backgrounds, cell_decorations};
 use crate::scroll::ScrollAnimations;
 use crate::shape::ShapePipeline;
 use crate::text::TextPipeline;
@@ -447,10 +447,8 @@ fn layer_quads(
 ) -> LayerQuads {
 	let layer = &piece.layer;
 	let shadow = quads.len();
-	if let Some(layer_shadow) = layer.shadow.filter(|_| piece.kind == PieceKind::Layer) {
-		let (width, height) = (layer.width * cell.width, layer.height * cell.height);
-		let rect = [layer.col * cell.width, layer.row * cell.height, width, height].map(|value| value as f32);
-		quads.push(Quad::shadow(rect, layer_shadow, srgb));
+	if let Some(layer_shadow) = layer.shadow.as_ref().filter(|_| piece.kind == PieceKind::Layer) {
+		area_shadow(quads, layer_shadow, cell, srgb);
 	}
 	let start = quads.len();
 	// The shape of a cursor on its way stands in for its background or bar.
@@ -717,6 +715,7 @@ mod tests {
 		// A white cell at column 3, with a red shadow, on black
 		let shadow = crate::Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
 		let Layer::Cells(white) = cell(1, " ", 0xFFFFFF);
+		let shadow = crate::LayerShadow { shadow, area: vec![[3, 0, 1, 1]] };
 		let layer = Layer::Cells(CellLayer { col: 3, shadow: Some(shadow), ..white });
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");

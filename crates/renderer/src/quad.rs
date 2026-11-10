@@ -4,7 +4,9 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::color::rgba;
 use crate::font::LineMetrics;
-use crate::{BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, RenderCell, Shadow, Underline};
+use crate::{
+	BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, LayerShadow, RenderCell, Shadow, Underline,
+};
 
 /// A rectangle in physical pixels, with optional rounded corners and border
 #[repr(C)]
@@ -328,6 +330,52 @@ pub(crate) fn bar_cursor(quads: &mut Vec<Quad>, layer: &CellLayer, cell: CellSiz
 	quads.push(Quad::fill(rect.map(|value| value as f32), rgba(cursor.color, srgb_surface)));
 }
 
+/// Adds the quads of `shadow`, with cells of `cell`. Its area is first cut into rectangles that don't overlap: a blur
+/// is linear, so the shadow of their union is the sum of theirs, and where the area's rectangles overlap (a window and
+/// its border, say) the shadow isn't drawn twice. Blending the pieces instead of summing them differs by well under 1%.
+pub(crate) fn area_shadow(quads: &mut Vec<Quad>, shadow: &LayerShadow, cell: CellSize, srgb_surface: bool) {
+	for [col, row, width, height] in disjoint(&shadow.area) {
+		let rect = [col * cell.width, row * cell.height, width * cell.width, height * cell.height];
+		quads.push(Quad::shadow(rect.map(|value| value as f32), shadow.shadow, srgb_surface));
+	}
+}
+
+/// The area of `rects` (left, top, width, height) as rectangles that don't overlap: by bands between the rectangles'
+/// top and bottom edges, each band in runs of covered columns
+fn disjoint(rects: &[[u32; 4]]) -> Vec<[u32; 4]> {
+	let edges = |start: usize, size: usize| {
+		let mut edges: Vec<u32> = rects.iter().flat_map(|rect| [rect[start], rect[start] + rect[size]]).collect();
+		edges.sort_unstable();
+		edges.dedup();
+		edges
+	};
+	let (xs, ys) = (edges(0, 2), edges(1, 3));
+	let covers = |rect: &[u32; 4], x: u32, y: u32| {
+		(rect[0]..rect[0] + rect[2]).contains(&x) && (rect[1]..rect[1] + rect[3]).contains(&y)
+	};
+
+	let mut pieces = Vec::new();
+	for band in ys.windows(2) {
+		let (top, bottom) = (band[0], band[1]);
+		let mut run: Option<u32> = None;
+		for column in xs.windows(2) {
+			let covered = rects.iter().any(|rect| covers(rect, column[0], top));
+			match (covered, run) {
+				(true, None) => run = Some(column[0]),
+				(false, Some(left)) => {
+					pieces.push([left, top, column[0] - left, bottom - top]);
+					run = None;
+				},
+				_ => (),
+			}
+		}
+		if let (Some(left), Some(&right)) = (run, xs.last()) {
+			pieces.push([left, top, right - left, bottom - top]);
+		}
+	}
+	pieces
+}
+
 /// Runs of neighbouring cells with the same background, as (first column, length, color)
 fn background_runs(cells: &[RenderCell]) -> impl Iterator<Item = (u32, u32, u32)> {
 	cells.chunk_by(|a, b| a.background == b.background).scan(0, |col, run| {
@@ -341,7 +389,7 @@ fn background_runs(cells: &[RenderCell]) -> impl Iterator<Item = (u32, u32, u32)
 mod tests {
 	use arrayvec::ArrayString;
 
-	use super::{DASHES, DOTS, Quad, QuadPipeline, WAVE, background_runs, bar_cursor, cell_decorations};
+	use super::{DASHES, DOTS, Quad, QuadPipeline, WAVE, background_runs, bar_cursor, cell_decorations, disjoint};
 	use crate::font::LineMetrics;
 	use crate::{
 		BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, RenderCell, TextStyle, Underline,
@@ -469,6 +517,19 @@ mod tests {
 		assert!(decorations(Decoration::default()).is_empty());
 		// An underline color alone draws nothing.
 		assert!(decorations(Decoration { underline_color: GREEN, ..Decoration::default() }).is_empty());
+	}
+
+	#[test]
+	fn shadow_areas_are_cut_into_rectangles_that_dont_overlap() {
+		// Side by side, like a picker's windows: one rectangle
+		assert_eq!(disjoint(&[[0, 0, 4, 2], [4, 0, 3, 2]]), [[0, 0, 7, 2]]);
+		// A window inside its border: the border's rectangle, by bands
+		assert_eq!(disjoint(&[[0, 0, 10, 5], [1, 1, 8, 3]]), [[0, 0, 10, 1], [0, 1, 10, 3], [0, 4, 10, 1]]);
+		// A menu with a shorter window beside it
+		assert_eq!(disjoint(&[[0, 0, 4, 4], [4, 0, 3, 2]]), [[0, 0, 7, 2], [0, 2, 4, 2]]);
+		// Apart
+		assert_eq!(disjoint(&[[0, 0, 2, 1], [5, 0, 2, 1]]), [[0, 0, 2, 1], [5, 0, 2, 1]]);
+		assert_eq!(disjoint(&[]), Vec::<[u32; 4]>::new());
 	}
 
 	#[test]

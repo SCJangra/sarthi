@@ -45,11 +45,23 @@ pub struct FloatWindow {
 	/// The window's `w:nvui_shadow`, if set
 	#[serde(default)]
 	pub shadow: Option<bool>,
+
+	/// How transparent the window is, from 0 to 100 (`winblend`)
+	#[serde(default)]
+	pub winblend: u32,
+
+	/// The floating window it's attached to (`relative = 'win'`), like a scrollbar to its menu
+	#[serde(default, deserialize_with = "optional_window_number")]
+	pub parent: Option<Window>,
 }
 
 /// Lua's window handles are plain numbers.
 fn window_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Window, D::Error> {
 	i64::deserialize(deserializer).map(Window)
+}
+
+fn optional_window_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Window>, D::Error> {
+	Option::<i64>::deserialize(deserializer).map(|handle| handle.map(Window))
 }
 
 #[cfg(test)]
@@ -89,11 +101,25 @@ mod tests {
 			(Value::from("filetype"), Value::from("")),
 			(Value::from("shadow"), Value::from(false)),
 		];
-		let windows = Value::Array(vec![Value::Map(fields)]);
+		let attached = vec![
+			(Value::from("win"), Value::from(1003)),
+			(Value::from("filetype"), Value::from("")),
+			(Value::from("winblend"), Value::from(100)),
+			(Value::from("parent"), Value::from(1002)),
+		];
+		let windows = Value::Array(vec![Value::Map(fields), Value::Map(attached)]);
 		let notification = Value::Array(vec![Value::from("floats_changed"), Value::Array(vec![windows])]);
 		let decoded: Notification = rmp_serde::from_slice(&rmp_serde::to_vec(&notification).unwrap()).unwrap();
 
-		let window = FloatWindow { win: Window(1002), filetype: String::new(), shadow: Some(false) };
-		assert_eq!(decoded, Notification::FloatsChanged(FloatsChangedArgs { windows: vec![window] }));
+		let window =
+			FloatWindow { win: Window(1002), filetype: String::new(), shadow: Some(false), winblend: 0, parent: None };
+		let attached = FloatWindow {
+			win: Window(1003),
+			winblend: 100,
+			parent: Some(Window(1002)),
+			shadow: None,
+			filetype: String::new(),
+		};
+		assert_eq!(decoded, Notification::FloatsChanged(FloatsChangedArgs { windows: vec![window, attached] }));
 	}
 }

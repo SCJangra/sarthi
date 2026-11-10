@@ -28,8 +28,18 @@ pub struct CellLayer {
 	/// How the text moved since the layer was last shown, so the renderer can slide it to its new place
 	pub scroll: Option<Scroll>,
 
-	/// A shadow under the layer's rectangle, e.g. for a floating window
-	pub shadow: Option<Shadow>,
+	/// A shadow under the layer, and under others drawn with it: e.g. under the floating windows of one plugin's UI, drawn
+	/// with the first of them
+	pub shadow: Option<LayerShadow>,
+}
+
+/// A shadow under an area of the window, made of rectangles that may overlap
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayerShadow {
+	pub shadow: Shadow,
+
+	/// Rectangles in cells from the window's top-left corner: column, row, width, height
+	pub area: Vec<[u32; 4]>,
 }
 
 /// A soft shadow under a rectangle, like CSS's `box-shadow`, in physical pixels

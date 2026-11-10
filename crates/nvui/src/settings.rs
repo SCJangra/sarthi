@@ -48,11 +48,11 @@ pub fn shadow(settings: &Settings, scale: f32) -> Option<Shadow> {
 	settings.shadow.enabled.then_some(shadow)
 }
 
-/// Whether floating window `window` has the shadow: unless its filetype is excluded, or its `w:nvui_shadow` says
-/// otherwise
+/// Whether floating window `window` casts a shadow: unless it's fully transparent, or its filetype is excluded and
+/// its `w:nvui_shadow` doesn't say otherwise, or that says so
 pub fn float_shadow(settings: &Settings, window: &FloatWindow) -> bool {
 	let excluded = settings.shadow.exclude_filetypes.contains(&window.filetype);
-	window.shadow.unwrap_or(!excluded)
+	window.winblend < 100 && window.shadow.unwrap_or(!excluded)
 }
 
 /// How the renderer draws underlines, in logical pixels
@@ -82,12 +82,21 @@ mod tests {
 		assert_eq!(super::shadow(&settings, 2.0), None);
 
 		settings.shadow.exclude_filetypes = vec![String::from("satellite")];
-		let window = |filetype: &str, shadow| FloatWindow { win: Window(1000), filetype: filetype.into(), shadow };
+		let window = |filetype: &str, shadow| FloatWindow {
+			win: Window(1000),
+			filetype: filetype.into(),
+			shadow,
+			winblend: 0,
+			parent: None,
+		};
 		assert!(super::float_shadow(&settings, &window("TelescopeResults", None)));
 		assert!(!super::float_shadow(&settings, &window("satellite", None)));
 		// The window's variable wins.
 		assert!(super::float_shadow(&settings, &window("satellite", Some(true))));
 		assert!(!super::float_shadow(&settings, &window("lua", Some(false))));
+		// Fully transparent: no shadow, whatever the variable says
+		let transparent = FloatWindow { winblend: 100, ..window("lua", Some(true)) };
+		assert!(!super::float_shadow(&settings, &transparent));
 	}
 
 	#[test]

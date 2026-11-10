@@ -7,7 +7,7 @@ pub mod highlight;
 
 use std::collections::{HashMap, HashSet};
 
-use renderer::{CellLayer, Layer, Scroll, Shadow};
+use renderer::{CellLayer, Layer, LayerShadow, Scroll, Shadow};
 use rpc::neovim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification, Window};
 
 use crate::compositor::cell_layer;
@@ -31,9 +31,9 @@ pub struct Editor {
 	/// Windows whose text jumps to its new place when it scrolls, rather than sliding
 	jumping: HashSet<Window>,
 
-	/// The shadow under floating windows, if any, and the floating windows without one
+	/// The shadow under floating windows, if any, and what decides each float's part in it
 	shadow: Option<Shadow>,
-	shadowless: HashSet<Window>,
+	floats: HashMap<Window, FloatShadow>,
 
 	highlights: HighlightState,
 	cursor: CursorState,
@@ -68,7 +68,7 @@ enum Placement {
 
 	/// Floating window `win` at a cell of the screen, in Neovim's drawing order of floats (`win_float_pos`). Without
 	/// `mouse`, clicks go to what's below it.
-	Float { win: Window, row: u32, col: u32, compindex: u32, mouse: bool },
+	Float { win: Window, row: u32, col: u32, zindex: u32, compindex: u32, mouse: bool },
 
 	/// The message grid, across the screen from `row` down (`msg_set_pos`). When messages scrolled over the windows,
 	/// a line of `separator` goes above them.
@@ -93,6 +93,16 @@ struct Viewport {
 
 	/// Rows the text moved up since the last `flush`, or down if negative
 	scrolled: i64,
+}
+
+/// A floating window's part in the shadow under floating windows
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FloatShadow {
+	/// Whether it casts one: not if left out by the settings, or if it's fully transparent
+	pub casts: bool,
+
+	/// The floating window it's attached to, like a scrollbar to its menu: it shares that window's shadow.
+	pub parent: Option<Window>,
 }
 
 /// A cell of a grid
@@ -127,7 +137,7 @@ impl Editor {
 			viewports: HashMap::new(),
 			jumping: HashSet::new(),
 			shadow: None,
-			shadowless: HashSet::new(),
+			floats: HashMap::new(),
 			highlights: HighlightState::new(),
 			cursor: CursorState::default(),
 			cursor_grid: 1,
@@ -166,16 +176,21 @@ impl Editor {
 		self.cursor.set_animation(insert_mode, cmdline);
 	}
 
+	/// The layers to draw, if something set on nvui's side changed since the last redraw, like the shadow: to show it
+	/// without waiting for Neovim's next redraw. Call it between Neovim's redraws, which nvui's Lua and settings come in.
+	pub fn refresh(&mut self) -> Option<Redraw> {
+		self.flush()
+	}
+
 	/// The shadow under floating windows, in physical pixels, or `None` for none
 	pub fn set_shadow(&mut self, shadow: Option<Shadow>) {
 		self.shadow = shadow;
 		self.stale = true;
 	}
 
-	/// Whether floating window `win` has the shadow
-	pub fn set_float_shadow(&mut self, win: Window, shadow: bool) {
-		let changed = if shadow { self.shadowless.remove(&win) } else { self.shadowless.insert(win) };
-		self.stale |= changed;
+	/// Floating window `win`'s part in the shadow; until set, it casts one and isn't attached
+	pub fn set_float_shadow(&mut self, win: Window, shadow: FloatShadow) {
+		self.stale |= self.floats.insert(win, shadow) != Some(shadow);
 	}
 
 	/// A `guifont` value the way [`Editor::guifont`] gives it: empty if it's Neovim's default
@@ -261,7 +276,7 @@ impl Editor {
 						self.jumping.remove(&win);
 					}
 					if let Some(Placement::Float { win, .. }) = self.placements.remove(&destroy.grid) {
-						self.shadowless.remove(&win);
+						self.floats.remove(&win);
 					}
 					self.stale = true;
 				}
@@ -302,8 +317,8 @@ impl Editor {
 			RedrawNotification::WinFloatPos(positions) => {
 				for position in positions {
 					let (row, col, compindex) = (position.screen_row, position.screen_col, position.compindex);
-					let (win, mouse) = (position.win, position.mouse_enabled);
-					self.place(position.grid, Placement::Float { win, row, col, compindex, mouse });
+					let (win, zindex, mouse) = (position.win, position.zindex, position.mouse_enabled);
+					self.place(position.grid, Placement::Float { win, row, col, zindex, compindex, mouse });
 				}
 			},
 			RedrawNotification::WinHide(hides) => {
@@ -452,6 +467,7 @@ impl Editor {
 		let screen_height = self.grids.get(&1).map_or(0, |grid| grid.height as u32);
 		let placed = self.stacked();
 
+		let mut shadows = self.float_shadows(&placed);
 		let mut layers = Vec::with_capacity(placed.len() + 2);
 		if self.grids.contains_key(&1) {
 			layers.push(self.layer(1, 0, 0));
@@ -459,10 +475,10 @@ impl Editor {
 		for (id, placement) in placed {
 			match placement {
 				Placement::Tiled { row, col } => layers.push(self.layer(id, *row, *col)),
-				Placement::Float { win, row, col, .. } => {
+				Placement::Float { row, col, .. } => {
 					let mut layer = self.layer(id, *row, *col);
 					let Layer::Cells(cells) = &mut layer;
-					cells.shadow = self.shadow.filter(|_| !self.shadowless.contains(win));
+					cells.shadow = shadows.remove(&id);
 					layers.push(layer);
 				},
 				Placement::Message { row, separator, .. } => {
@@ -478,6 +494,47 @@ impl Editor {
 			}
 		}
 		layers
+	}
+
+	/// The shadows under the floating windows among `placed`, by the grid of the window each is drawn with. Floats at one
+	/// `zindex` share a shadow, so the windows of a plugin's UI read as one; a float attached to another counts at that
+	/// float's level. Each shadow is drawn with its group's first window, under all of them.
+	fn float_shadows(&self, placed: &[(u32, &Placement)]) -> HashMap<u32, LayerShadow> {
+		let Some(shadow) = self.shadow else { return HashMap::new() };
+		let floats: Vec<(u32, Window, u32, [u32; 2])> = placed
+			.iter()
+			.filter_map(|&(id, placement)| match placement {
+				Placement::Float { win, row, col, zindex, .. } => Some((id, *win, *zindex, [*col, *row])),
+				_ => None,
+			})
+			.collect();
+		let zindex: HashMap<Window, u32> = floats.iter().map(|&(_, win, zindex, _)| (win, zindex)).collect();
+		let parent = |win: &Window| {
+			self.floats
+				.get(win)
+				.and_then(|float| float.parent)
+				.filter(|parent| zindex.contains_key(parent))
+		};
+		// Up to the float it's attached to, if any, and on from there; at most once per float, so a loop ends
+		let level = |mut win: Window| {
+			for _ in 0..floats.len() {
+				let Some(next) = parent(&win) else { break };
+				win = next;
+			}
+			zindex[&win]
+		};
+
+		let mut groups: HashMap<u32, (u32, LayerShadow)> = HashMap::new();
+		for &(id, win, _, [col, row]) in &floats {
+			let (_, group) = groups
+				.entry(level(win))
+				.or_insert_with(|| (id, LayerShadow { shadow, area: Vec::new() }));
+			if self.floats.get(&win).is_none_or(|float| float.casts) {
+				let grid = &self.grids[&id];
+				group.area.push([col, row, grid.width as u32, grid.height as u32]);
+			}
+		}
+		groups.into_values().filter(|(_, group)| !group.area.is_empty()).collect()
 	}
 
 	/// Grid `id` as a layer at `row`, `col`, with the cursor if it's in this grid
@@ -545,7 +602,7 @@ mod tests {
 	};
 	use serde::de::IgnoredAny;
 
-	use super::{Editor, GridPosition, Redraw};
+	use super::{Editor, FloatShadow, GridPosition, Redraw};
 
 	const FG: u32 = 0xC7C7C7;
 	const BG: u32 = 0x1C1C1C;
@@ -639,6 +696,11 @@ mod tests {
 	}
 
 	fn float(grid: u32, row: u32, col: u32, compindex: u32) -> RedrawNotification {
+		float_at_level(grid, row, col, compindex, 50)
+	}
+
+	/// Like [`float`], at `zindex`
+	fn float_at_level(grid: u32, row: u32, col: u32, compindex: u32, zindex: u32) -> RedrawNotification {
 		RedrawNotification::WinFloatPos(vec![WinFloatPosEvent {
 			grid,
 			win: win_of(grid),
@@ -647,7 +709,7 @@ mod tests {
 			anchor_row: f64::from(row),
 			anchor_col: f64::from(col),
 			mouse_enabled: true,
-			zindex: 50,
+			zindex,
 			compindex,
 			screen_row: row,
 			screen_col: col,
@@ -832,10 +894,6 @@ mod tests {
 	#[test]
 	fn floating_windows_have_the_shadow() {
 		let shadow = Shadow { blur: 8.0, offset: [0.0, 2.0], color: 0, opacity: 0.5 };
-		let shadow_of = |redraw: &Redraw, id: u64| {
-			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
-			layer.shadow
-		};
 		let mut editor = screen();
 		flush(&mut editor, vec![resize(3, 2, 1), win_pos(2, 0, 0), float(3, 1, 1, 1)]);
 
@@ -845,19 +903,56 @@ mod tests {
 
 		editor.set_shadow(Some(shadow));
 		let redraw = flush(&mut editor, vec![line(3, 0, "b")]);
-		// The float has it, the window doesn't.
-		assert_eq!((shadow_of(&redraw, 3), shadow_of(&redraw, 2)), (Some(shadow), None));
+		// The float has it, under its own cells; the window doesn't.
+		assert_eq!((shadow_of(&redraw, 3), shadow_of(&redraw, 2)), (Some(vec![[1, 1, 2, 1]]), None));
 
 		// A float left out, until it isn't: either is a change to draw.
-		editor.set_float_shadow(win_of(3), false);
+		editor.set_float_shadow(win_of(3), FloatShadow { casts: false, parent: None });
 		assert_eq!(shadow_of(&flush(&mut editor, vec![]), 3), None);
-		editor.set_float_shadow(win_of(3), true);
-		assert_eq!(shadow_of(&flush(&mut editor, vec![]), 3), Some(shadow));
+		editor.set_float_shadow(win_of(3), FloatShadow { casts: true, parent: None });
+		assert!(shadow_of(&flush(&mut editor, vec![]), 3).is_some());
+
+		// Changes on nvui's side show without waiting for Neovim's next redraw, and only if there are any.
+		assert_eq!(editor.refresh(), None);
+		editor.set_float_shadow(win_of(3), FloatShadow { casts: false, parent: None });
+		let redraw = editor.refresh().expect("the shadow changed");
+		assert_eq!(shadow_of(&redraw, 3), None);
 
 		// Forgotten with the float's grid
-		editor.set_float_shadow(win_of(3), false);
 		flush(&mut editor, vec![RedrawNotification::GridDestroy(vec![GridDestroyEvent { grid: 3 }])]);
-		assert!(editor.shadowless.is_empty());
+		assert!(editor.floats.is_empty());
+	}
+
+	#[test]
+	fn floats_at_one_level_share_a_shadow() {
+		let mut editor = screen();
+		editor.set_shadow(Some(Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 }));
+		// 3 and 4 side by side at 50, like a picker's windows; 5 at 52 attached to 3, like a scrollbar; 6 at 100, a hover
+		// over them; 7 at 50, fully transparent
+		let mut events: Vec<_> = (3..=7).map(|id| resize(id, 2, 1)).collect();
+		events.extend([
+			float_at_level(3, 1, 1, 1, 50),
+			float_at_level(4, 1, 3, 2, 50),
+			float_at_level(5, 1, 5, 3, 52),
+			float_at_level(6, 0, 2, 4, 100),
+			float_at_level(7, 3, 0, 5, 50),
+		]);
+		flush(&mut editor, events);
+		editor.set_float_shadow(win_of(5), FloatShadow { casts: true, parent: Some(win_of(3)) });
+		editor.set_float_shadow(win_of(7), FloatShadow { casts: false, parent: None });
+		let redraw = flush(&mut editor, vec![]);
+
+		// One shadow for 3, 4 and the attached 5, drawn with the first of them
+		assert_eq!(shadow_of(&redraw, 3), Some(vec![[1, 1, 2, 1], [3, 1, 2, 1], [5, 1, 2, 1]]));
+		assert_eq!((shadow_of(&redraw, 4), shadow_of(&redraw, 5), shadow_of(&redraw, 7)), (None, None, None));
+		// The hover has its own.
+		assert_eq!(shadow_of(&redraw, 6), Some(vec![[2, 0, 2, 1]]));
+	}
+
+	/// The area of the shadow drawn with grid `id`'s layer in `redraw`
+	fn shadow_of(redraw: &Redraw, id: u64) -> Option<Vec<[u32; 4]>> {
+		let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
+		layer.shadow.as_ref().map(|shadow| shadow.area.clone())
 	}
 
 	#[test]

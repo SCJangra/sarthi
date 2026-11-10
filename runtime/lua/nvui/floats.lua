@@ -1,6 +1,6 @@
--- Tells nvui about floating windows before Neovim draws them, so nvui can decide which have a shadow: it knows the
--- settings (`shadow.exclude_filetypes`), and Neovim knows each window's filetype and `w:nvui_shadow`. Sends a window
--- again only when these change.
+-- Tells nvui about floating windows before Neovim draws them, so nvui can decide which cast a shadow: it knows the
+-- settings (`shadow.exclude_filetypes`), and Neovim knows each window's filetype, `w:nvui_shadow`, `winblend`, and the
+-- floating window it's attached to, if any. Sends a window again only when these change.
 local rpc = require('nvui.rpc')
 
 local M = {}
@@ -8,17 +8,32 @@ local M = {}
 -- What was last sent for each window, by handle
 local sent = {}
 
+-- What's sent about each window, besides its handle; any may be nil
+local FACTS = { 'filetype', 'shadow', 'winblend', 'parent' }
+
+--- Whether `win` is a floating window
+local function is_float(win)
+  return win ~= nil and vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_config(win).relative ~= ''
+end
+
 local function forward()
   local windows = {}
   for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_config(win).relative ~= '' then
+    local config = vim.api.nvim_win_get_config(win)
+    if config.relative ~= '' then
       local window = {
         win = win,
         filetype = vim.bo[vim.api.nvim_win_get_buf(win)].filetype,
         shadow = vim.w[win].nvui_shadow,
+        winblend = vim.wo[win].winblend,
+        parent = config.relative == 'win' and is_float(config.win) and config.win or nil,
       }
       local last = sent[win]
-      if not last or last.filetype ~= window.filetype or last.shadow ~= window.shadow then
+      local changed = not last
+      for _, key in ipairs(FACTS) do
+        changed = changed or last[key] ~= window[key]
+      end
+      if changed then
         sent[win] = window
         table.insert(windows, window)
       end

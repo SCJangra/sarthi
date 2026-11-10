@@ -9,7 +9,7 @@ use winit::event_loop::EventLoopProxy;
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowAttributes, WindowId};
 
-use editor::Editor;
+use editor::{Editor, FloatShadow, Redraw};
 use renderer::{CellSize, FontChoice, Fonts, Frame, Renderer, RendererConfig, RendererError, TextSize};
 use rpc::client::{IncomingRequest, Message, Nvim};
 use rpc::neovim::{
@@ -215,9 +215,12 @@ impl App {
 			// Before Neovim draws them
 			Notification::FloatsChanged(FloatsChangedArgs { windows }) => {
 				for window in windows {
-					let shadow = settings::float_shadow(&self.settings, &window);
-					self.editor.set_float_shadow(window.win, shadow);
+					let casts = settings::float_shadow(&self.settings, &window);
+					self.editor
+						.set_float_shadow(window.win, FloatShadow { casts, parent: window.parent });
 				}
+				// E.g. a float made transparent: Neovim drew it already, and won't again for this.
+				self.refresh();
 			},
 			Notification::Other { .. } => (),
 		}
@@ -246,6 +249,17 @@ impl App {
 			}
 		}
 
+		self.show(redraw);
+	}
+
+	/// Shows what changed on nvui's side since Neovim's last redraw, like a float's shadow, without waiting for its next
+	fn refresh(&mut self) {
+		if let Some(redraw) = self.editor.refresh() {
+			self.show(redraw);
+		}
+	}
+
+	fn show(&mut self, redraw: Redraw) {
 		let Some(state) = &mut self.window else { return };
 		state.renderer.set_clear_color(redraw.background);
 		state.renderer.set_layers(redraw.layers);
@@ -324,6 +338,7 @@ impl App {
 		}
 		self.settings = settings;
 		self.update_shadow();
+		self.refresh();
 		Ok(())
 	}
 
@@ -437,6 +452,7 @@ impl ApplicationHandler<AppEvent> for App {
 			WindowEvent::ScaleFactorChanged { .. } => {
 				self.resize_renderer();
 				self.update_shadow();
+				self.refresh();
 				if let Err(error) = self.resize_nvim_ui(&window) {
 					self.exit_with_error(event_loop, error);
 					return;
