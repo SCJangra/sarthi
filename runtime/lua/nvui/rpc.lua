@@ -15,4 +15,9 @@ function M.request(method, ...)
   return answer
 end
 
+--- Tells nvui `method` with the arguments, without waiting for it
+function M.notify(method, ...)
+  vim.rpcnotify(M.channel, method, ...)
+end
+
 return M

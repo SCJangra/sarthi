@@ -1,14 +1,15 @@
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
+use crate::Window;
+
 /// Which buffer lines the window of `grid` shows, sent when they change (`:help ui-event-win_viewport`)
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinViewportEvent {
 	pub grid: u32,
 
-	/// The window handle, unused
-	pub win: IgnoredAny,
+	pub win: Window,
 
 	/// First line shown, 0-based
 	pub topline: u32,
@@ -46,7 +47,7 @@ mod tests {
 	use serde::de::IgnoredAny;
 
 	use super::{WinViewportEvent, WinViewportMarginsEvent};
-	use crate::RedrawNotification;
+	use crate::{RedrawNotification, Window};
 
 	/// Decodes `[name, args...]` the way Neovim sends it
 	fn decode(name: &str, args: Vec<Value>) -> RedrawNotification {
@@ -66,7 +67,7 @@ mod tests {
 		let event = decode("win_viewport", [2.into(), win()].into_iter().chain(args).collect());
 		let expected = WinViewportEvent {
 			grid: 2,
-			win: IgnoredAny,
+			win: Window(1000),
 			topline: 2,
 			botline: 16,
 			curline: 3,

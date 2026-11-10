@@ -17,6 +17,10 @@ pub struct Settings {
 pub struct ScrollSettings {
 	/// How text that scrolled moves to its new place
 	pub animation: Animation,
+
+	/// Windows showing these filetypes jump to their new place, e.g. menus whose selected line is highlighted text. A
+	/// window's `w:nvui_smooth_scroll` overrides this.
+	pub exclude_filetypes: Vec<String>,
 }
 
 /// An animation's curve, e.g. `{ curve = "spring", stiffness = 400, damping = 32 }`. Durations are in milliseconds.

@@ -5,10 +5,10 @@ pub mod cursor;
 pub mod grid;
 pub mod highlight;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use renderer::{CellLayer, Layer, Scroll};
-use rpc::neovim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification};
+use rpc::neovim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification, Window};
 
 use crate::compositor::cell_layer;
 use crate::cursor::CursorState;
@@ -27,6 +27,9 @@ pub struct Editor {
 
 	/// How each window's text scrolls, by grid
 	viewports: HashMap<u32, Viewport>,
+
+	/// Windows whose text jumps to its new place when it scrolls, rather than sliding
+	jumping: HashSet<Window>,
 
 	highlights: HighlightState,
 	cursor: CursorState,
@@ -74,6 +77,9 @@ enum Placement {
 /// How a window's text scrolls, from `win_viewport` and `win_viewport_margins`
 #[derive(Debug, Default)]
 struct Viewport {
+	/// The window, from `win_viewport`
+	win: Option<Window>,
+
 	/// Lines in the window's buffer. When it changes, the window likely shows another buffer, which Neovim also
 	/// reports as a scroll.
 	line_count: u32,
@@ -115,6 +121,7 @@ impl Editor {
 			grids: HashMap::new(),
 			placements: HashMap::new(),
 			viewports: HashMap::new(),
+			jumping: HashSet::new(),
 			highlights: HighlightState::new(),
 			cursor: CursorState::default(),
 			cursor_grid: 1,
@@ -136,6 +143,16 @@ impl Editor {
 	/// Neovim's default (a list of common fonts, while nvui has its own default font).
 	pub fn guifont(&self) -> &str {
 		&self.guifont
+	}
+
+	/// Whether `win`'s text slides when it scrolls, or jumps to its new place. Applies from the next scroll, even one
+	/// already applied but not yet flushed.
+	pub fn set_smooth_scroll(&mut self, win: Window, smooth: bool) {
+		if smooth {
+			self.jumping.remove(&win);
+		} else {
+			self.jumping.insert(win);
+		}
 	}
 
 	/// A `guifont` value the way [`Editor::guifont`] gives it: empty if it's Neovim's default
@@ -217,7 +234,9 @@ impl Editor {
 			RedrawNotification::GridDestroy(destroys) => {
 				for destroy in destroys {
 					self.grids.remove(&destroy.grid);
-					self.viewports.remove(&destroy.grid);
+					if let Some(win) = self.viewports.remove(&destroy.grid).and_then(|viewport| viewport.win) {
+						self.jumping.remove(&win);
+					}
 					self.placements.remove(&destroy.grid);
 					self.stale = true;
 				}
@@ -289,6 +308,7 @@ impl Editor {
 					let same_buffer = viewport.line_count == event.line_count;
 					viewport.scrolled = if same_buffer { viewport.scrolled + event.scroll_delta } else { 0 };
 					viewport.line_count = event.line_count;
+					viewport.win = Some(event.win);
 				}
 			},
 			RedrawNotification::WinViewportMargins(margins) => {
@@ -439,7 +459,11 @@ impl Editor {
 
 	/// How the text of grid `id`, `width` × `height` cells, scrolled since the last `flush`, if it did
 	fn scroll(&self, id: u32, width: u32, height: u32) -> Option<Scroll> {
-		let viewport = self.viewports.get(&id).filter(|viewport| viewport.scrolled != 0)?;
+		let jumps = |viewport: &Viewport| viewport.win.is_some_and(|win| self.jumping.contains(&win));
+		let viewport = self
+			.viewports
+			.get(&id)
+			.filter(|viewport| viewport.scrolled != 0 && !jumps(viewport))?;
 		let [top, bottom, left, right] = viewport.margins;
 		Some(Scroll {
 			rows: viewport.scrolled.clamp(i32::MIN.into(), i32::MAX.into()) as i32,
@@ -485,7 +509,7 @@ mod tests {
 		CellText, DefaultColorsSetEvent, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
 		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, OptionSetEvent, OptionValue,
 		RedrawNotification, WinCloseEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent, WinViewportEvent,
-		WinViewportMarginsEvent,
+		WinViewportMarginsEvent, Window,
 	};
 	use serde::de::IgnoredAny;
 
@@ -706,10 +730,15 @@ mod tests {
 		assert_eq!((cursor(0), cursor(1)), (None, Some((0, 1))));
 	}
 
+	/// The window of grid `grid`, in these tests
+	fn win_of(grid: u32) -> Window {
+		Window(1000 + i64::from(grid))
+	}
+
 	fn viewport(grid: u32, line_count: u32, scroll_delta: i64) -> RedrawNotification {
 		RedrawNotification::WinViewport(vec![WinViewportEvent {
 			grid,
-			win: IgnoredAny,
+			win: win_of(grid),
 			topline: 0,
 			botline: 0,
 			curline: 0,
@@ -765,6 +794,26 @@ mod tests {
 		assert_eq!(scroll_of(&redraw, 2), None);
 		let redraw = flush(&mut editor, vec![viewport(2, 300, -294), line(2, 0, "a")]);
 		assert_eq!(scroll_of(&redraw, 2), None);
+	}
+
+	#[test]
+	fn some_windows_jump() {
+		let mut editor = screen();
+		flush(&mut editor, vec![win_pos(2, 0, 0), viewport(2, 100, 0)]);
+
+		// Told before the redraw that scrolls, like `WinScrolled` does
+		editor.set_smooth_scroll(win_of(2), false);
+		let redraw = flush(&mut editor, vec![viewport(2, 100, 1), line(2, 0, "a")]);
+		assert_eq!(scroll_of(&redraw, 2), None);
+
+		editor.set_smooth_scroll(win_of(2), true);
+		let redraw = flush(&mut editor, vec![viewport(2, 100, 1), line(2, 0, "b")]);
+		assert_eq!(scroll_of(&redraw, 2), Some((1, 0, 3, 0, 4)));
+
+		// Forgotten with the window's grid
+		editor.set_smooth_scroll(win_of(2), false);
+		flush(&mut editor, vec![RedrawNotification::GridDestroy(vec![GridDestroyEvent { grid: 2 }])]);
+		assert!(editor.jumping.is_empty());
 	}
 
 	fn option(name: &str, value: OptionValue) -> RedrawNotification {

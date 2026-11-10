@@ -11,3 +11,4 @@ require('nvui.rpc').channel = channel
 
 -- What works without the user's config asking for it
 require('nvui.clipboard')
+require('nvui.scroll')

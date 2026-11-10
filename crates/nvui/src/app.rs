@@ -13,11 +13,12 @@ use editor::Editor;
 use renderer::{CellSize, FontChoice, Fonts, Frame, Renderer, RendererConfig, RendererError, TextSize};
 use rpc::client::{IncomingRequest, Message, Nvim};
 use rpc::neovim::{
-	ClientInfo, ClientVersion, InputMouseParams, Notification, UiAttachParams, UiOptions, UiTryResizeParams,
+	ClientInfo, ClientVersion, InputMouseParams, Notification, RedrawNotification, UiAttachParams, UiOptions,
+	UiTryResizeParams,
 };
 use rpc::nvui::{
 	ChangeFontSizeArgs, Copied, GetClipboardArgs, MODULES, Request, ResetFontSizeArgs, STARTUP, SetClipboardArgs,
-	SetFontSizeArgs, Settings, SetupArgs,
+	SetFontSizeArgs, Settings, SetupArgs, WinScrolledArgs,
 };
 
 use crate::clipboard::Clipboard;
@@ -196,10 +197,23 @@ impl App {
 		Ok(())
 	}
 
+	fn handle_nvim_notification(&mut self, notification: Notification) {
+		match notification {
+			Notification::Redraw(events) => self.redraw_nvim(events),
+			// Before the redraw that scrolls them
+			Notification::WinScrolled(WinScrolledArgs { windows }) => {
+				for window in windows {
+					let smooth = settings::smooth_scroll(&self.settings, &window);
+					self.editor.set_smooth_scroll(window.win, smooth);
+				}
+			},
+			Notification::Other { .. } => (),
+		}
+	}
+
 	/// Applies Neovim's redraws, and shows the result once Neovim finished one, so events that arrive before the window
 	/// redraws can't show half-applied.
-	fn handle_nvim_notification(&mut self, notification: Notification) {
-		let Notification::Redraw(events) = notification else { return };
+	fn redraw_nvim(&mut self, events: Vec<RedrawNotification>) {
 		let Some(redraw) = self.editor.apply(events) else { return };
 		let fonts_changed = self.editor.guifont() != self.guifont;
 		if fonts_changed {

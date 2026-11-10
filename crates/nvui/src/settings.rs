@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use renderer::{Easing, Motion, UnderlineSize};
-use rpc::nvui::{Animation, Settings};
+use rpc::nvui::{Animation, ScrolledWindow, Settings};
 
 /// How the renderer moves scrolled text
 pub fn scroll_motion(settings: &Settings) -> Motion {
@@ -21,6 +21,13 @@ pub fn scroll_motion(settings: &Settings) -> Motion {
 	}
 }
 
+/// Whether `window`'s text slides when it scrolls: unless its filetype is excluded, or its `w:nvui_smooth_scroll` says
+/// otherwise
+pub fn smooth_scroll(settings: &Settings, window: &ScrolledWindow) -> bool {
+	let excluded = settings.scroll.exclude_filetypes.contains(&window.filetype);
+	window.smooth_scroll.unwrap_or(!excluded)
+}
+
 /// How the renderer draws underlines, in logical pixels
 pub fn underlines(settings: &Settings) -> UnderlineSize {
 	let underline = &settings.underline;
@@ -29,5 +36,32 @@ pub fn underlines(settings: &Settings) -> UnderlineSize {
 		thickness: underline.thickness,
 		wave_height: underline.wave_height,
 		ink_gaps: underline.ink_gaps,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use rpc::neovim::Window;
+	use rpc::nvui::{ScrolledWindow, Settings};
+
+	use super::smooth_scroll;
+
+	#[test]
+	fn which_windows_slide() {
+		let mut settings = Settings::default();
+		settings.scroll.exclude_filetypes = vec![String::from("cmp_menu")];
+		let window = |filetype: &str, smooth_scroll| ScrolledWindow {
+			win: Window(1000),
+			filetype: filetype.into(),
+			smooth_scroll,
+		};
+
+		assert!(smooth_scroll(&settings, &window("lua", None)));
+		assert!(!smooth_scroll(&settings, &window("cmp_menu", None)));
+		// The window's variable wins.
+		assert!(smooth_scroll(&settings, &window("cmp_menu", Some(true))));
+		assert!(!smooth_scroll(&settings, &window("lua", Some(false))));
+		// Nothing is excluded by default.
+		assert!(smooth_scroll(&Settings::default(), &window("cmp_menu", None)));
 	}
 }
