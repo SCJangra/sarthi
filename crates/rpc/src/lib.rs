@@ -1,5 +1,5 @@
 //! nvui's RPC with Neovim: the connection and process (`client`), Neovim's API (`neovim`), and nvui's own API between
-//! nvui and its Lua (`nvui`, with the Lua in `lua/`).
+//! nvui and its Lua (`nvui`, with the Lua in the workspace's `runtime/`).
 
 pub mod client;
 pub mod neovim;

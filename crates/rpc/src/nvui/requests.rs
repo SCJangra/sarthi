@@ -1,4 +1,4 @@
-//! What nvui's Lua (`lua/*.lua`) asks of nvui, decoded straight from Neovim's requests. The method is the variant's name
+//! What nvui's Lua (`runtime/`) asks of nvui, decoded straight from Neovim's requests. The method is the variant's name
 //! in snake case, e.g. `rpcrequest(channel, "set_clipboard", register, lines, regtype)`, and the arguments are decoded
 //! in order into the variant's struct.
 

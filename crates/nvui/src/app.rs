@@ -16,8 +16,8 @@ use rpc::neovim::{
 	ClientInfo, ClientVersion, InputMouseParams, Notification, UiAttachParams, UiOptions, UiTryResizeParams,
 };
 use rpc::nvui::{
-	ChangeFontSizeArgs, Copied, GetClipboardArgs, LUA, Request, ResetFontSizeArgs, SetClipboardArgs, SetFontSizeArgs, Settings,
-	SetupArgs,
+	ChangeFontSizeArgs, Copied, GetClipboardArgs, MODULES, Request, ResetFontSizeArgs, STARTUP, SetClipboardArgs,
+	SetFontSizeArgs, Settings, SetupArgs,
 };
 
 use crate::clipboard::Clipboard;
@@ -175,10 +175,8 @@ impl App {
 		// check for nvui (`if vim.g.nvui then … end`) and use `require("nvui")`.
 		self.nvim.set_var("nvui", true)?;
 		let channel = self.nvim.channel()?;
-		for (what, code) in LUA {
-			if let Err(error) = self.nvim.exec_lua::<()>(code, (channel,)) {
-				tracing::warn!("Couldn't set up {what}: {error}");
-			}
+		if let Err(error) = self.nvim.exec_lua::<()>(STARTUP, (channel, MODULES)) {
+			tracing::warn!("Couldn't set up nvui's Lua: {error}");
 		}
 		self.nvim.ui_attach(params)?;
 		self.ui_size = size;

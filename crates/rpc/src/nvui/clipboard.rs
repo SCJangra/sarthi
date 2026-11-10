@@ -1,4 +1,4 @@
-//! What the clipboard provider in `lua/clipboard.lua` sends and gets back
+//! What the clipboard provider in `runtime/lua/nvui/clipboard.lua` sends and gets back
 
 use serde::{Deserialize, Serialize};
 
