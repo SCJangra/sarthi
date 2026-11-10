@@ -1,4 +1,4 @@
-use crate::Motion;
+use crate::{CursorMotion, Motion};
 
 #[derive(Debug, Clone)]
 pub struct RendererConfig {
@@ -12,6 +12,9 @@ pub struct RendererConfig {
 
 	/// How text that scrolled moves to its new place, until [`crate::Renderer::set_scroll_motion`] changes it
 	pub scroll: Motion,
+
+	/// How the cursor moves to a new place, until [`crate::Renderer::set_cursor_motion`] changes it
+	pub cursor: CursorMotion,
 }
 
 impl Default for RendererConfig {
@@ -23,6 +26,7 @@ impl Default for RendererConfig {
 			prefer_srgb_surface_format: true,
 			desired_maximum_frame_latency: 2,
 			scroll: Motion::Spring { stiffness: 400.0, damping: 32.0 },
+			cursor: CursorMotion::default(),
 		}
 	}
 }

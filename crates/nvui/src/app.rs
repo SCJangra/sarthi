@@ -136,8 +136,12 @@ impl App {
 
 	fn create_renderer(window: &Arc<Window>, background: u32, settings: &Settings) -> Result<Renderer, Error> {
 		let size = window.inner_size();
-		let config =
-			RendererConfig { background, scroll: settings::scroll_motion(settings), ..RendererConfig::default() };
+		let config = RendererConfig {
+			background,
+			scroll: settings::scroll_motion(settings),
+			cursor: settings::cursor_motion(settings),
+			..RendererConfig::default()
+		};
 		Ok(smol::block_on(Renderer::with_config(window.clone(), size.width, size.height, config))?)
 	}
 
@@ -297,8 +301,11 @@ impl App {
 	fn apply_settings(&mut self, settings: Settings) -> Result<(), String> {
 		settings.validate()?;
 		self.mouse.set_touchpad_scroll(settings.touchpad.scroll_speed);
+		self.editor
+			.set_cursor_animation(settings.cursor.animate_insert_mode, settings.cursor.animate_cmdline);
 		if let Some(state) = &mut self.window {
 			state.renderer.set_scroll_motion(settings::scroll_motion(&settings));
+			state.renderer.set_cursor_motion(settings::cursor_motion(&settings));
 			state.window.request_redraw();
 		}
 		self.settings = settings;

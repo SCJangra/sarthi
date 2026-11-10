@@ -104,6 +104,9 @@ pub struct Cursor {
 
 	/// Color of the character under a block cursor, so it stays readable. As `0xRRGGBB` in sRGB.
 	pub text_color: u32,
+
+	/// Whether moving here animates (see [`crate::CursorMotion`]); otherwise the cursor jumps here.
+	pub animate: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

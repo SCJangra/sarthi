@@ -321,7 +321,7 @@ mod tests {
 		let mut scrolled = layer(&["w", "b", "c", "d"], 1, 1, 4);
 		let Layer::Cells(cells) = &mut scrolled;
 		let shape = CursorShape::Bar { orientation: BarOrientation::Vertical, percentage: 25 };
-		cells.cursor = Some(Cursor { row: 2, col: 0, width: 1, shape, color: 0, text_color: 0 });
+		cells.cursor = Some(Cursor { row: 2, col: 0, width: 1, shape, color: 0, text_color: 0, animate: true });
 		scrolls.update(&shown, std::slice::from_ref(&scrolled), now);
 
 		let Layer::Cells(cells) = &scrolled;

@@ -69,7 +69,7 @@ fn draw_cursor(layer: &mut CellLayer, row: usize, col: usize, style: CursorStyle
 	};
 
 	let (row, col, width) = (row as u32, col as u32, if double_width { 2 } else { 1 });
-	layer.cursor = Some(Cursor { row, col, width, shape, color, text_color });
+	layer.cursor = Some(Cursor { row, col, width, shape, color, text_color, animate: style.animate });
 }
 
 #[cfg(test)]
@@ -137,7 +137,7 @@ mod tests {
 	}
 
 	fn style(shape: CursorShape, percentage: u32, attr_id: u32) -> CursorStyle {
-		CursorStyle { shape, percentage, attr_id }
+		CursorStyle { shape, percentage, attr_id, animate: true }
 	}
 
 	/// A 4×1 grid "ab漢" (the last cell is the right half of 漢) with the cursor at `col`
@@ -157,7 +157,7 @@ mod tests {
 	}
 
 	fn cursor(col: u32, width: u32, shape: renderer::CursorShape, color: u32, text_color: u32) -> Option<Cursor> {
-		Some(Cursor { row: 0, col, width, shape, color, text_color })
+		Some(Cursor { row: 0, col, width, shape, color, text_color, animate: true })
 	}
 
 	#[test]

@@ -2,14 +2,16 @@ use std::borrow::Cow;
 use std::ops::Range;
 use std::time::Instant;
 
-use crate::color::wgpu_color;
+use crate::color::{rgba, wgpu_color};
+use crate::cursor::{CursorAnimation, cursor_rect};
 use crate::font::LineMetrics;
 use crate::quad::{Quad, QuadPipeline, bar_cursor, cell_backgrounds, cell_decorations};
 use crate::scroll::ScrollAnimations;
+use crate::shape::ShapePipeline;
 use crate::text::TextPipeline;
 use crate::{
-	CellLayer, CellSize, Cursor, CursorShape, Fonts, Layer, Motion, RenderCell, RendererConfig, RendererError,
-	TextSize, TextStyle,
+	CellLayer, CellSize, Cursor, CursorMotion, CursorShape, Fonts, Layer, Motion, RenderCell, RendererConfig,
+	RendererError, TextSize, TextStyle,
 };
 
 pub struct Renderer {
@@ -20,10 +22,12 @@ pub struct Renderer {
 	clear_color: wgpu::Color,
 	quads: QuadPipeline,
 	text: TextPipeline,
+	shape: ShapePipeline,
 
-	/// What to draw, and the text sliding in it after scrolling
+	/// What to draw, the text sliding in it after scrolling, and the cursor on its way to where it is
 	layers: Vec<Layer>,
 	scrolls: ScrollAnimations,
+	cursor: CursorAnimation,
 
 	/// Quads of the current frame, layer by layer, and each layer's ranges of them; kept to reuse the allocations
 	frame_quads: Vec<Quad>,
@@ -123,6 +127,7 @@ impl Renderer {
 
 		let quads = QuadPipeline::new(&device, config.format);
 		let text = TextPipeline::new(&device, &queue, config.format);
+		let shape = ShapePipeline::new(&device, config.format);
 
 		Ok(Self {
 			surface,
@@ -132,8 +137,10 @@ impl Renderer {
 			clear_color,
 			quads,
 			text,
+			shape,
 			layers: Vec::new(),
 			scrolls: ScrollAnimations::new(renderer_config.scroll),
+			cursor: CursorAnimation::new(renderer_config.cursor),
 			frame_quads: Vec::new(),
 			layer_quads: Vec::new(),
 		})
@@ -162,14 +169,20 @@ impl Renderer {
 		self.scrolls.set_motion(motion);
 	}
 
+	/// Sets how the cursor moves to a new place, from its next move on
+	pub fn set_cursor_motion(&mut self, motion: CursorMotion) {
+		self.cursor.set_motion(motion);
+	}
+
 	/// The layers shown, as last set
 	pub fn layers(&self) -> &[Layer] {
 		&self.layers
 	}
 
-	/// Whether text is still sliding, so the window should be drawn again
+	/// Whether text is still sliding or the cursor moving, so the window should be drawn again
 	pub fn is_animating(&self) -> bool {
-		self.scrolls.is_animating(Instant::now())
+		let now = Instant::now();
+		self.scrolls.is_animating(now) || self.cursor.is_animating(now)
 	}
 
 	/// Draws the layers on the clear color, with text of `size`. Laying out text needs `fonts`, which all renderers
@@ -198,8 +211,17 @@ impl Renderer {
 		};
 
 		let (cell, lines, srgb) = (fonts.cell_size(size), fonts.line_metrics(size), self.config.format.is_srgb());
-		let surface = (self.config.width, self.config.height);
-		let pieces = pieces(&self.layers, &self.scrolls, cell, surface, Instant::now());
+		let (surface, now) = ((self.config.width, self.config.height), Instant::now());
+		// On its way, the cursor is drawn as its shape, with a block's character only where the shape covers its cell.
+		let moving = self.move_cursor(cell, now);
+		let mut pieces = pieces(&self.layers, &self.scrolls, cell, surface, now);
+		if let Some((corners, cursor)) = moving {
+			if let Some(piece) = pieces.last_mut().filter(|piece| piece.kind == PieceKind::Cursor) {
+				piece.clip = covered(piece, corners, cell);
+			}
+			self.shape
+				.prepare(&self.queue, surface.0, surface.1, corners, rgba(cursor.color, srgb));
+		}
 
 		let resolution = glyphon::Resolution { width: self.config.width, height: self.config.height };
 		self.text.prepare(&self.device, &self.queue, resolution, fonts, &pieces, size)?;
@@ -207,8 +229,9 @@ impl Renderer {
 		self.frame_quads.clear();
 		self.layer_quads.clear();
 		for piece in &pieces {
+			let moving = moving.is_some() && piece.kind == PieceKind::Cursor;
 			self.layer_quads
-				.push(layer_quads(&mut self.frame_quads, piece, &self.text, cell, lines, srgb));
+				.push(layer_quads(&mut self.frame_quads, piece, &self.text, cell, lines, srgb, moving));
 		}
 		self.quads
 			.prepare(&self.device, &self.queue, self.config.width, self.config.height, &self.frame_quads);
@@ -233,7 +256,7 @@ impl Renderer {
 				timestamp_writes: None,
 				multiview_mask: None,
 			});
-			draw_layers(&mut pass, &self.quads, &self.text, &self.layer_quads)?;
+			draw_layers(&mut pass, &self.quads, &self.text, &self.shape, surface, &self.layer_quads)?;
 		}
 
 		self.queue.submit(Some(encoder.finish()));
@@ -250,6 +273,41 @@ impl Renderer {
 	}
 }
 
+impl Renderer {
+	/// Moves the cursor animation on to the layers' cursor, with cells of `cell`, and gives the cursor and its corners
+	/// at `now` (in pixels: top-left, top-right, bottom-right, bottom-left) while it's on its way.
+	fn move_cursor(&mut self, cell: CellSize, now: Instant) -> Option<([[f32; 2]; 4], Cursor)> {
+		let (layer, cursor) = self
+			.layers
+			.iter()
+			.find_map(|Layer::Cells(layer)| Some((layer, layer.cursor?)))?;
+		self.cursor.update(cursor_rect(layer, cursor, cell), cursor.animate, cell, now);
+		if !self.cursor.is_animating(now) {
+			return None;
+		}
+		let corners = self.cursor.corners(now)?;
+		Some((corners.map(|[x, y]| [x * cell.width as f32, y * cell.height as f32]), cursor))
+	}
+}
+
+/// The part of the cursor `piece`, within its clip, that the cursor's shape covers while on its way, with `corners` in
+/// pixels and cells of `cell`
+fn covered(piece: &Piece, corners: [[f32; 2]; 4], cell: CellSize) -> [u32; 4] {
+	let layer = &piece.layer;
+	let [left, top, width, height] = piece.clip;
+	let (mut low, mut high) = ([left, top], [left + width, top + height]);
+	let cells = [[layer.col, layer.row], [layer.col + layer.width, layer.row + layer.height]];
+	let size = [cell.width, cell.height];
+	for axis in 0..2 {
+		let (least, most) = corners
+			.iter()
+			.fold((f32::MAX, f32::MIN), |(least, most), corner| (least.min(corner[axis]), most.max(corner[axis])));
+		low[axis] = low[axis].max(cells[0][axis] * size[axis]).max(least.floor().max(0.0) as u32);
+		high[axis] = high[axis].min(cells[1][axis] * size[axis]).min(most.ceil().max(0.0) as u32);
+	}
+	[low[0], low[1], high[0].saturating_sub(low[0]), high[1].saturating_sub(low[1])]
+}
+
 /// What happened when rendering a frame
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Frame {
@@ -263,8 +321,8 @@ pub enum Frame {
 	Reconfigured,
 }
 
-/// A cell layer as drawn in a frame: a whole layer, then over it the scrolling region of one whose text slides, and its
-/// cursor
+/// A cell layer as drawn in a frame: a whole layer, then over it the scrolling region of one whose text slides; and after
+/// all layers, the cursor
 pub(crate) struct Piece<'a> {
 	pub layer: Cow<'a, CellLayer>,
 
@@ -288,7 +346,7 @@ pub(crate) enum PieceKind {
 	Region,
 
 	/// The layer's cursor, where Neovim put it: drawn over text that's still sliding into place, so it never leaves the
-	/// window or crosses `scrolloff`
+	/// window or crosses `scrolloff`. Drawn last, over every layer.
 	Cursor,
 }
 
@@ -308,7 +366,8 @@ fn pieces<'a>(
 		[left, top, right - left, bottom - top]
 	};
 
-	let mut pieces = Vec::with_capacity(layers.len());
+	let mut pieces = Vec::with_capacity(layers.len() + 1);
+	let mut cursor_piece = None;
 	for Layer::Cells(layer) in layers {
 		let whole = clip(layer.col, layer.row, layer.width, layer.height);
 		pieces.push(Piece { layer: Cow::Borrowed(layer), kind: PieceKind::Layer, offset: 0.0, clip: whole });
@@ -322,9 +381,11 @@ fn pieces<'a>(
 
 		if let Some(cursor) = layer.cursor {
 			let layer = Cow::Owned(cursor_layer(layer, cursor));
-			pieces.push(Piece { layer, kind: PieceKind::Cursor, offset: 0.0, clip: whole });
+			cursor_piece = Some(Piece { layer, kind: PieceKind::Cursor, offset: 0.0, clip: whole });
 		}
 	}
+	// Over everything, like in the TUI
+	pieces.extend(cursor_piece);
 	pieces
 }
 
@@ -356,9 +417,13 @@ struct LayerQuads {
 	under_text: Range<u32>,
 	over_text: Range<u32>,
 	clip: [u32; 4],
+
+	/// Whether the cursor's shape is drawn first, uncut: for the cursor on its way
+	shape: bool,
 }
 
-/// Adds the quads of `piece` to `quads`, with underlines breaking where `text` laid out its text over them
+/// Adds the quads of `piece` to `quads`, with underlines breaking where `text` laid out its text over them. With `moving`,
+/// `piece` is the cursor on its way, drawn over its shape.
 fn layer_quads(
 	quads: &mut Vec<Quad>,
 	piece: &Piece,
@@ -366,13 +431,17 @@ fn layer_quads(
 	cell: CellSize,
 	lines: LineMetrics,
 	srgb: bool,
+	moving: bool,
 ) -> LayerQuads {
 	let layer = &piece.layer;
 	let start = quads.len();
-	cell_backgrounds(quads, layer, cell, srgb);
+	// The shape of a cursor on its way stands in for its background or bar.
+	if !moving {
+		cell_backgrounds(quads, layer, cell, srgb);
+	}
 	let middle = quads.len();
 	cell_decorations(quads, layer, cell, lines, srgb, |row| text.ink(piece, row));
-	if piece.kind == PieceKind::Cursor {
+	if piece.kind == PieceKind::Cursor && !moving {
 		bar_cursor(quads, layer, cell, srgb);
 	}
 	for quad in &mut quads[start..] {
@@ -382,18 +451,26 @@ fn layer_quads(
 		under_text: start as u32..middle as u32,
 		over_text: middle as u32..quads.len() as u32,
 		clip: piece.clip,
+		shape: moving,
 	}
 }
 
 /// Draws the layers one after another, each with its backgrounds, text, then decorations and cursor, so a later
-/// layer (e.g. a floating window) covers everything of the earlier ones
+/// layer (e.g. a floating window) covers everything of the earlier ones. The cursor's shape, drawn first for the cursor
+/// on its way, isn't cut to its layer: on a `surface` of width × height pixels, it may be anywhere.
 fn draw_layers(
 	pass: &mut wgpu::RenderPass<'_>,
 	quads: &QuadPipeline,
 	text: &TextPipeline,
+	shape: &ShapePipeline,
+	surface: (u32, u32),
 	layers: &[LayerQuads],
 ) -> Result<(), RendererError> {
 	for (index, layer) in layers.iter().enumerate() {
+		if layer.shape {
+			pass.set_scissor_rect(0, 0, surface.0, surface.1);
+			shape.render(pass);
+		}
 		let [left, top, width, height] = layer.clip;
 		pass.set_scissor_rect(left, top, width, height);
 		quads.render(pass, layer.under_text.clone());
@@ -412,6 +489,7 @@ mod tests {
 	use super::{PieceKind, draw_layers, layer_quads, pieces};
 	use crate::quad::QuadPipeline;
 	use crate::scroll::ScrollAnimations;
+	use crate::shape::ShapePipeline;
 	use crate::text::TextPipeline;
 	use crate::{CellLayer, Decoration, Fonts, Layer, RenderCell, RendererConfig, TextSize, TextStyle};
 
@@ -432,9 +510,14 @@ mod tests {
 		})
 	}
 
-	/// Draws `layers` like the renderer does, into an 8×19 texture, and returns the pixel in the middle of the cell, or
-	/// `None` without a GPU
+	/// Draws `layers` like the renderer does, into a 64×19 texture, and returns the pixel in the middle of the first cell,
+	/// or `None` without a GPU
 	fn middle_pixel(layers: &[Layer]) -> Option<[u8; 4]> {
+		drawn_pixel(layers, None)
+	}
+
+	/// Like [`middle_pixel`], with a cursor shape over the layers if given: its corners in pixels, and its color
+	fn drawn_pixel(layers: &[Layer], shape: Option<([[f32; 2]; 4], u32)>) -> Option<[u8; 4]> {
 		let (width, height) = (64, 19);
 		smol::block_on(async {
 			let instance = wgpu::Instance::default();
@@ -465,8 +548,18 @@ mod tests {
 			let mut quads = Vec::new();
 			let ranges: Vec<_> = pieces
 				.iter()
-				.map(|piece| layer_quads(&mut quads, piece, &text, cell, lines, false))
+				.map(|piece| layer_quads(&mut quads, piece, &text, cell, lines, false, false))
+				.chain(shape.map(|_| super::LayerQuads {
+					under_text: 0..0,
+					over_text: 0..0,
+					clip: [0, 0, 1, 1],
+					shape: true,
+				}))
 				.collect();
+			let shape_pipeline = ShapePipeline::new(&device, format);
+			if let Some((corners, color)) = shape {
+				shape_pipeline.prepare(&queue, width, height, corners, crate::color::rgba(color, false));
+			}
 			let mut pipeline = QuadPipeline::new(&device, format);
 			pipeline.prepare(&device, &queue, width, height, &quads);
 
@@ -489,7 +582,7 @@ mod tests {
 					timestamp_writes: None,
 					multiview_mask: None,
 				});
-				draw_layers(&mut pass, &pipeline, &text, &ranges).unwrap();
+				draw_layers(&mut pass, &pipeline, &text, &shape_pipeline, (width, height), &ranges).unwrap();
 			}
 
 			let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -531,7 +624,15 @@ mod tests {
 	/// `layer` with a cursor of `shape` on its top-left cell, red with white text
 	fn with_cursor(layer: Layer, shape: crate::CursorShape) -> Layer {
 		let Layer::Cells(mut layer) = layer;
-		layer.cursor = Some(crate::Cursor { row: 0, col: 0, width: 1, shape, color: 0xFF0000, text_color: 0xFFFFFF });
+		layer.cursor = Some(crate::Cursor {
+			row: 0,
+			col: 0,
+			width: 1,
+			shape,
+			color: 0xFF0000,
+			text_color: 0xFFFFFF,
+			animate: true,
+		});
 		Layer::Cells(layer)
 	}
 
@@ -558,6 +659,52 @@ mod tests {
 	}
 
 	#[test]
+	fn gpu_cursor_shape_fills_between_its_corners() {
+		// A slanted shape across the middle of the first cell (4, 9), over a black cell
+		let slanted = [[0.0, 0.0], [6.0, 0.0], [12.0, 19.0], [2.0, 19.0]];
+		let Some(pixel) = drawn_pixel(&[cell(1, " ", 0x000000)], Some((slanted, 0x00FF00))) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		assert_eq!(pixel, [0, 255, 0, 255]);
+
+		// The same slant further right misses it.
+		let right = slanted.map(|[x, y]| [x + 20.0, y]);
+		assert_eq!(drawn_pixel(&[cell(1, " ", 0x000000)], Some((right, 0x00FF00))).unwrap(), [0, 0, 0, 255]);
+
+		// Corners that briefly cross, so the shape isn't convex, still fill.
+		let crossed = [[0.0, 0.0], [20.0, 0.0], [0.0, 19.0], [20.0, 19.0]];
+		assert_eq!(drawn_pixel(&[cell(1, " ", 0x000000)], Some((crossed, 0x00FF00))).unwrap(), [0, 255, 0, 255]);
+	}
+
+	#[test]
+	fn the_cursor_is_drawn_over_every_layer() {
+		let lower = with_cursor(cell(1, "a", 0x000000), crate::CursorShape::Block);
+		let cell_size = crate::CellSize { width: 8, height: 19 };
+		let scrolls = ScrollAnimations::new(RendererConfig::default().scroll);
+		let layers = [lower, cell(2, "b", 0x000000)];
+		let pieces = pieces(&layers, &scrolls, cell_size, (64, 19), Instant::now());
+		let kinds: Vec<_> = pieces.iter().map(|piece| (piece.layer.id, piece.kind)).collect();
+		assert_eq!(kinds, [(1, PieceKind::Layer), (2, PieceKind::Layer), (1, PieceKind::Cursor)]);
+	}
+
+	#[test]
+	fn a_moving_block_shows_its_character_where_its_shape_covers_it() {
+		let layer = with_cursor(cell(1, "a", 0x000000), crate::CursorShape::Block);
+		let cell_size = crate::CellSize { width: 8, height: 19 };
+		let scrolls = ScrollAnimations::new(RendererConfig::default().scroll);
+		let pieces = pieces(std::slice::from_ref(&layer), &scrolls, cell_size, (64, 19), Instant::now());
+		let cursor = &pieces[1];
+
+		// The shape reaches halfway into the cell from the right: the right half shows.
+		let arriving = [[4.0, 0.0], [30.0, 0.0], [30.0, 19.0], [4.0, 19.0]];
+		assert_eq!(super::covered(cursor, arriving, cell_size), [4, 0, 4, 19]);
+		// Not there yet: nothing shows.
+		let away = [[20.0, 0.0], [30.0, 0.0], [30.0, 19.0], [20.0, 19.0]];
+		assert_eq!(super::covered(cursor, away, cell_size)[2], 0);
+	}
+
+	#[test]
 	fn gpu_block_cursor_covers_its_cell() {
 		// A full block in white under a red block cursor: the cursor's red covers it, and its text color is white.
 		let layer = with_cursor(cell(1, " ", 0x000000), crate::CursorShape::Block);
@@ -580,8 +727,15 @@ mod tests {
 				.iter()
 				.map(|text| RenderCell { text: ArrayString::from(text).unwrap(), ..top.cells[0] });
 			let scroll = scroll.then_some(crate::Scroll { rows: 1, top: 0, bottom: 3, left: 0, right: 1 });
-			let cursor =
-				crate::Cursor { row: 2, col: 0, width: 1, shape: crate::CursorShape::Block, color: 0, text_color: 0 };
+			let cursor = crate::Cursor {
+				row: 2,
+				col: 0,
+				width: 1,
+				shape: crate::CursorShape::Block,
+				color: 0,
+				text_color: 0,
+				animate: true,
+			};
 			Layer::Cells(CellLayer { height: 3, cells: cells.collect(), cursor: Some(cursor), scroll, ..top })
 		};
 		let (shown, scrolled) = (column(["a", "b", "c"], false), column(["b", "c", "d"], true));

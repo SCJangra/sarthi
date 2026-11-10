@@ -7,12 +7,19 @@ local M = {}
 -- The settings given so far, merged
 local current = {}
 
--- `opts` merged into the settings given so far. A scroll animation replaces the previous one whole, since each curve
--- has its own keys.
+-- The animations in the settings, by section and key
+local animations = { scroll = { 'animation' }, cursor = { 'animation', 'short_animation' } }
+
+-- `opts` merged into the settings given so far. An animation replaces the previous one whole, since each curve has its
+-- own keys.
 local function merge(opts)
   local merged = vim.tbl_deep_extend('force', current, opts)
-  if opts.scroll and opts.scroll.animation ~= nil then
-    merged.scroll.animation = opts.scroll.animation
+  for section, keys in pairs(animations) do
+    for _, key in ipairs(keys) do
+      if type(opts[section]) == 'table' and opts[section][key] ~= nil then
+        merged[section][key] = opts[section][key]
+      end
+    end
   end
   return merged
 end

@@ -8,6 +8,7 @@ use serde::de::{self, Deserializer, Visitor};
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
 	pub scroll: ScrollSettings,
+	pub cursor: CursorSettings,
 	pub underline: UnderlineSettings,
 	pub touchpad: TouchpadSettings,
 }
@@ -82,6 +83,40 @@ impl Default for Animation {
 	}
 }
 
+/// How the cursor moves to a new place: its corners each on their way, the leading ones faster, so it stretches towards
+/// where it goes and shrinks back as it arrives
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CursorSettings {
+	/// For moves farther than a couple of cells along a row
+	pub animation: Animation,
+
+	/// For short moves along a row, like typing
+	pub short_animation: Animation,
+
+	/// How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1, where
+	/// its leading edge is there at once
+	pub trail: f32,
+
+	/// Whether moves in insert and replace mode animate, e.g. while typing
+	pub animate_insert_mode: bool,
+
+	/// Whether moves into and out of the command line animate
+	pub animate_cmdline: bool,
+}
+
+impl Default for CursorSettings {
+	fn default() -> Self {
+		Self {
+			animation: Animation::Spring { stiffness: 700.0, damping: 53.0 },
+			short_animation: Animation::EaseOut { duration: 40.0 },
+			trail: 0.7,
+			animate_insert_mode: true,
+			animate_cmdline: true,
+		}
+	}
+}
+
 /// How underlines are drawn, as adjustments to the font's own, in logical pixels
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -123,24 +158,10 @@ impl Default for TouchpadSettings {
 impl Settings {
 	/// Whether the values make sense, beyond their types; the error names the first that doesn't
 	pub fn validate(&self) -> Result<(), String> {
-		let check = |valid: bool, message: &str| if valid { Ok(()) } else { Err(message.to_owned()) };
-		match self.scroll.animation {
-			Animation::None => (),
-			Animation::Spring { stiffness, damping } => {
-				check(stiffness > 0.0, "scroll.animation.stiffness must be more than 0")?;
-				check(damping >= 0.0, "scroll.animation.damping can't be negative")?;
-			},
-			Animation::Linear { duration } | Animation::EaseOut { duration } | Animation::EaseInOut { duration } => {
-				check(duration >= 0.0, "scroll.animation.duration can't be negative")?;
-			},
-			Animation::CubicBezier { points: [x1, _, x2, _], duration } => {
-				check(
-					(0.0..=1.0).contains(&x1) && (0.0..=1.0).contains(&x2),
-					"scroll.animation.points: x1 and x2 must be from 0 to 1",
-				)?;
-				check(duration >= 0.0, "scroll.animation.duration can't be negative")?;
-			},
-		}
+		validate_animation("scroll.animation", self.scroll.animation)?;
+		validate_animation("cursor.animation", self.cursor.animation)?;
+		validate_animation("cursor.short_animation", self.cursor.short_animation)?;
+		check((0.0..=1.0).contains(&self.cursor.trail), "cursor.trail must be from 0 to 1")?;
 
 		let underline = &self.underline;
 		check(underline.thickness.is_none_or(|thickness| thickness > 0.0), "underline.thickness must be more than 0")?;
@@ -149,6 +170,31 @@ impl Settings {
 		check(self.touchpad.scroll_speed > 0.0, "touchpad.scroll_speed must be more than 0")?;
 		Ok(())
 	}
+}
+
+/// Whether `animation`'s values make sense; the error names the first that doesn't, as part of `name`
+fn validate_animation(name: &str, animation: Animation) -> Result<(), String> {
+	let check = |valid: bool, problem: &str| if valid { Ok(()) } else { Err(format!("{name}.{problem}")) };
+	match animation {
+		Animation::None => Ok(()),
+		Animation::Spring { stiffness, damping } => {
+			check(stiffness > 0.0, "stiffness must be more than 0")?;
+			check(damping >= 0.0, "damping can't be negative")
+		},
+		Animation::Linear { duration } | Animation::EaseOut { duration } | Animation::EaseInOut { duration } => {
+			check(duration >= 0.0, "duration can't be negative")
+		},
+		Animation::CubicBezier { points: [x1, _, x2, _], duration } => {
+			let within = |x: f32| (0.0..=1.0).contains(&x);
+			check(within(x1) && within(x2), "points: x1 and x2 must be from 0 to 1")?;
+			check(duration >= 0.0, "duration can't be negative")
+		},
+	}
+}
+
+/// An error with `message`, unless `valid`
+fn check(valid: bool, message: &str) -> Result<(), String> {
+	if valid { Ok(()) } else { Err(message.to_owned()) }
 }
 
 /// A number, or `false` for none (Lua can't keep `nil` in a table)
@@ -263,5 +309,19 @@ mod tests {
 		assert_eq!(error, "underline.wave_height must be more than 0");
 		let error = underline(vec![("offset", Value::from("down"))]).unwrap_err();
 		assert!(error.contains("invalid type"), "{error}");
+	}
+
+	#[test]
+	fn cursor() {
+		let cursor = |pairs| parse(table(vec![("cursor", table(pairs))]));
+		let settings = cursor(vec![("trail", Value::from(0.2)), ("animate_cmdline", Value::from(false))]).unwrap();
+		assert_eq!((settings.cursor.trail, settings.cursor.animate_cmdline), (0.2, false));
+		assert_eq!(settings.cursor.short_animation, Animation::EaseOut { duration: 40.0 });
+
+		let error = cursor(vec![("trail", Value::from(2))]).unwrap_err();
+		assert_eq!(error, "cursor.trail must be from 0 to 1");
+		let linear = table(vec![("curve", Value::from("linear")), ("duration", Value::from(-1))]);
+		let error = cursor(vec![("short_animation", linear)]).unwrap_err();
+		assert_eq!(error, "cursor.short_animation.duration can't be negative");
 	}
 }

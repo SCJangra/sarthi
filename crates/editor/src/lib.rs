@@ -155,6 +155,11 @@ impl Editor {
 		}
 	}
 
+	/// Whether the cursor's moves animate in insert and replace mode, and into and out of the command line
+	pub fn set_cursor_animation(&mut self, insert_mode: bool, cmdline: bool) {
+		self.cursor.set_animation(insert_mode, cmdline);
+	}
+
 	/// A `guifont` value the way [`Editor::guifont`] gives it: empty if it's Neovim's default
 	pub fn strip_default_guifont<'a>(&self, value: &'a str) -> &'a str {
 		if self.default_guifont.as_deref() == Some(value) { "" } else { value }
@@ -357,7 +362,7 @@ impl Editor {
 			},
 			RedrawNotification::ModeChange(changes) => {
 				if let Some(change) = changes.last() {
-					self.cursor.set_mode(change.mode_idx as usize);
+					self.cursor.set_mode(change.mode_idx as usize, &change.mode);
 					self.stale = true;
 				}
 			},
@@ -397,6 +402,9 @@ impl Editor {
 	fn flush(&mut self) -> Option<Redraw> {
 		let redraw =
 			std::mem::take(&mut self.stale).then(|| Redraw { background: self.background(), layers: self.layers() });
+		if redraw.is_some() {
+			self.cursor.drawn();
+		}
 		// A scroll belongs to the redraw it's part of.
 		for viewport in self.viewports.values_mut() {
 			viewport.scrolled = 0;
@@ -593,7 +601,8 @@ mod tests {
 		let redraw = editor.apply(events).unwrap();
 		let [Layer::Cells(layer)] = redraw.layers.as_slice() else { panic!("expected one layer") };
 		// A block cursor in the cell's swapped colors, on "b"
-		let cursor = Cursor { row: 0, col: 1, width: 1, shape: CursorShape::Block, color: FG, text_color: BG };
+		let cursor =
+			Cursor { row: 0, col: 1, width: 1, shape: CursorShape::Block, color: FG, text_color: BG, animate: true };
 		assert_eq!(layer.cursor, Some(cursor));
 
 		// Moving the cursor is a change to draw.

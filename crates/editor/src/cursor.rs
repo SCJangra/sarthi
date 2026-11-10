@@ -2,15 +2,38 @@ use rpc::neovim::{CursorShape, ModeInfo};
 
 /// How Neovim wants the cursor drawn, from `mode_info_set`, `mode_change`, `busy_start` and `busy_stop`
 /// (`:help ui-event-mode_info_set`)
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CursorState {
 	/// Whether to use the modes' styles; otherwise the cursor is always a block
 	style_enabled: bool,
 	modes: Vec<ModeInfo>,
 	mode: usize,
 
+	/// The mode's name, like `insert` or `cmdline_normal`, and the one the cursor was last drawn in
+	mode_name: String,
+	drawn_mode: String,
+
 	/// Neovim asked not to draw the cursor
 	hidden: bool,
+
+	/// Whether moves animate in insert and replace mode, and into and out of the command line
+	animate_insert_mode: bool,
+	animate_cmdline: bool,
+}
+
+impl Default for CursorState {
+	fn default() -> Self {
+		Self {
+			style_enabled: false,
+			modes: Vec::new(),
+			mode: 0,
+			mode_name: String::new(),
+			drawn_mode: String::new(),
+			hidden: false,
+			animate_insert_mode: true,
+			animate_cmdline: true,
+		}
+	}
 }
 
 /// The cursor's look in the current mode
@@ -23,6 +46,9 @@ pub struct CursorStyle {
 
 	/// Highlight for the cursor's colors; 0 means the cell's colors swapped
 	pub attr_id: u32,
+
+	/// Whether moving here animates
+	pub animate: bool,
 }
 
 impl CursorState {
@@ -31,8 +57,19 @@ impl CursorState {
 		self.modes = modes;
 	}
 
-	pub fn set_mode(&mut self, mode: usize) {
+	pub fn set_mode(&mut self, mode: usize, name: &str) {
 		self.mode = mode;
+		name.clone_into(&mut self.mode_name);
+	}
+
+	/// Whether moves animate in insert and replace mode, and into and out of the command line
+	pub fn set_animation(&mut self, insert_mode: bool, cmdline: bool) {
+		(self.animate_insert_mode, self.animate_cmdline) = (insert_mode, cmdline);
+	}
+
+	/// The cursor was drawn in the current mode.
+	pub fn drawn(&mut self) {
+		self.drawn_mode.clone_from(&self.mode_name);
 	}
 
 	pub fn set_hidden(&mut self, hidden: bool) {
@@ -46,7 +83,7 @@ impl CursorState {
 			return None;
 		}
 
-		let block = CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: 0 };
+		let block = CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: 0, animate: self.animates() };
 		let Some(mode) = self.modes.get(self.mode).filter(|_| self.style_enabled) else {
 			return Some(block);
 		};
@@ -55,7 +92,16 @@ impl CursorState {
 			shape: mode.cursor_shape.unwrap_or(block.shape),
 			percentage: mode.cell_percentage.unwrap_or(block.percentage),
 			attr_id: mode.attr_id.unwrap_or(block.attr_id),
+			..block
 		})
+	}
+
+	/// Whether a move to the cursor animates: not in a mode, or into or out of one, that animation is off for
+	fn animates(&self) -> bool {
+		let typing = |mode: &str| mode == "insert" || mode == "replace";
+		let cmdline = |mode: &str| mode.starts_with("cmdline");
+		let off = |mode: &str| (typing(mode) && !self.animate_insert_mode) || (cmdline(mode) && !self.animate_cmdline);
+		!off(&self.mode_name) && !(cmdline(&self.drawn_mode) && !self.animate_cmdline)
 	}
 }
 
@@ -65,7 +111,7 @@ mod tests {
 
 	use super::{CursorState, CursorStyle};
 
-	const BLOCK: CursorStyle = CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: 0 };
+	const BLOCK: CursorStyle = CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: 0, animate: true };
 
 	fn modes() -> Vec<ModeInfo> {
 		vec![
@@ -85,16 +131,16 @@ mod tests {
 		let mut cursor = CursorState::default();
 		cursor.set_modes(true, modes());
 
-		assert_eq!(cursor.style(), Some(CursorStyle { shape: CursorShape::Block, percentage: 0, attr_id: 7 }));
+		assert_eq!(cursor.style(), Some(CursorStyle { shape: CursorShape::Block, percentage: 0, attr_id: 7, ..BLOCK }));
 
-		cursor.set_mode(1);
-		assert_eq!(cursor.style(), Some(CursorStyle { shape: CursorShape::Vertical, percentage: 25, attr_id: 0 }));
+		cursor.set_mode(1, "insert");
+		assert_eq!(cursor.style(), Some(CursorStyle { shape: CursorShape::Vertical, percentage: 25, ..BLOCK }));
 
 		// Missing keys fall back to the block
-		cursor.set_mode(2);
+		cursor.set_mode(2, "visual");
 		assert_eq!(cursor.style(), Some(BLOCK));
 
-		cursor.set_mode(9);
+		cursor.set_mode(9, "normal");
 		assert_eq!(cursor.style(), Some(BLOCK));
 	}
 
@@ -102,8 +148,36 @@ mod tests {
 	fn block_when_styles_are_disabled() {
 		let mut cursor = CursorState::default();
 		cursor.set_modes(false, modes());
-		cursor.set_mode(1);
+		cursor.set_mode(1, "insert");
 		assert_eq!(cursor.style(), Some(BLOCK));
+	}
+
+	#[test]
+	fn moves_animate_unless_turned_off_for_the_mode() {
+		let animates = |cursor: &CursorState| cursor.style().unwrap().animate;
+		let mut cursor = CursorState::default();
+		cursor.set_mode(0, "normal");
+		assert!(animates(&cursor));
+		cursor.set_mode(1, "insert");
+		assert!(animates(&cursor));
+
+		cursor.set_animation(false, true);
+		assert!(!animates(&cursor));
+		cursor.set_mode(1, "replace");
+		assert!(!animates(&cursor));
+
+		// Into the command line, and back out of it
+		cursor.set_animation(true, false);
+		cursor.set_mode(0, "normal");
+		cursor.drawn();
+		cursor.set_mode(2, "cmdline_normal");
+		assert!(!animates(&cursor));
+		cursor.drawn();
+		cursor.set_mode(0, "normal");
+		assert!(!animates(&cursor));
+		// Once drawn outside it, moves animate again.
+		cursor.drawn();
+		assert!(animates(&cursor));
 	}
 
 	#[test]

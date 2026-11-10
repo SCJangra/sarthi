@@ -14,6 +14,20 @@ pub enum Motion {
 	Spring { stiffness: f32, damping: f32 },
 }
 
+impl Motion {
+	/// The same motion taking `factor` times as long: an easing's duration is scaled, a spring is made stiffer or looser
+	/// (its settling time scales with 1 / √stiffness) and its damping kept in proportion, so it keeps its bounce.
+	pub(crate) fn scaled(self, factor: f32) -> Self {
+		match self {
+			Motion::Ease { easing, duration } => Motion::Ease { easing, duration: duration.mul_f32(factor.max(0.0)) },
+			Motion::Spring { stiffness, damping } => {
+				let factor = factor.max(f32::EPSILON);
+				Motion::Spring { stiffness: stiffness / (factor * factor), damping: damping / factor }
+			},
+		}
+	}
+}
+
 /// The shape of a [`Motion::Ease`]: how far along the way the value is at each point in time
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Easing {
@@ -109,12 +123,18 @@ impl Approach {
 	/// Adds `amount` to the value at `now`, and moves on from there. A spring keeps its speed; an easing curve starts
 	/// over.
 	pub(crate) fn add(&mut self, amount: f32, now: Instant) {
+		self.add_with(amount, self.motion, now);
+	}
+
+	/// Like [`Approach::add`], moving on with `motion` from then on
+	pub(crate) fn add_with(&mut self, amount: f32, motion: Motion, now: Instant) {
 		let elapsed = now.saturating_duration_since(self.started).as_secs_f32();
 		let (value, speed) = match self.motion {
 			Motion::Ease { .. } => (self.value(now), 0.0),
 			Motion::Spring { .. } => self.spring(elapsed),
 		};
 		(self.from, self.speed, self.started) = (value + amount, speed, now);
+		self.motion = motion;
 	}
 
 	/// The value and speed of a spring `elapsed` seconds after it started: the solution of x'' = -k·x - c·x'

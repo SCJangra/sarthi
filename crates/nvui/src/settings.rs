@@ -2,14 +2,25 @@
 
 use std::time::Duration;
 
-use renderer::{Easing, Motion, UnderlineSize};
+use renderer::{CursorMotion, Easing, Motion, UnderlineSize};
 use rpc::nvui::{Animation, ScrolledWindow, Settings};
 
 /// How the renderer moves scrolled text
 pub fn scroll_motion(settings: &Settings) -> Motion {
+	motion(settings.scroll.animation)
+}
+
+/// How the renderer moves the cursor
+pub fn cursor_motion(settings: &Settings) -> CursorMotion {
+	let cursor = &settings.cursor;
+	CursorMotion { motion: motion(cursor.animation), short: motion(cursor.short_animation), trail: cursor.trail }
+}
+
+/// `animation` as the renderer takes it
+fn motion(animation: Animation) -> Motion {
 	let ease = |easing, duration: f32| Motion::Ease { easing, duration: Duration::from_secs_f32(duration / 1000.0) };
-	match settings.scroll.animation {
-		// Over no time at all, the text is in place at once.
+	match animation {
+		// Over no time at all, the value is in place at once.
 		Animation::None => ease(Easing::Linear, 0.0),
 		Animation::Spring { stiffness, damping } => Motion::Spring { stiffness, damping },
 		Animation::Linear { duration } => ease(Easing::Linear, duration),
