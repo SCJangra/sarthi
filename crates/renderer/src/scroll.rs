@@ -157,7 +157,7 @@ impl Animation {
 		let rows = first..hidden.end.max(self.height());
 
 		let new_rows: Vec<&[RenderCell]> = region_rows(layer, region).collect();
-		// A curve that overshoots shows rows past the text from before the scroll, or past the new text, which nvui
+		// A curve that overshoots shows rows past the text from before the scroll, or past the new text, which sarthi
 		// doesn't have: they're blank, in the background of the row at that edge.
 		let (above, below) = (blank(new_rows[0]), blank(new_rows[new_rows.len() - 1]));
 		let cells: Vec<&[RenderCell]> = rows

@@ -1,16 +1,16 @@
-//! Characters nvui draws itself instead of taking them from a font: box drawing (U+2500–U+257F), block elements
+//! Characters sarthi draws itself instead of taking them from a font: box drawing (U+2500–U+257F), block elements
 //! (U+2580–U+259F) and powerline separators (U+E0B0–U+E0BF). They're meant to tile, and a font's glyphs rarely fit
 //! the cell exactly, which leaves gaps in boxes and bars. Drawn from the cell size in whole pixels, every line runs
 //! from edge to edge at the same position in every cell, so neighbours meet seamlessly.
 
 use zeno::{Cap, Command, Fill, Mask, PathBuilder, Stroke};
 
-/// Whether nvui draws `text` itself
+/// Whether sarthi draws `text` itself
 pub(crate) fn is_builtin(text: &str) -> bool {
 	builtin_char(text).is_some()
 }
 
-/// The character nvui draws for `text`, if it draws it
+/// The character sarthi draws for `text`, if it draws it
 pub(crate) fn builtin_char(text: &str) -> Option<char> {
 	let mut chars = text.chars();
 	let c = chars.next()?;
@@ -18,7 +18,7 @@ pub(crate) fn builtin_char(text: &str) -> Option<char> {
 }
 
 /// Draws `c` as an alpha mask of `width` × `height` pixels, row by row, with light lines `thickness` pixels thick.
-/// `None` for characters nvui doesn't draw.
+/// `None` for characters sarthi doesn't draw.
 pub(crate) fn rasterize(c: char, width: u32, height: u32, thickness: f32) -> Option<Vec<u8>> {
 	let mut canvas = Canvas::new(width, height, thickness.round().max(1.0) as u32);
 	match c {

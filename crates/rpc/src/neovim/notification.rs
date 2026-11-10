@@ -1,4 +1,4 @@
-use nvui_derive::DeserializeTaggedEnum;
+use sarthi_derive::DeserializeTaggedEnum;
 
 use crate::{FloatsChangedArgs, RedrawNotification, WinScrolledArgs};
 
@@ -7,10 +7,10 @@ use crate::{FloatsChangedArgs, RedrawNotification, WinScrolledArgs};
 pub enum Notification {
 	Redraw(Vec<RedrawNotification>),
 
-	/// From nvui's Lua (`crate::nvui`)
+	/// From sarthi's Lua (`crate::sarthi`)
 	WinScrolled(WinScrolledArgs),
 
-	/// From nvui's Lua (`crate::nvui`)
+	/// From sarthi's Lua (`crate::sarthi`)
 	FloatsChanged(FloatsChangedArgs),
 
 	Other {

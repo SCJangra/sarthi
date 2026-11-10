@@ -1,5 +1,5 @@
 [package]
-name = "nvui-editor"
+name = "sarthi-editor"
 version = { workspace = true }
 edition = { workspace = true }
 

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use rpc::nvui::{Copied, Paste, Register};
+use rpc::sarthi::{Copied, Paste, Register};
 use winit::window::Window;
 
 /// The system clipboard, for Neovim's `+` and `*` registers
@@ -41,17 +41,17 @@ impl Clipboard {
 	}
 }
 
-/// How long the system clipboard may take to show nvui's copy: on Wayland, the compositor announces it a moment after
-/// nvui copied, and reading before gets what it held before.
+/// How long the system clipboard may take to show sarthi's copy: on Wayland, the compositor announces it a moment after
+/// sarthi copied, and reading before gets what it held before.
 const ANNOUNCE_TIME: Duration = Duration::from_millis(500);
 
-/// What nvui copied to `+` and to `*`
+/// What sarthi copied to `+` and to `*`
 #[derive(Debug, Default)]
 struct Copies {
 	/// The last copy to each register, with its register type, so pasting it back keeps the type
 	last: [Option<Copied>; 2],
 
-	/// When nvui copied to each register, until the system clipboard shows the copy
+	/// When sarthi copied to each register, until the system clipboard shows the copy
 	unannounced: [Option<Instant>; 2],
 }
 
@@ -79,7 +79,7 @@ impl Copies {
 	}
 }
 
-/// What pasting `text` returns, given what nvui last `copied` to the register
+/// What pasting `text` returns, given what sarthi last `copied` to the register
 fn paste(text: &str, copied: Option<&Copied>) -> Paste {
 	let lines: Vec<String> = text
 		.split('\n')
@@ -95,7 +95,7 @@ fn paste(text: &str, copied: Option<&Copied>) -> Paste {
 mod tests {
 	use std::time::{Duration, Instant};
 
-	use rpc::nvui::{Copied, Paste, Register};
+	use rpc::sarthi::{Copied, Paste, Register};
 
 	use super::{ANNOUNCE_TIME, Copies, paste};
 
@@ -111,7 +111,7 @@ mod tests {
 	}
 
 	#[test]
-	fn text_nvui_copied_keeps_its_type() {
+	fn text_sarthi_copied_keeps_its_type() {
 		// Neovim copies a linewise yank with a trailing empty line.
 		let copied = Copied { lines: lines(&["one", ""]), regtype: String::from("V") };
 		assert_eq!(paste("one\n", Some(&copied)), Paste::Typed((lines(&["one", ""]), String::from("V"))));

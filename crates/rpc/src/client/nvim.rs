@@ -23,8 +23,8 @@ pub struct Nvim {
 }
 
 impl Nvim {
-	/// Starts Neovim, embedded. Returns it and what it sends unasked (notifications, and requests from nvui's Lua), which
-	/// ends once Neovim exits.
+	/// Starts Neovim, embedded. Returns it and what it sends unasked (notifications, and requests from sarthi's Lua),
+	/// which ends once Neovim exits.
 	pub fn start() -> Result<(Self, Receiver<Message>), Error> {
 		Self::spawn(&["--embed"])
 	}
@@ -46,7 +46,7 @@ impl Nvim {
 		Ok((Self { rpc, process: NvimProcess(nvim) }, messages))
 	}
 
-	/// The id of the channel nvui and Neovim talk on, e.g. for Lua code that calls back with `rpcrequest()`
+	/// The id of the channel sarthi and Neovim talk on, e.g. for Lua code that calls back with `rpcrequest()`
 	pub fn channel(&self) -> Result<u64, Error> {
 		Ok(self.rpc.call::<GetChanInfo>([0]).map_err(Error::Rpc)?.id)
 	}
@@ -171,8 +171,8 @@ mod tests {
 			.unwrap();
 		assert_eq!(channel, listed);
 
-		nvim.set_var("nvui_test", (true, 3)).unwrap();
-		let value: (bool, u32) = nvim.exec_lua("return vim.g.nvui_test", ()).unwrap();
+		nvim.set_var("sarthi_test", (true, 3)).unwrap();
+		let value: (bool, u32) = nvim.exec_lua("return vim.g.sarthi_test", ()).unwrap();
 		assert_eq!(value, (true, 3));
 	}
 }

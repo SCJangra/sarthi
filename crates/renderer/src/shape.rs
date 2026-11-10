@@ -23,14 +23,14 @@ impl ShapePipeline {
 		let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/shape.wgsl"));
 
 		let shape = device.create_buffer(&wgpu::BufferDescriptor {
-			label: Some("nvui-shape"),
+			label: Some("sarthi-shape"),
 			size: size_of::<Shape>() as u64,
 			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
 			mapped_at_creation: false,
 		});
 
 		let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-			label: Some("nvui-shape-bind-group-layout"),
+			label: Some("sarthi-shape-bind-group-layout"),
 			entries: &[wgpu::BindGroupLayoutEntry {
 				binding: 0,
 				visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -44,19 +44,19 @@ impl ShapePipeline {
 		});
 
 		let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-			label: Some("nvui-shape-bind-group"),
+			label: Some("sarthi-shape-bind-group"),
 			layout: &bind_group_layout,
 			entries: &[wgpu::BindGroupEntry { binding: 0, resource: shape.as_entire_binding() }],
 		});
 
 		let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-			label: Some("nvui-shape-pipeline-layout"),
+			label: Some("sarthi-shape-pipeline-layout"),
 			bind_group_layouts: &[Some(&bind_group_layout)],
 			..Default::default()
 		});
 
 		let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-			label: Some("nvui-shape-pipeline"),
+			label: Some("sarthi-shape-pipeline"),
 			layout: Some(&layout),
 			vertex: wgpu::VertexState {
 				module: &shader,

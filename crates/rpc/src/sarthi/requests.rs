@@ -1,6 +1,6 @@
-//! What nvui's Lua (`runtime/`) asks of nvui, decoded straight from Neovim's requests. The method is the variant's name
-//! in snake case, e.g. `rpcrequest(channel, "set_clipboard", register, lines, regtype)`, and the arguments are decoded
-//! in order into the variant's struct.
+//! What sarthi's Lua (`runtime/`) asks of sarthi, decoded straight from Neovim's requests. The method is the variant's
+//! name in snake case, e.g. `rpcrequest(channel, "set_clipboard", register, lines, regtype)`, and the arguments are
+//! decoded in order into the variant's struct.
 
 use serde::Deserialize;
 use serde::de::IgnoredAny;
@@ -10,7 +10,7 @@ use crate::{DeserializeTaggedEnum, Register, Settings};
 #[derive(Debug, DeserializeTaggedEnum)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum Request {
-	/// `require("nvui").setup(opts)`, with the settings given so far merged
+	/// `require("sarthi").setup(opts)`, with the settings given so far merged
 	Setup(SetupArgs),
 
 	/// The clipboard provider copying to `+` or `*`
@@ -19,16 +19,16 @@ pub enum Request {
 	/// The clipboard provider pasting from `+` or `*`
 	GetClipboard(GetClipboardArgs),
 
-	/// `require("nvui").set_font_size(points)`; answered with the `guifont` to set
+	/// `require("sarthi").set_font_size(points)`; answered with the `guifont` to set
 	SetFontSize(SetFontSizeArgs),
 
-	/// `require("nvui").change_font_size(delta)`; answered with the `guifont` to set
+	/// `require("sarthi").change_font_size(delta)`; answered with the `guifont` to set
 	ChangeFontSize(ChangeFontSizeArgs),
 
-	/// `require("nvui").reset_font_size()`; answered with the `guifont` to set
+	/// `require("sarthi").reset_font_size()`; answered with the `guifont` to set
 	ResetFontSize(ResetFontSizeArgs),
 
-	/// A method nvui doesn't know
+	/// A method sarthi doesn't know
 	Other { method: String, value: IgnoredAny },
 }
 

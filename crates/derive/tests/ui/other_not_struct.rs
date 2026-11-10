@@ -1,4 +1,4 @@
-use nvui_derive::DeserializeTaggedEnum;
+use sarthi_derive::DeserializeTaggedEnum;
 
 #[derive(DeserializeTaggedEnum)]
 enum Event {

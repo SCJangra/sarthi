@@ -1,4 +1,4 @@
-//! Neovim's API: the functions nvui calls (`methods`) and the notifications Neovim sends, mostly redraw events
+//! Neovim's API: the functions sarthi calls (`methods`) and the notifications Neovim sends, mostly redraw events
 
 mod methods;
 mod notification;

@@ -13,7 +13,7 @@ mod option_set;
 mod win_pos;
 mod win_viewport;
 
-use nvui_derive::DeserializeTaggedEnum;
+use sarthi_derive::DeserializeTaggedEnum;
 
 pub use default_colors_set::*;
 pub use grid_clear::*;
@@ -85,7 +85,7 @@ pub enum RedrawNotification {
 	/// Neovim is done redrawing the screen, so this is the time to show the result (`:help ui-global`)
 	Flush,
 
-	/// An event nvui doesn't handle. Its arguments are skipped without being decoded; `value` only keeps
+	/// An event sarthi doesn't handle. Its arguments are skipped without being decoded; `value` only keeps
 	/// one placeholder per occurrence of the event.
 	Other {
 		method: String,

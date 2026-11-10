@@ -1,7 +1,7 @@
 //! Decoding behaviour of `DeserializeTaggedEnum`, using msgpack as Neovim sends it.
 
-use nvui_derive::DeserializeTaggedEnum;
 use rmpv::Value;
+use sarthi_derive::DeserializeTaggedEnum;
 use serde::Deserialize;
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -111,8 +111,8 @@ fn flattened_element_must_be_a_sequence() {
 
 #[test]
 fn plain_field() {
-	let bytes = encode(arr(vec!["title".into(), "nvui".into()]));
-	assert_eq!(decode::<Event>(&bytes).unwrap(), Event::Title(String::from("nvui")));
+	let bytes = encode(arr(vec!["title".into(), "sarthi".into()]));
+	assert_eq!(decode::<Event>(&bytes).unwrap(), Event::Title(String::from("sarthi")));
 }
 
 #[test]
@@ -152,9 +152,9 @@ fn unknown_tag_goes_to_other() {
 
 #[test]
 fn other_with_a_single_value() {
-	let bytes = encode(arr(vec!["nvui_custom".into(), arr(vec![1.into(), "two".into()])]));
+	let bytes = encode(arr(vec!["sarthi_custom".into(), arr(vec![1.into(), "two".into()])]));
 	let expected =
-		Notification::Other { method: String::from("nvui_custom"), value: arr(vec![1.into(), "two".into()]) };
+		Notification::Other { method: String::from("sarthi_custom"), value: arr(vec![1.into(), "two".into()]) };
 	assert_eq!(decode::<Notification>(&bytes).unwrap(), expected);
 }
 
@@ -253,7 +253,7 @@ fn other_with_flattened_value_before_method() {
 #[test]
 fn other_value_missing() {
 	// `method` comes from the tag, so `value` is element 1.
-	let bytes = encode(arr(vec!["nvui_custom".into()]));
+	let bytes = encode(arr(vec!["sarthi_custom".into()]));
 	let error = decode::<Notification>(&bytes).unwrap_err().to_string();
 	assert_eq!(error, "invalid length 1, expected a tagged enum sequence");
 }

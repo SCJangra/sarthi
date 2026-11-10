@@ -16,7 +16,7 @@ use rpc::neovim::{
 	ClientInfo, ClientVersion, InputMouseParams, Notification, RedrawNotification, UiAttachParams, UiOptions,
 	UiTryResizeParams,
 };
-use rpc::nvui::{
+use rpc::sarthi::{
 	ChangeFontSizeArgs, Copied, FloatsChangedArgs, GetClipboardArgs, MODULES, Request, ResetFontSizeArgs, STARTUP,
 	SetClipboardArgs, SetFontSizeArgs, Settings, SetupArgs, WinScrolledArgs,
 };
@@ -61,7 +61,7 @@ pub struct App {
 	/// What the mouse is doing over the window
 	pub mouse: Mouse,
 
-	/// What the user set with `require("nvui").setup()`, or the defaults
+	/// What the user set with `require("sarthi").setup()`, or the defaults
 	pub settings: Settings,
 
 	pub error: Option<Error>,
@@ -170,19 +170,19 @@ impl App {
 	fn attach_ui(&mut self, window: &Window) -> Result<(), Error> {
 		let size = self.grid_size(window);
 
-		// With multigrid, Neovim draws each window to its own grid, and nvui places and stacks them.
+		// With multigrid, Neovim draws each window to its own grid, and sarthi places and stacks them.
 		let options = UiOptions::all();
 		let params = UiAttachParams { width: size.width, height: size.height, options };
 
-		// Names nvui's channel, so plugins can tell it's nvui.
+		// Names sarthi's channel, so plugins can tell it's sarthi.
 		self.nvim.set_client_info(client_info())?;
 
 		// All before attaching, so before the user's config, which Neovim sources once a UI attached. A config can then
-		// check for nvui (`if vim.g.nvui then … end`) and use `require("nvui")`.
-		self.nvim.set_var("nvui", true)?;
+		// check for sarthi (`if vim.g.sarthi then … end`) and use `require("sarthi")`.
+		self.nvim.set_var("sarthi", true)?;
 		let channel = self.nvim.channel()?;
 		if let Err(error) = self.nvim.exec_lua::<()>(STARTUP, (channel, MODULES)) {
-			tracing::warn!("Couldn't set up nvui's Lua: {error}");
+			tracing::warn!("Couldn't set up sarthi's Lua: {error}");
 		}
 		self.nvim.ui_attach(params)?;
 		self.ui_size = size;
@@ -252,7 +252,7 @@ impl App {
 		self.show(redraw);
 	}
 
-	/// Shows what changed on nvui's side since Neovim's last redraw, like a float's shadow, without waiting for its next
+	/// Shows what changed on sarthi's side, like a float's shadow, without waiting for Neovim's next redraw
 	fn refresh(&mut self) {
 		if let Some(redraw) = self.editor.refresh() {
 			self.show(redraw);
@@ -315,7 +315,7 @@ impl App {
 				let guifont = self.editor.strip_default_guifont(&guifont);
 				responder.respond(Ok::<_, String>(self.font_sizes.reset(guifont)));
 			},
-			Request::Other { method, .. } => responder.respond::<()>(Err(format!("nvui doesn't know {method}"))),
+			Request::Other { method, .. } => responder.respond::<()>(Err(format!("sarthi doesn't know {method}"))),
 		}
 	}
 
@@ -502,7 +502,7 @@ impl ApplicationHandler<AppEvent> for App {
 	}
 }
 
-/// How nvui introduces itself to Neovim (`:help nvim_set_client_info()`)
+/// How sarthi introduces itself to Neovim (`:help nvim_set_client_info()`)
 fn client_info() -> ClientInfo {
 	let number = |part: &str| part.parse().unwrap_or(0);
 	let version = ClientVersion {
@@ -510,5 +510,5 @@ fn client_info() -> ClientInfo {
 		minor: number(env!("CARGO_PKG_VERSION_MINOR")),
 		patch: number(env!("CARGO_PKG_VERSION_PATCH")),
 	};
-	ClientInfo { name: String::from("nvui"), version, kind: "ui" }
+	ClientInfo { name: String::from("sarthi"), version, kind: "ui" }
 }

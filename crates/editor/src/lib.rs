@@ -156,7 +156,7 @@ impl Editor {
 	}
 
 	/// The `guifont` option (`:help 'guifont'`): which fonts to draw text with. Empty unless set to something other than
-	/// Neovim's default (a list of common fonts, while nvui has its own default font).
+	/// Neovim's default (a list of common fonts, while sarthi has its own default font).
 	pub fn guifont(&self) -> &str {
 		&self.guifont
 	}
@@ -176,8 +176,8 @@ impl Editor {
 		self.cursor.set_animation(insert_mode, cmdline);
 	}
 
-	/// The layers to draw, if something set on nvui's side changed since the last redraw, like the shadow: to show it
-	/// without waiting for Neovim's next redraw. Call it between Neovim's redraws, which nvui's Lua and settings come in.
+	/// The layers to draw, if something set on sarthi's side changed since the last redraw, like the shadow: to show it
+	/// without waiting for Neovim's next redraw. Call it between Neovim's redraws, as sarthi's Lua and settings arrive.
 	pub fn refresh(&mut self) -> Option<Redraw> {
 		self.flush()
 	}
@@ -912,7 +912,7 @@ mod tests {
 		editor.set_float_shadow(win_of(3), FloatShadow { casts: true, parent: None });
 		assert!(shadow_of(&flush(&mut editor, vec![]), 3).is_some());
 
-		// Changes on nvui's side show without waiting for Neovim's next redraw, and only if there are any.
+		// Changes on sarthi's side show without waiting for Neovim's next redraw, and only if there are any.
 		assert_eq!(editor.refresh(), None);
 		editor.set_float_shadow(win_of(3), FloatShadow { casts: false, parent: None });
 		let redraw = editor.refresh().expect("the shadow changed");

@@ -1,5 +1,5 @@
-//! nvui's settings, set from Lua with `require("nvui").setup({ … })`. Each section and value is optional: what isn't
-//! given keeps its default. Fonts aren't here: they're Neovim's own `guifont` and `linespace` options.
+//! sarthi's settings, set from Lua with `require("sarthi").setup({ … })`. Each section and value is optional: what
+//! isn't given keeps its default. Fonts aren't here: they're Neovim's own `guifont` and `linespace` options.
 
 use serde::Deserialize;
 use serde::de::{self, Deserializer, Visitor};
@@ -21,7 +21,7 @@ pub struct ScrollSettings {
 	pub animation: Animation,
 
 	/// Windows showing these filetypes jump to their new place, e.g. menus whose selected line is highlighted text. A
-	/// window's `w:nvui_smooth_scroll` overrides this.
+	/// window's `w:sarthi_smooth_scroll` overrides this.
 	pub exclude_filetypes: Vec<String>,
 }
 
@@ -133,7 +133,7 @@ pub struct ShadowSettings {
 	/// From 0, invisible, to 1, black where fully shadowed
 	pub opacity: f32,
 
-	/// Floating windows showing these filetypes have no shadow, e.g. scrollbars. A window's `w:nvui_shadow` overrides
+	/// Floating windows showing these filetypes have no shadow, e.g. scrollbars. A window's `w:sarthi_shadow` overrides
 	/// this.
 	pub exclude_filetypes: Vec<String>,
 }

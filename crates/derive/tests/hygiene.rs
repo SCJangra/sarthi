@@ -25,7 +25,7 @@ struct E(u32);
 struct EventVisitor;
 struct Tag;
 
-#[derive(Debug, PartialEq, nvui_derive::DeserializeTaggedEnum)]
+#[derive(Debug, PartialEq, sarthi_derive::DeserializeTaggedEnum)]
 enum Event {
 	First(#[tagged_enum(flatten)] std::vec::Vec<A>),
 	Second(D, T),

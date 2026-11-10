@@ -13,7 +13,7 @@ impl RpcMethod for GetChanInfo {
 	type Response = ChannelInfo;
 }
 
-/// The parts of a channel's info nvui uses; Neovim sends more
+/// The parts of a channel's info sarthi uses; Neovim sends more
 #[derive(Debug, Deserialize)]
 pub struct ChannelInfo {
 	pub id: u64,

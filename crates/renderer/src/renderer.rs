@@ -69,7 +69,7 @@ impl Renderer {
 
 		let (device, queue) = adapter
 			.request_device(&wgpu::DeviceDescriptor {
-				label: Some("nvui-renderer-device"),
+				label: Some("sarthi-renderer-device"),
 				required_features: wgpu::Features::empty(),
 				required_limits: wgpu::Limits::default(),
 				memory_hints: wgpu::MemoryHints::Performance,
@@ -240,11 +240,11 @@ impl Renderer {
 
 		let mut encoder = self
 			.device
-			.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("nvui-renderer-encoder") });
+			.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sarthi-renderer-encoder") });
 
 		{
 			let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-				label: Some("nvui-renderer-pass"),
+				label: Some("sarthi-renderer-pass"),
 				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
 					view: &view,
 					resolve_target: None,

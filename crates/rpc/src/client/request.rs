@@ -3,14 +3,14 @@ use serde::Serialize;
 
 use crate::{Notification, OutgoingRpcMessage, Request};
 
-/// What Neovim sends without being asked, in the order it sent it: its notifications, and the requests of nvui's Lua
+/// What Neovim sends without being asked, in the order it sent it: its notifications, and the requests of sarthi's Lua
 #[derive(Debug)]
 pub enum Message {
 	Notification(Notification),
 	Request(IncomingRequest),
 }
 
-/// A request from Neovim, e.g. from `rpcrequest()` on nvui's channel, and what answers it
+/// A request from Neovim, e.g. from `rpcrequest()` on sarthi's channel, and what answers it
 #[derive(Debug)]
 pub struct IncomingRequest {
 	pub request: Request,

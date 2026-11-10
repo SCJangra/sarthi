@@ -6,10 +6,10 @@ use std::ops::RangeInclusive;
 /// What `guifont` asks for
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GuiFont {
-	/// The main font, then fallbacks for the characters it lacks. Empty for nvui's default font.
+	/// The main font, then fallbacks for the characters it lacks. Empty for sarthi's default font.
 	pub families: Vec<String>,
 
-	/// In points (`:h14`); `None` for nvui's default size
+	/// In points (`:h14`); `None` for sarthi's default size
 	pub size: Option<f32>,
 
 	/// All text bold (`:b`) or italic (`:i`)
@@ -40,7 +40,7 @@ impl GuiFont {
 					Some(("b", "")) => font.bold = true,
 					Some(("i", "")) => font.italic = true,
 					_ if option.is_empty() => (),
-					_ => return Err(format!("unknown option: {option} (nvui knows h<size>, b and i)")),
+					_ => return Err(format!("unknown option: {option} (sarthi knows h<size>, b and i)")),
 				}
 			}
 		}
@@ -53,7 +53,7 @@ impl GuiFont {
 	}
 }
 
-/// Font sizes the size functions (`require("nvui").set_font_size()` …) accept, in points
+/// Font sizes the size functions (`require("sarthi").set_font_size()` …) accept, in points
 const SIZES: RangeInclusive<f32> = 4.0..=96.0;
 
 /// Points in `pixels` logical pixels
@@ -183,7 +183,7 @@ mod tests {
 		assert_eq!(sizes.change("X:h95", 5.0, 10.5).unwrap(), "X:h96");
 		assert_eq!(sizes.change("X:h5", -5.0, 10.5).unwrap(), "X:h4");
 		assert_eq!(sizes.set("X", 100.0).unwrap_err(), "font size 100 is outside 4..96 points");
-		assert_eq!(sizes.set("X:w1", 12.0).unwrap_err(), "unknown option: w1 (nvui knows h<size>, b and i)");
+		assert_eq!(sizes.set("X:w1", 12.0).unwrap_err(), "unknown option: w1 (sarthi knows h<size>, b and i)");
 	}
 
 	#[test]

@@ -1,6 +1,6 @@
--- Makes nvui the clipboard provider for the + and * registers (:help clipboard). nvui loads this before the user's
--- config, which can still set its own g:clipboard. Copying and pasting ask nvui over its channel.
-local rpc = require('nvui.rpc')
+-- Makes sarthi the clipboard provider for the + and * registers (:help clipboard). sarthi loads this before the user's
+-- config, which can still set its own g:clipboard. Copying and pasting ask sarthi over its channel.
+local rpc = require('sarthi.rpc')
 
 local function copy(register)
   return function(lines, regtype)
@@ -15,7 +15,7 @@ local function paste(register)
 end
 
 vim.g.clipboard = {
-  name = 'nvui',
+  name = 'sarthi',
   copy = { ['+'] = copy('+'), ['*'] = copy('*') },
   paste = { ['+'] = paste('+'), ['*'] = paste('*') },
 }

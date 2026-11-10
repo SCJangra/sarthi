@@ -1,4 +1,4 @@
-//! What nvui's Lua tells nvui without waiting for an answer, so Neovim goes on at once. Each is a variant of
+//! What sarthi's Lua tells sarthi without waiting for an answer, so Neovim goes on at once. Each is a variant of
 //! [`Notification`](crate::Notification), with the method named like a request's.
 
 use serde::{Deserialize, Deserializer};
@@ -21,7 +21,7 @@ pub struct ScrolledWindow {
 	/// Of the buffer the window shows
 	pub filetype: String,
 
-	/// The window's `w:nvui_smooth_scroll`, if set
+	/// The window's `w:sarthi_smooth_scroll`, if set
 	#[serde(default)]
 	pub smooth_scroll: Option<bool>,
 }
@@ -42,7 +42,7 @@ pub struct FloatWindow {
 	/// Of the buffer the window shows
 	pub filetype: String,
 
-	/// The window's `w:nvui_shadow`, if set
+	/// The window's `w:sarthi_shadow`, if set
 	#[serde(default)]
 	pub shadow: Option<bool>,
 

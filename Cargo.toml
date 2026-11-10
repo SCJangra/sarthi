@@ -2,17 +2,17 @@
 members = [
 	"crates/derive",
 	"crates/editor",
-	"crates/nvui",
 	"crates/renderer",
 	"crates/rpc",
+	"crates/sarthi",
 ]
 resolver = "3"
 
 [workspace.dependencies]
 arrayvec = { version = "0.7", features = ["serde"] }
-editor = { package = "nvui-editor", path = "crates/editor" }
-renderer = { package = "nvui-renderer", path = "crates/renderer" }
-rpc = { package = "nvui-rpc", path = "crates/rpc" }
+editor = { package = "sarthi-editor", path = "crates/editor" }
+renderer = { package = "sarthi-renderer", path = "crates/renderer" }
+rpc = { package = "sarthi-rpc", path = "crates/rpc" }
 rmp = "0.8"
 rmp-serde = "1"
 rmpv = { version = "1", features = ["with-serde"] }
@@ -24,7 +24,7 @@ wgpu = "30"
 glyphon = "0.12"
 rustc-hash = "2"
 bytemuck = { version = "1", features = ["derive"] }
-# Path rasterizer swash uses; draws the characters nvui shapes itself (box drawing, blocks, powerline)
+# Path rasterizer swash uses; draws the characters sarthi shapes itself (box drawing, blocks, powerline)
 zeno = "0.3"
 # glyphon's cosmic-text, with the shaping cache: without it, laying out a full screen takes ~20× longer.
 cosmic-text = { version = "0.19", features = ["shape-run-cache"] }

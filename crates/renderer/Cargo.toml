@@ -1,5 +1,5 @@
 [package]
-name = "nvui-renderer"
+name = "sarthi-renderer"
 version = { workspace = true }
 edition = { workspace = true }
 

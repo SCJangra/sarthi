@@ -22,7 +22,7 @@ mod tests {
 		let mode = |entries: &[(&str, Value)]| {
 			Value::Map(entries.iter().map(|(key, value)| (Value::from(*key), value.clone())).collect())
 		};
-		// Like Neovim sends it: some keys missing in some modes, and keys nvui doesn't use
+		// Like Neovim sends it: some keys missing in some modes, and keys sarthi doesn't use
 		let normal = mode(&[
 			("cursor_shape", "block".into()),
 			("cell_percentage", 0.into()),

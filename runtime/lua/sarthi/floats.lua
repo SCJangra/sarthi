@@ -1,7 +1,7 @@
--- Tells nvui about floating windows before Neovim draws them, so nvui can decide which cast a shadow: it knows the
--- settings (`shadow.exclude_filetypes`), and Neovim knows each window's filetype, `w:nvui_shadow`, `winblend`, and the
--- floating window it's attached to, if any. Sends a window again only when these change.
-local rpc = require('nvui.rpc')
+-- Tells sarthi about floating windows before Neovim draws them, so sarthi can decide which cast a shadow: it knows the
+-- settings (`shadow.exclude_filetypes`), and Neovim knows each window's filetype, `w:sarthi_shadow`, `winblend`, and
+-- the floating window it's attached to, if any. Sends a window again only when these change.
+local rpc = require('sarthi.rpc')
 
 local M = {}
 
@@ -24,7 +24,7 @@ local function forward()
       local window = {
         win = win,
         filetype = vim.bo[vim.api.nvim_win_get_buf(win)].filetype,
-        shadow = vim.w[win].nvui_shadow,
+        shadow = vim.w[win].sarthi_shadow,
         winblend = vim.wo[win].winblend,
         parent = config.relative == 'win' and is_float(config.win) and config.win or nil,
       }
@@ -59,7 +59,7 @@ end
 -- SafeState comes after a plugin set a new window's variables and before Neovim draws it. It doesn't come while a
 -- mapping runs or an operator is pending, so the events that set a window's buffer and filetype forward too.
 vim.api.nvim_create_autocmd({ 'WinNew', 'BufWinEnter', 'FileType', 'SafeState' }, {
-  group = vim.api.nvim_create_augroup('nvui.floats', {}),
+  group = vim.api.nvim_create_augroup('sarthi.floats', {}),
   callback = forward,
 })
 

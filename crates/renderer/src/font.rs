@@ -8,7 +8,7 @@ use glyphon::cosmic_text::skrifa::{FontRef, MetadataProvider, Tag};
 use glyphon::fontdb::{Family, Query, Source, Style, Weight};
 use rustc_hash::FxHashMap;
 
-/// nvui draws text with JetBrains Mono unless told otherwise, bundled so it looks the same everywhere (license:
+/// sarthi draws text with JetBrains Mono unless told otherwise, bundled so it looks the same everywhere (license:
 /// `assets/fonts/OFL.txt`). Both faces are variable fonts, so every weight is available.
 const BUNDLED: &str = "JetBrains Mono";
 const FACES: [&[u8]; 2] = [

@@ -24,7 +24,7 @@ pub enum OutgoingRpcMessage<T> {
 	},
 }
 
-/// A message from the server: a request from nvui's Lua, a response with a result of type `T`, or a
+/// A message from the server: a request from sarthi's Lua, a response with a result of type `T`, or a
 /// notification
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -200,7 +200,7 @@ mod tests {
 
 	#[test]
 	fn de_request() {
-		// [0, 10, "get_clipboard", ["+"]]: the method and arguments decode straight into nvui's request
+		// [0, 10, "get_clipboard", ["+"]]: the method and arguments decode straight into sarthi's request
 		let request = [&[0x94, 0x00, 0x0A, 0xAD][..], b"get_clipboard", &[0x91, 0xA1, b'+']].concat();
 		let request: IncomingRpcMessage<()> = rmp_serde::from_slice(&request).unwrap();
 		let expected = Request::GetClipboard(GetClipboardArgs { register: Register::Clipboard });

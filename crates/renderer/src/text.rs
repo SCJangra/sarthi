@@ -43,7 +43,7 @@ struct Row {
 	layout: RowLayout,
 }
 
-/// How a row's cells are drawn: segments of text by starting column, and custom glyphs for the cells nvui draws
+/// How a row's cells are drawn: segments of text by starting column, and custom glyphs for the cells sarthi draws
 /// itself (box drawing, blocks, powerline), positioned relative to the row
 #[derive(Default)]
 struct RowLayout {
@@ -99,7 +99,7 @@ impl TextPipeline {
 
 		self.viewport.update(queue, resolution);
 
-		// Custom glyphs are the cells nvui draws itself, rasterized once per size.
+		// Custom glyphs are the cells sarthi draws itself, rasterized once per size.
 		let thickness = fonts.line_metrics(size).thickness;
 		for (index, piece) in pieces.iter().enumerate() {
 			if index == self.renderers.len() {
@@ -305,7 +305,7 @@ fn ink(
 	})
 }
 
-/// A custom glyph, relative to the row, for each cell nvui draws itself, in the cell's text color
+/// A custom glyph, relative to the row, for each cell sarthi draws itself, in the cell's text color
 fn builtin_glyphs(cells: &[RenderCell], cell: CellSize) -> Vec<CustomGlyph> {
 	(0..)
 		.zip(cells)
@@ -371,7 +371,7 @@ fn segments(cells: &[RenderCell], mut face_of: impl FnMut(&str) -> Option<u8>) -
 		match cell.text.as_str() {
 			// The right half of a double-width character: the next segment starts after it.
 			"" => continue,
-			// Cells nvui draws itself count as spaces for the text.
+			// Cells sarthi draws itself count as spaces for the text.
 			text if text == " " || is_builtin(text) => {
 				spaces += 1;
 				continue;

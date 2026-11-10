@@ -1,6 +1,6 @@
--- `require("nvui")`, for the user's config: `require("nvui").setup({ … })`. Only nvui has the module, so a config
--- shared with the TUI checks `vim.g.nvui`, which nvui sets, first.
-local rpc = require('nvui.rpc')
+-- `require("sarthi")`, for the user's config: `require("sarthi").setup({ … })`. Only sarthi has the module, so a config
+-- shared with the TUI checks `vim.g.sarthi`, which sarthi sets, first.
+local rpc = require('sarthi.rpc')
 
 local M = {}
 
@@ -24,23 +24,23 @@ local function merge(opts)
   return merged
 end
 
---- Sets nvui's settings: values given replace their previous ones, at first their defaults. Applies at once, so it
+--- Sets sarthi's settings: values given replace their previous ones, at first their defaults. Applies at once, so it
 --- can be called again later, e.g. from a keymap. A mistake is an error at the call.
 ---@param opts table?
 function M.setup(opts)
   if opts ~= nil and type(opts) ~= 'table' then
-    error('nvui: setup() takes a table, not a ' .. type(opts), 2)
+    error('sarthi: setup() takes a table, not a ' .. type(opts), 2)
   end
   local merged = merge(opts or {})
-  -- Settings nvui can't decode (unknown keys, wrong types) fail the request; values it decodes but finds wrong (out
+  -- Settings sarthi can't decode (unknown keys, wrong types) fail the request; values it decodes but finds wrong (out
   -- of range) come back as the answer. Either way the mistake is raised here, at the caller's setup().
   local mistake = rpc.request('setup', merged)
   if mistake ~= vim.NIL then
-    error('nvui: ' .. mistake, 2)
+    error('sarthi: ' .. mistake, 2)
   end
   current = merged
   -- Floating windows open already get the new settings too.
-  require('nvui.floats').resend()
+  require('sarthi.floats').resend()
 end
 
 --- Sets the font size, in points (4 to 96), by setting `:h` in `guifont`.

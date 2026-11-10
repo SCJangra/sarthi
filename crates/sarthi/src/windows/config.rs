@@ -11,7 +11,7 @@ pub struct WindowConfig {
 
 impl Default for WindowConfig {
 	fn default() -> Self {
-		Self { title: String::from("NvUI"), width: 1280, height: 720, resizable: true, font_size: 14.0 }
+		Self { title: String::from("Sarthi"), width: 1280, height: 720, resizable: true, font_size: 14.0 }
 	}
 }
 
@@ -23,7 +23,7 @@ mod tests {
 	fn default_values() {
 		let config = WindowConfig::default();
 
-		assert_eq!(config.title, "NvUI");
+		assert_eq!(config.title, "Sarthi");
 		assert_eq!(config.width, 1280);
 		assert_eq!(config.height, 720);
 		assert!(config.resizable);

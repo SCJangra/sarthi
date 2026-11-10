@@ -1,9 +1,9 @@
-//! How nvui's settings (`rpc::nvui::Settings`, set with `require("nvui").setup()`) apply to the renderer
+//! How sarthi's settings (`rpc::sarthi::Settings`, set with `require("sarthi").setup()`) apply to the renderer
 
 use std::time::Duration;
 
 use renderer::{CursorMotion, Easing, Motion, Shadow, UnderlineSize};
-use rpc::nvui::{Animation, FloatWindow, ScrolledWindow, Settings};
+use rpc::sarthi::{Animation, FloatWindow, ScrolledWindow, Settings};
 
 /// How the renderer moves scrolled text
 pub fn scroll_motion(settings: &Settings) -> Motion {
@@ -32,8 +32,8 @@ fn motion(animation: Animation) -> Motion {
 	}
 }
 
-/// Whether `window`'s text slides when it scrolls: unless its filetype is excluded, or its `w:nvui_smooth_scroll` says
-/// otherwise
+/// Whether `window`'s text slides when it scrolls: unless its filetype is excluded, or its `w:sarthi_smooth_scroll`
+/// says otherwise
 pub fn smooth_scroll(settings: &Settings, window: &ScrolledWindow) -> bool {
 	let excluded = settings.scroll.exclude_filetypes.contains(&window.filetype);
 	window.smooth_scroll.unwrap_or(!excluded)
@@ -49,7 +49,7 @@ pub fn shadow(settings: &Settings, scale: f32) -> Option<Shadow> {
 }
 
 /// Whether floating window `window` casts a shadow: unless it's fully transparent, or its filetype is excluded and
-/// its `w:nvui_shadow` doesn't say otherwise, or that says so
+/// its `w:sarthi_shadow` doesn't say otherwise, or that says so
 pub fn float_shadow(settings: &Settings, window: &FloatWindow) -> bool {
 	let excluded = settings.shadow.exclude_filetypes.contains(&window.filetype);
 	window.winblend < 100 && window.shadow.unwrap_or(!excluded)
@@ -69,7 +69,7 @@ pub fn underlines(settings: &Settings) -> UnderlineSize {
 #[cfg(test)]
 mod tests {
 	use rpc::neovim::Window;
-	use rpc::nvui::{FloatWindow, ScrolledWindow, Settings};
+	use rpc::sarthi::{FloatWindow, ScrolledWindow, Settings};
 
 	use super::smooth_scroll;
 

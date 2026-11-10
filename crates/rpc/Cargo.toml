@@ -1,5 +1,5 @@
 [package]
-name = "nvui-rpc"
+name = "sarthi-rpc"
 version = { workspace = true }
 edition = { workspace = true }
 
@@ -11,5 +11,5 @@ rmpv = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 flume = { workspace = true }
-nvui-derive = { path = "../derive" }
+sarthi-derive = { path = "../derive" }
 tracing = { workspace = true }

@@ -72,14 +72,14 @@ impl QuadPipeline {
 		let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/quad.wgsl"));
 
 		let viewport = device.create_buffer(&wgpu::BufferDescriptor {
-			label: Some("nvui-quad-viewport"),
+			label: Some("sarthi-quad-viewport"),
 			size: size_of::<[f32; 4]>() as u64,
 			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
 			mapped_at_creation: false,
 		});
 
 		let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-			label: Some("nvui-quad-bind-group-layout"),
+			label: Some("sarthi-quad-bind-group-layout"),
 			entries: &[wgpu::BindGroupLayoutEntry {
 				binding: 0,
 				visibility: wgpu::ShaderStages::VERTEX,
@@ -93,19 +93,19 @@ impl QuadPipeline {
 		});
 
 		let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-			label: Some("nvui-quad-bind-group"),
+			label: Some("sarthi-quad-bind-group"),
 			layout: &bind_group_layout,
 			entries: &[wgpu::BindGroupEntry { binding: 0, resource: viewport.as_entire_binding() }],
 		});
 
 		let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-			label: Some("nvui-quad-pipeline-layout"),
+			label: Some("sarthi-quad-pipeline-layout"),
 			bind_group_layouts: &[Some(&bind_group_layout)],
 			..Default::default()
 		});
 
 		let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-			label: Some("nvui-quad-pipeline"),
+			label: Some("sarthi-quad-pipeline"),
 			layout: Some(&layout),
 			vertex: wgpu::VertexState {
 				module: &shader,
@@ -172,7 +172,7 @@ impl QuadPipeline {
 
 fn instance_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
 	device.create_buffer(&wgpu::BufferDescriptor {
-		label: Some("nvui-quad-instances"),
+		label: Some("sarthi-quad-instances"),
 		size,
 		usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
 		mapped_at_creation: false,

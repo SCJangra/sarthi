@@ -1,4 +1,4 @@
-//! What the clipboard provider in `runtime/lua/nvui/clipboard.lua` sends and gets back
+//! What the clipboard provider in `runtime/lua/sarthi/clipboard.lua` sends and gets back
 
 use serde::{Deserialize, Serialize};
 
@@ -9,7 +9,7 @@ pub struct Copied {
 	pub regtype: String,
 }
 
-/// What a paste returns to Neovim: the lines and their type when nvui copied them, so e.g. lines copied linewise
+/// What a paste returns to Neovim: the lines and their type when sarthi copied them, so e.g. lines copied linewise
 /// paste linewise; otherwise only the lines, and Neovim takes a trailing empty line as linewise.
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(untagged)]

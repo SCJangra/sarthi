@@ -1,5 +1,5 @@
 [package]
-name = "nvui-derive"
+name = "sarthi-derive"
 version.workspace = true
 edition.workspace = true
 
