@@ -23,6 +23,10 @@ pub(crate) struct Quad {
 	/// Draws a patterned line instead of a rectangle: kind ([`WAVE`], [`DOTS`] or [`DASHES`]; 0 for none), period and
 	/// line thickness in pixels, unused; or a shadow instead ([`SHADOW`]), with its blur radius in pixels
 	pub pattern: [f32; 4],
+
+	/// For a shadow: where it isn't drawn, under what casts it, as rectangles of the frame's holes (see
+	/// [`QuadPipeline::prepare`]): the first, and how many
+	pub holes: [u32; 2],
 }
 
 const WAVE: f32 = 1.0;
@@ -33,7 +37,15 @@ const SHADOW: f32 = 4.0;
 impl Quad {
 	/// A plain rectangle without rounded corners or border
 	pub fn fill(rect: [f32; 4], color: [f32; 4]) -> Self {
-		Self { rect, color, border_color: [0.0; 4], corner_radius: 0.0, border_width: 0.0, pattern: [0.0; 4] }
+		Self {
+			rect,
+			color,
+			border_color: [0.0; 4],
+			corner_radius: 0.0,
+			border_width: 0.0,
+			pattern: [0.0; 4],
+			holes: [0; 2],
+		}
 	}
 
 	/// `shadow` under a rectangle `rect` (left, top, width, height), for a surface of the given kind: the quad reaches as
@@ -55,14 +67,32 @@ impl Quad {
 	}
 }
 
+/// A frame's quads, and the rectangles their shadows leave out (see [`Quad::holes`])
+#[derive(Debug, Default)]
+pub(crate) struct FrameQuads {
+	pub quads: Vec<Quad>,
+	pub holes: Vec<[f32; 4]>,
+}
+
+impl FrameQuads {
+	pub(crate) fn clear(&mut self) {
+		self.quads.clear();
+		self.holes.clear();
+	}
+}
+
 /// Draws [`Quad`]s with instanced draw calls: all quads of a frame are uploaded at once, and drawn in ranges
 pub(crate) struct QuadPipeline {
 	pipeline: wgpu::RenderPipeline,
 	viewport: wgpu::Buffer,
+	bind_group_layout: wgpu::BindGroupLayout,
 	bind_group: wgpu::BindGroup,
 
 	/// Instance buffer, grown when a frame needs more room
 	instances: wgpu::Buffer,
+
+	/// The rectangles shadows leave out (left, top, width, height in pixels), grown like the instances
+	holes: wgpu::Buffer,
 }
 
 impl QuadPipeline {
@@ -78,23 +108,32 @@ impl QuadPipeline {
 
 		let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
 			label: Some("sarthi-quad-bind-group-layout"),
-			entries: &[wgpu::BindGroupLayoutEntry {
-				binding: 0,
-				visibility: wgpu::ShaderStages::VERTEX,
-				ty: wgpu::BindingType::Buffer {
-					ty: wgpu::BufferBindingType::Uniform,
-					has_dynamic_offset: false,
-					min_binding_size: None,
+			entries: &[
+				wgpu::BindGroupLayoutEntry {
+					binding: 0,
+					visibility: wgpu::ShaderStages::VERTEX,
+					ty: wgpu::BindingType::Buffer {
+						ty: wgpu::BufferBindingType::Uniform,
+						has_dynamic_offset: false,
+						min_binding_size: None,
+					},
+					count: None,
 				},
-				count: None,
-			}],
+				wgpu::BindGroupLayoutEntry {
+					binding: 1,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Buffer {
+						ty: wgpu::BufferBindingType::Storage { read_only: true },
+						has_dynamic_offset: false,
+						min_binding_size: None,
+					},
+					count: None,
+				},
+			],
 		});
 
-		let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-			label: Some("sarthi-quad-bind-group"),
-			layout: &bind_group_layout,
-			entries: &[wgpu::BindGroupEntry { binding: 0, resource: viewport.as_entire_binding() }],
-		});
+		let holes = holes_buffer(device, HOLE);
+		let bind_group = quad_bind_group(device, &bind_group_layout, &viewport, &holes);
 
 		let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
 			label: Some("sarthi-quad-pipeline-layout"),
@@ -112,7 +151,7 @@ impl QuadPipeline {
 					array_stride: size_of::<Quad>() as u64,
 					step_mode: wgpu::VertexStepMode::Instance,
 					attributes: &wgpu::vertex_attr_array![
-						0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x2, 4 => Float32x4
+						0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x2, 4 => Float32x4, 5 => Uint32x2
 					],
 				})],
 				compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -135,10 +174,11 @@ impl QuadPipeline {
 		});
 
 		let instances = instance_buffer(device, 0);
-		Self { pipeline, viewport, bind_group, instances }
+		Self { pipeline, viewport, bind_group_layout, bind_group, instances, holes }
 	}
 
-	/// Uploads `quads` for a surface of `width` × `height` pixels.
+	/// Uploads `quads` for a surface of `width` × `height` pixels, and the rectangles their shadows leave out, `holes`
+	/// (left, top, width, height in pixels), which [`Quad::holes`] ranges over.
 	pub(crate) fn prepare(
 		&mut self,
 		device: &wgpu::Device,
@@ -146,7 +186,15 @@ impl QuadPipeline {
 		width: u32,
 		height: u32,
 		quads: &[Quad],
+		holes: &[[f32; 4]],
 	) {
+		let size = size_of_val(holes) as u64;
+		if size > self.holes.size() {
+			self.holes = holes_buffer(device, size.next_power_of_two());
+			self.bind_group = quad_bind_group(device, &self.bind_group_layout, &self.viewport, &self.holes);
+		}
+		queue.write_buffer(&self.holes, 0, bytemuck::cast_slice(holes));
+
 		queue.write_buffer(&self.viewport, 0, bytemuck::cast_slice(&[width as f32, height as f32, 0.0, 0.0]));
 
 		let size = size_of_val(quads) as u64;
@@ -166,6 +214,34 @@ impl QuadPipeline {
 		pass.set_vertex_buffer(0, self.instances.slice(..));
 		pass.draw(0..4, range);
 	}
+}
+
+/// Room for one hole: a storage buffer can't be empty.
+const HOLE: u64 = size_of::<[f32; 4]>() as u64;
+
+fn holes_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
+	device.create_buffer(&wgpu::BufferDescriptor {
+		label: Some("sarthi-quad-holes"),
+		size: size.max(HOLE),
+		usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+		mapped_at_creation: false,
+	})
+}
+
+fn quad_bind_group(
+	device: &wgpu::Device,
+	layout: &wgpu::BindGroupLayout,
+	viewport: &wgpu::Buffer,
+	holes: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+	device.create_bind_group(&wgpu::BindGroupDescriptor {
+		label: Some("sarthi-quad-bind-group"),
+		layout,
+		entries: &[
+			wgpu::BindGroupEntry { binding: 0, resource: viewport.as_entire_binding() },
+			wgpu::BindGroupEntry { binding: 1, resource: holes.as_entire_binding() },
+		],
+	})
 }
 
 fn instance_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
@@ -351,10 +427,23 @@ pub(crate) fn cursor_quad(
 /// Adds the quads of `shadow`, with cells of `cell`. Its area is first cut into rectangles that don't overlap: a blur
 /// is linear, so the shadow of their union is the sum of theirs, and where the area's rectangles overlap (a window and
 /// its border, say) the shadow isn't drawn twice. Blending the pieces instead of summing them differs by well under 1%.
-pub(crate) fn area_shadow(quads: &mut Vec<Quad>, shadow: &LayerShadow, cell: CellSize, srgb_surface: bool) {
-	for [col, row, width, height] in disjoint(&shadow.area) {
-		let rect = [col * cell.width, row * cell.height, width * cell.width, height * cell.height];
-		quads.push(Quad::shadow(rect.map(|value| value as f32), shadow.shadow, srgb_surface));
+///
+/// Like CSS's `box-shadow`, the shadow is only drawn outside the area: under a see-through window, it would darken it.
+/// The area's pieces are added to the frame's holes, which the shadow's quads leave out.
+pub(crate) fn area_shadow(frame: &mut FrameQuads, shadow: &LayerShadow, cell: CellSize, srgb_surface: bool) {
+	let pieces: Vec<[f32; 4]> = disjoint(&shadow.area)
+		.into_iter()
+		.map(|[col, row, width, height]| {
+			[col * cell.width, row * cell.height, width * cell.width, height * cell.height]
+		})
+		.map(|rect| rect.map(|value| value as f32))
+		.collect();
+	let range = [frame.holes.len() as u32, pieces.len() as u32];
+	frame.holes.extend(&pieces);
+	for rect in pieces {
+		frame
+			.quads
+			.push(Quad { holes: range, ..Quad::shadow(rect, shadow.shadow, srgb_surface) });
 	}
 }
 
@@ -593,7 +682,7 @@ mod tests {
 			});
 
 			let mut pipeline = QuadPipeline::new(device, format);
-			pipeline.prepare(device, queue, SIZE, SIZE, quads);
+			pipeline.prepare(device, queue, SIZE, SIZE, quads, &[]);
 
 			let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 			let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());

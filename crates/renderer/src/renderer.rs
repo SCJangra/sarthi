@@ -7,7 +7,7 @@ use arrayvec::ArrayString;
 use crate::color::{rgba, wgpu_color};
 use crate::cursor::{CursorAnimation, cursor_rect};
 use crate::font::LineMetrics;
-use crate::quad::{Quad, QuadPipeline, area_shadow, cell_backgrounds, cell_decorations, cursor_quad};
+use crate::quad::{FrameQuads, QuadPipeline, area_shadow, cell_backgrounds, cell_decorations, cursor_quad};
 use crate::scroll::{ScrollAnimations, SlidingRegion};
 use crate::shape::ShapePipeline;
 use crate::text::TextPipeline;
@@ -34,7 +34,7 @@ pub struct Renderer {
 	cursor: CursorAnimation,
 
 	/// Quads of the current frame, layer by layer, and each layer's ranges of them; kept to reuse the allocations
-	frame_quads: Vec<Quad>,
+	frame_quads: FrameQuads,
 	layer_quads: Vec<LayerQuads>,
 }
 
@@ -149,7 +149,7 @@ impl Renderer {
 			layers: Vec::new(),
 			scrolls: ScrollAnimations::new(renderer_config.scroll),
 			cursor: CursorAnimation::new(renderer_config.cursor),
-			frame_quads: Vec::new(),
+			frame_quads: FrameQuads::default(),
 			layer_quads: Vec::new(),
 		})
 	}
@@ -254,8 +254,14 @@ impl Renderer {
 			self.layer_quads
 				.push(layer_quads(&mut self.frame_quads, piece, &self.text, cell, lines, srgb, moving));
 		}
-		self.quads
-			.prepare(&self.device, &self.queue, self.config.width, self.config.height, &self.frame_quads);
+		self.quads.prepare(
+			&self.device,
+			&self.queue,
+			self.config.width,
+			self.config.height,
+			&self.frame_quads.quads,
+			&self.frame_quads.holes,
+		);
 
 		let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -481,10 +487,10 @@ struct LayerQuads {
 	shape: bool,
 }
 
-/// Adds the quads of `piece` to `quads`, with underlines breaking where `text` laid out its text over them. With `moving`,
-/// `piece` is the cursor on its way, drawn over its shape.
+/// Adds the quads of `piece` to the `frame`'s, with underlines breaking where `text` laid out its text over them. With
+/// `moving`, `piece` is the cursor on its way, drawn over its shape.
 fn layer_quads(
-	quads: &mut Vec<Quad>,
+	frame: &mut FrameQuads,
 	piece: &Piece,
 	text: &TextPipeline,
 	cell: CellSize,
@@ -493,10 +499,11 @@ fn layer_quads(
 	moving: bool,
 ) -> LayerQuads {
 	let layer = &piece.layer;
-	let shadow = quads.len();
+	let shadow = frame.quads.len();
 	if let Some(layer_shadow) = layer.shadow.as_ref().filter(|_| piece.kind == PieceKind::Layer) {
-		area_shadow(quads, layer_shadow, cell, srgb);
+		area_shadow(frame, layer_shadow, cell, srgb);
 	}
+	let quads = &mut frame.quads;
 	let start = quads.len();
 	// The shape of a cursor on its way stands in for its background or bar.
 	if !moving {
@@ -555,7 +562,7 @@ mod tests {
 	use arrayvec::ArrayString;
 
 	use super::{PieceKind, draw_layers, layer_quads, pieces};
-	use crate::quad::QuadPipeline;
+	use crate::quad::{FrameQuads, QuadPipeline};
 	use crate::scroll::ScrollAnimations;
 	use crate::shape::ShapePipeline;
 	use crate::text::TextPipeline;
@@ -628,10 +635,10 @@ mod tests {
 			let resolution = glyphon::Resolution { width, height };
 			text.prepare(device, queue, resolution, &mut fonts, &pieces, size).unwrap();
 
-			let mut quads = Vec::new();
+			let mut frame = FrameQuads::default();
 			let ranges: Vec<_> = pieces
 				.iter()
-				.map(|piece| layer_quads(&mut quads, piece, &text, cell, lines, false, false))
+				.map(|piece| layer_quads(&mut frame, piece, &text, cell, lines, false, false))
 				.chain(shape.map(|_| super::LayerQuads {
 					shadow: 0..0,
 					under_text: 0..0,
@@ -645,7 +652,7 @@ mod tests {
 				shape_pipeline.prepare(queue, width, height, corners, crate::color::rgba(color, false));
 			}
 			let mut pipeline = QuadPipeline::new(device, format);
-			pipeline.prepare(device, queue, width, height, &quads);
+			pipeline.prepare(device, queue, width, height, &frame.quads, &frame.holes);
 
 			let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 			let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -776,6 +783,25 @@ mod tests {
 		assert!(pixel[0] == 255 && (126..=129).contains(&pixel[1]) && pixel[1] == pixel[2], "{pixel:?}");
 		// All the way see-through: only the red
 		assert_eq!(middle_pixel(&[cell(1, " ", 0xFF0000), blended(100)]).unwrap(), [255, 0, 0, 255]);
+	}
+
+	#[test]
+	fn gpu_a_shadow_isnt_drawn_under_what_casts_it() {
+		// A see-through cell at column 3, drawing no background, with a red shadow, on black
+		let shadow = crate::Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
+		let Layer::Cells(mut clear) = cell(1, " ", 0xFFFFFF);
+		clear.cells[0].blend = 100;
+		let shadow = crate::LayerShadow { shadow, area: vec![[3, 0, 1, 1]] };
+		let layer = Layer::Cells(CellLayer { col: 3, shadow: Some(shadow), ..clear });
+		let Some((pixels, cell)) = drawn(&[layer], None) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		let at = |x: u32| pixels[(9 * WIDTH + x) as usize];
+		// Under the cell, nothing: like CSS's box-shadow, only outside it
+		assert_eq!(at(3 * cell.width + cell.width / 2), [0, 0, 0, 255]);
+		// Around it, the shadow
+		assert!(at(3 * cell.width - 1)[0] > 50, "{:?}", at(3 * cell.width - 1));
 	}
 
 	#[test]

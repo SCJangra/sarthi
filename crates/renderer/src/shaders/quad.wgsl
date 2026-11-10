@@ -4,6 +4,9 @@
 // Surface size in pixels (xy); zw is padding
 @group(0) @binding(0) var<uniform> viewport: vec4<f32>;
 
+// Rectangles shadows leave out, under what casts them: left, top, width, height in pixels
+@group(0) @binding(1) var<storage, read> holes: array<vec4<f32>>;
+
 struct Quad {
 	// Left, top, width, height
 	@location(0) rect: vec4<f32>,
@@ -14,6 +17,8 @@ struct Quad {
 	// Kind (0: none, 1: wave, 2: dots, 3: dashes), period and line thickness in pixels, unused; or for a shadow
 	// (kind 4), its blur radius in pixels
 	@location(4) pattern: vec4<f32>,
+	// For a shadow: the first of its holes, and how many
+	@location(5) holes: vec2<u32>,
 }
 
 struct VertexOutput {
@@ -25,6 +30,7 @@ struct VertexOutput {
 	@location(3) @interpolate(flat) border_color: vec4<f32>,
 	@location(4) @interpolate(flat) radius_border: vec2<f32>,
 	@location(5) @interpolate(flat) pattern: vec4<f32>,
+	@location(6) @interpolate(flat) holes: vec2<u32>,
 }
 
 @vertex
@@ -41,6 +47,7 @@ fn vs_main(@builtin(vertex_index) vertex: u32, quad: Quad) -> VertexOutput {
 	out.border_color = quad.border_color;
 	out.radius_border = quad.radius_border;
 	out.pattern = quad.pattern;
+	out.holes = quad.holes;
 	return out;
 }
 
@@ -99,6 +106,13 @@ fn shadow_coverage(in: VertexOutput, sigma: f32) -> f32 {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	if u32(in.pattern.x + 0.5) == 4u {
+		// Only outside what casts it, like CSS's box-shadow
+		for (var i = in.holes.x; i < in.holes.x + in.holes.y; i++) {
+			let hole = holes[i];
+			if all(in.position.xy >= hole.xy) && all(in.position.xy < hole.xy + hole.zw) {
+				return vec4<f32>(0.0);
+			}
+		}
 		let sigma = max(in.pattern.y * 0.5, 0.01);
 		return vec4<f32>(in.color.rgb * in.color.a, in.color.a) * shadow_coverage(in, sigma);
 	}
