@@ -334,10 +334,6 @@ struct Segment {
 	face: Option<u8>,
 	text: String,
 	spans: Vec<(Range<usize>, TextStyle)>,
-
-	/// For a segment of its own, whose glyph may be wider than its cells: its room, in cells. That's its character's
-	/// cells, and one more if a space follows it; a glyph wider than that is drawn smaller to fit (see [`layout`]).
-	room: Option<u32>,
 }
 
 impl Segment {
@@ -388,11 +384,7 @@ fn segments(cells: &[RenderCell], mut run_of: impl FnMut(&str) -> Run) -> Vec<Se
 		if let Run::Alone(face) = run_of(&cell.text) {
 			segments.extend(current.take());
 			spaces = 0;
-			// Two cells for a double-width character, whose right half is empty
-			let next = |offset: u32| cells.get((col + offset) as usize).map(|cell| cell.text.as_str());
-			let own = if next(1) == Some("") { 2 } else { 1 };
-			let room = own + u32::from(next(own) == Some(" "));
-			let mut segment = Segment { col, face, text: String::new(), spans: Vec::new(), room: Some(room) };
+			let mut segment = Segment { col, face, text: String::new(), spans: Vec::new() };
 			segment.push(&cell.text, cell.style);
 			segments.push(segment);
 			continue;
@@ -403,13 +395,8 @@ fn segments(cells: &[RenderCell], mut run_of: impl FnMut(&str) -> Run) -> Vec<Se
 		}
 		spaces = 0;
 
-		let segment = current.get_or_insert_with(|| Segment {
-			col,
-			face: Some(0),
-			text: String::new(),
-			spans: Vec::new(),
-			room: None,
-		});
+		let segment =
+			current.get_or_insert_with(|| Segment { col, face: Some(0), text: String::new(), spans: Vec::new() });
 		segment.push(&cell.text, cell.style);
 
 		let double_width = cells.get(col as usize + 1).is_some_and(|next| next.text.is_empty());
@@ -422,25 +409,9 @@ fn segments(cells: &[RenderCell], mut run_of: impl FnMut(&str) -> Run) -> Vec<Se
 	segments
 }
 
-/// Lays out `segment` in its font, with all text bold or italic if the fonts were chosen so. A segment of its own whose
-/// glyph is wider than its room (see [`Segment::room`]) is laid out smaller, to fit it: a wide icon or arrow with a space
-/// after it keeps about its size, one squeezed between text shrinks to its cell.
+/// Lays out `segment` in its font, in lines a cell high, with all text bold or italic if the fonts were chosen so. A
+/// glyph wider than its cells keeps its size, and draws over the cells after it.
 fn layout(fonts: &mut Fonts, font_size: f32, cell: CellSize, segment: &Segment) -> Buffer {
-	let buffer = shape(fonts, font_size, cell, segment);
-	let Some(room) = segment.room else { return buffer };
-	let width = buffer
-		.layout_runs()
-		.flat_map(|run| run.glyphs)
-		.map(|glyph| glyph.x + glyph.w)
-		.fold(0.0, f32::max);
-	if width <= (room * cell.width) as f32 + 0.5 {
-		return buffer;
-	}
-	shape(fonts, font_size * (room * cell.width) as f32 / width, cell, segment)
-}
-
-/// Lays out `segment` at `font_size`, in lines a cell high, so smaller text is centered in them like the font places it
-fn shape(fonts: &mut Fonts, font_size: f32, cell: CellSize, segment: &Segment) -> Buffer {
 	let family = fonts.family(segment.face).to_owned();
 	let (bold, italic) = (fonts.bold, fonts.italic);
 	// The face of the segment's font each span is drawn with
@@ -494,7 +465,7 @@ mod tests {
 
 	/// A segment in the main font
 	fn segment(col: u32, text: &str, spans: &[(std::ops::Range<usize>, TextStyle)]) -> Segment {
-		Segment { col, face: Some(0), text: text.to_owned(), spans: spans.to_vec(), room: None }
+		Segment { col, face: Some(0), text: text.to_owned(), spans: spans.to_vec() }
 	}
 
 	/// A main font with ASCII only, and no other chosen fonts
@@ -548,8 +519,7 @@ mod tests {
 	fn character_of_another_font_is_a_segment_of_its_own() {
 		let row = cells(&["a", "b", "é", "c"], PLAIN);
 		// "é" is in no chosen font, so the system's fonts draw it.
-		let system =
-			Segment { col: 2, face: None, text: String::from("é"), spans: vec![(0..2, PLAIN)], room: Some(1) };
+		let system = Segment { col: 2, face: None, text: String::from("é"), spans: vec![(0..2, PLAIN)] };
 		assert_eq!(
 			segments(&row, ascii_only),
 			[segment(0, "ab", &[(0..2, PLAIN)]), system, segment(3, "c", &[(0..1, PLAIN)])],
@@ -565,61 +535,8 @@ mod tests {
 		// Like Iosevka's ➜, two cells wide while Neovim gives it one: in a run, the text after it would move.
 		let wide = |text: &str| if text == "➜" { Run::Alone(Some(0)) } else { Run::Main };
 		let row = cells(&["e", " ", "➜", " ", "N"], PLAIN);
-		let arrow =
-			Segment { col: 2, face: Some(0), text: String::from("➜"), spans: vec![(0..3, PLAIN)], room: Some(2) };
+		let arrow = Segment { col: 2, face: Some(0), text: String::from("➜"), spans: vec![(0..3, PLAIN)] };
 		assert_eq!(segments(&row, wide), [segment(0, "e", &[(0..1, PLAIN)]), arrow, segment(4, "N", &[(0..1, PLAIN)])]);
-	}
-
-	#[test]
-	fn segments_of_their_own_have_room_for_a_space_after_them() {
-		let icon = |text: &str| if text == "★" || text == "漢" { Run::Alone(None) } else { Run::Main };
-		let room_of = |row: &[&str]| -> Vec<_> {
-			segments(&cells(row, PLAIN), icon)
-				.iter()
-				.filter_map(|segment| segment.room)
-				.collect()
-		};
-		// Followed by a space, or by text, or at the end of the row
-		assert_eq!(room_of(&["★", " ", "a"]), [2]);
-		assert_eq!(room_of(&["★", "a"]), [1]);
-		assert_eq!(room_of(&["a", "★"]), [1]);
-		// A double-width character has its two cells, and the space after them.
-		assert_eq!(room_of(&["漢", "", " "]), [3]);
-	}
-
-	#[test]
-	fn a_glyph_wider_than_its_room_is_drawn_smaller() {
-		let mut fonts = Fonts::new();
-		let choice = crate::FontChoice { families: vec!["Iosevka".into()], ..crate::FontChoice::default() };
-		if fonts.choose(&choice).is_err() {
-			eprintln!("skipped: Iosevka isn't installed");
-			return;
-		}
-		// 14 points, where the arrow's width rounds to a pixel more than two cells
-		let font_size = 14.0 * 96.0 / 72.0;
-		let cell = fonts.cell_size(TextSize::new(font_size));
-		let width = |fonts: &mut Fonts, room| {
-			let segment = Segment {
-				col: 0,
-				face: Some(0),
-				text: String::from("➜"),
-				spans: vec![(0..3, PLAIN)],
-				room: Some(room),
-			};
-			let buffer = super::layout(fonts, font_size, cell, &segment);
-			buffer
-				.layout_runs()
-				.flat_map(|run| run.glyphs)
-				.map(|glyph| glyph.x + glyph.w)
-				.fold(0.0, f32::max)
-		};
-
-		// Iosevka's ➜ is about two cells wide, a little more after rounding: with a space after it, it keeps about its
-		// size, within the two cells; without, it's drawn in one.
-		let cell_width = cell.width as f32;
-		let spaced = width(&mut fonts, 2);
-		assert!(spaced > 1.5 * cell_width && spaced <= 2.0 * cell_width + 0.5, "{spaced}");
-		assert!(width(&mut fonts, 1) <= cell_width + 0.5, "{}", width(&mut fonts, 1));
 	}
 
 	#[test]
@@ -727,8 +644,7 @@ mod tests {
 		// drawn in Iosevka, not in another family that has a Bold face.
 		for (bold, italic) in [(true, false), (false, true), (true, true)] {
 			let style = TextStyle { bold, italic, ..PLAIN };
-			let segment =
-				Segment { col: 0, face: Some(0), text: String::from("af"), spans: vec![(0..2, style)], room: None };
+			let segment = Segment { col: 0, face: Some(0), text: String::from("af"), spans: vec![(0..2, style)] };
 			let buffer = super::layout(&mut fonts, 16.0, cell, &segment);
 			for glyph in buffer.layout_runs().flat_map(|run| run.glyphs) {
 				let face = fonts.system.db().face(glyph.font_id).unwrap();
