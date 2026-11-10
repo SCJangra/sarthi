@@ -15,5 +15,10 @@ tracing-subscriber = { workspace = true }
 window_clipboard = { workspace = true }
 serde = { workspace = true }
 
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+wayland-backend = { workspace = true }
+wayland-client = { workspace = true }
+wayland-protocols = { workspace = true }
+
 [dev-dependencies]
 rmpv = { workspace = true }

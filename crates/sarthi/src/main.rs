@@ -1,4 +1,5 @@
 mod app;
+mod blur;
 mod clipboard;
 mod error;
 mod guifont;

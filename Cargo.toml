@@ -20,6 +20,11 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 flume = "0.12"
 winit = "0.30"
+# Blur behind the window on Wayland compositors that offer ext-background-effect (see `sarthi::blur`); the versions and
+# features winit uses, so it's the same build of them
+wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wgpu = "30"
 glyphon = "0.12"
 rustc-hash = "2"

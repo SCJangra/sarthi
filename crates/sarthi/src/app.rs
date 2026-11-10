@@ -21,6 +21,7 @@ use rpc::sarthi::{
 	SetClipboardArgs, SetFontSizeArgs, Settings, SetupArgs, WinScrolledArgs,
 };
 
+use crate::blur::Blur;
 use crate::clipboard::Clipboard;
 use crate::error::Error;
 use crate::guifont::{self, FontSizes, GuiFont};
@@ -71,6 +72,9 @@ pub struct App {
 pub struct WindowState {
 	/// The clipboard of the window's display, if it could connect. Dropped first: it needs the display.
 	pub clipboard: Option<Clipboard>,
+
+	/// The blur behind the window, which also needs the display
+	pub blur: Blur,
 
 	pub window: Arc<Window>,
 	pub renderer: Renderer,
@@ -132,7 +136,9 @@ impl App {
 		let clipboard = Clipboard::connect(&window)
 			.inspect_err(|error| tracing::warn!("Couldn't connect to the clipboard: {error}"))
 			.ok();
-		self.window = Some(WindowState { clipboard, window: window.clone(), renderer });
+		let mut blur = Blur::new(window.clone());
+		blur.set(self.settings.window.blur);
+		self.window = Some(WindowState { clipboard, blur, window: window.clone(), renderer });
 		self.update_shadow();
 		Ok(window)
 	}
@@ -340,7 +346,7 @@ impl App {
 			state.renderer.set_cursor_motion(settings::cursor_motion(&settings));
 			state.renderer.set_opacity(settings.window.opacity);
 			// The compositor blurs the desktop behind the window, where it can.
-			state.window.set_blur(settings.window.blur);
+			state.blur.set(settings.window.blur);
 			state.window.request_redraw();
 		}
 		self.settings = settings;
