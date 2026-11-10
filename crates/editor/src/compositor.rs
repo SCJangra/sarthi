@@ -18,6 +18,7 @@ pub fn cell_layer(id: u32, grid: &Grid, highlights: &HighlightState, cursor: Opt
 				text: cell.text,
 				style: TextStyle { foreground: style.foreground, bold: style.bold, italic: style.italic },
 				background: style.background,
+				blend: style.blend,
 				decoration: Decoration {
 					underline: style.underline,
 					strikethrough: style.strikethrough,

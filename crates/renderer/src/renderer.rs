@@ -415,6 +415,8 @@ fn cursor_layer(layer: &CellLayer, cursor: Cursor) -> CellLayer {
 		.map(|cell| RenderCell {
 			style: TextStyle { foreground: cursor.text_color, ..cell.style },
 			background: cursor.color,
+			// The cursor stays opaque, also over a transparent window.
+			blend: 0,
 			..*cell
 		})
 		.collect();
@@ -517,8 +519,13 @@ mod tests {
 	/// A one-cell layer at the top-left corner showing `text` in white on `background`
 	fn cell(id: u64, text: &str, background: u32) -> Layer {
 		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
-		let cell =
-			RenderCell { text: ArrayString::from(text).unwrap(), style, background, decoration: Decoration::default() };
+		let cell = RenderCell {
+			text: ArrayString::from(text).unwrap(),
+			style,
+			background,
+			blend: 0,
+			decoration: Decoration::default(),
+		};
 		Layer::Cells(CellLayer {
 			id,
 			row: 0,
@@ -707,6 +714,23 @@ mod tests {
 		// Corners that briefly cross, so the shape isn't convex, still fill.
 		let crossed = [[0.0, 0.0], [20.0, 0.0], [0.0, 19.0], [20.0, 19.0]];
 		assert_eq!(drawn_pixel(&[cell(1, " ", 0x000000)], Some((crossed, 0x00FF00))).unwrap(), [0, 255, 0, 255]);
+	}
+
+	#[test]
+	fn gpu_a_blended_cell_shows_whats_under_it() {
+		let blended = |blend: u8| {
+			let Layer::Cells(mut layer) = cell(2, " ", 0xFFFFFF);
+			layer.cells[0].blend = blend;
+			Layer::Cells(layer)
+		};
+		// White, half see-through, over red
+		let Some(pixel) = middle_pixel(&[cell(1, " ", 0xFF0000), blended(50)]) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		assert!(pixel[0] == 255 && (126..=129).contains(&pixel[1]) && pixel[1] == pixel[2], "{pixel:?}");
+		// All the way see-through: only the red
+		assert_eq!(middle_pixel(&[cell(1, " ", 0xFF0000), blended(100)]).unwrap(), [255, 0, 0, 255]);
 	}
 
 	#[test]

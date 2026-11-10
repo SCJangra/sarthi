@@ -30,6 +30,9 @@ pub struct CellStyle {
 	pub underline: Option<Underline>,
 	pub strikethrough: bool,
 	pub overline: bool,
+
+	/// How much of what's under the cell shows through its background, from 0 to 100 (`winblend`, `pumblend`)
+	pub blend: u8,
 }
 
 /// Neovim's highlight table, from `hl_attr_define`, `default_colors_set` and `hl_group_set`
@@ -97,6 +100,7 @@ impl HighlightState {
 				underline: None,
 				strikethrough: false,
 				overline: false,
+				blend: 0,
 			};
 		};
 
@@ -115,6 +119,7 @@ impl HighlightState {
 			underline: underline(attrs),
 			strikethrough: attrs.strikethrough,
 			overline: attrs.overline,
+			blend: attrs.blend.unwrap_or(0).min(100),
 		}
 	}
 }
@@ -192,6 +197,7 @@ pub(crate) mod tests {
 			underline: None,
 			strikethrough: false,
 			overline: false,
+			blend: 0,
 		}
 	}
 
@@ -247,6 +253,18 @@ pub(crate) mod tests {
 		let mut state = state();
 		state.set_attrs(vec![define(5, HlAttrs { foreground: Some(0x112233), ..attrs() })]);
 		assert_eq!(state.resolve(5), plain(0x112233, BG));
+	}
+
+	#[test]
+	fn blend_is_resolved() {
+		let mut state = state();
+		state.set_attrs(vec![
+			define(1, HlAttrs { blend: Some(30), ..attrs() }),
+			define(2, HlAttrs { blend: Some(250), ..attrs() }),
+		]);
+		assert_eq!((state.resolve(0).blend, state.resolve(1).blend), (0, 30));
+		// At most all of it
+		assert_eq!(state.resolve(2).blend, 100);
 	}
 
 	#[test]

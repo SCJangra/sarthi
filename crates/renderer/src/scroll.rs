@@ -64,6 +64,10 @@ impl ScrollAnimations {
 
 		for Layer::Cells(layer) in layers {
 			let Some(scroll) = layer.scroll else { continue };
+			// Sliding text is drawn over the layer's own: through transparent backgrounds, both would show.
+			if layer.cells.iter().any(|cell| cell.blend > 0) {
+				continue;
+			}
 			// A new layer has no text to slide from; neither has one that changed size, e.g. a resized window.
 			let previous = shown
 				.iter()
@@ -231,6 +235,7 @@ mod tests {
 				text: ArrayString::from(&c.to_string()).unwrap(),
 				style,
 				background: 0,
+				blend: 0,
 				decoration: Decoration::default(),
 			})
 			.collect();
@@ -276,6 +281,17 @@ mod tests {
 		assert!(scrolls.is_animating(now + DURATION / 2));
 		assert_eq!(region(&scrolls, &scrolled[0], now + DURATION), None);
 		assert!(!scrolls.is_animating(now + DURATION));
+	}
+
+	#[test]
+	fn transparent_text_doesnt_slide() {
+		let (mut scrolls, now) = (animations(), Instant::now());
+		let shown = [layer(&["a", "b", "c"], 0, 0, 3)];
+		let [Layer::Cells(mut scrolled)] = [layer(&["b", "c", "d"], 1, 0, 3)];
+		scrolled.cells[1].blend = 30;
+		let scrolled = [Layer::Cells(scrolled)];
+		scrolls.update(&shown, &scrolled, now);
+		assert_eq!(region(&scrolls, &scrolled[0], now), None);
 	}
 
 	#[test]

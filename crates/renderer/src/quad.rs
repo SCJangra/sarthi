@@ -185,9 +185,14 @@ pub(crate) fn cell_backgrounds(quads: &mut Vec<Quad>, layer: &CellLayer, cell: C
 	let (width, height) = (cell.width as f32, cell.height as f32);
 
 	for (row, cells) in (layer.row..).zip(layer.cells.chunks_exact((layer.width as usize).max(1))) {
-		for (col, len, color) in background_runs(cells) {
+		for (col, len, color, blend) in background_runs(cells) {
 			let rect = [(layer.col + col) as f32 * width, row as f32 * height, len as f32 * width, height];
-			quads.push(Quad::fill(rect, rgba(color, srgb_surface)));
+			let [r, g, b, _] = rgba(color, srgb_surface);
+			// What's under it shows through by `blend`, like in Neovim's own compositor, where the cell is blank.
+			let opacity = 1.0 - f32::from(blend.min(100)) / 100.0;
+			if opacity > 0.0 {
+				quads.push(Quad::fill(rect, [r, g, b, opacity]));
+			}
 		}
 	}
 }
@@ -376,12 +381,13 @@ fn disjoint(rects: &[[u32; 4]]) -> Vec<[u32; 4]> {
 	pieces
 }
 
-/// Runs of neighbouring cells with the same background, as (first column, length, color)
-fn background_runs(cells: &[RenderCell]) -> impl Iterator<Item = (u32, u32, u32)> {
-	cells.chunk_by(|a, b| a.background == b.background).scan(0, |col, run| {
+/// Runs of neighbouring cells with the same background and blend, as (first column, length, color, blend)
+fn background_runs(cells: &[RenderCell]) -> impl Iterator<Item = (u32, u32, u32, u8)> {
+	let same = |a: &RenderCell, b: &RenderCell| (a.background, a.blend) == (b.background, b.blend);
+	cells.chunk_by(same).scan(0, |col, run| {
 		let start = *col;
 		*col += run.len() as u32;
-		Some((start, run.len() as u32, run[0].background))
+		Some((start, run.len() as u32, run[0].background, run[0].blend))
 	})
 }
 
@@ -403,6 +409,7 @@ mod tests {
 				text: ArrayString::from("x").unwrap(),
 				style,
 				background,
+				blend: 0,
 				decoration: Decoration::default(),
 			})
 			.collect()
@@ -411,12 +418,19 @@ mod tests {
 	#[test]
 	fn runs_merge_equal_backgrounds() {
 		let row = cells(&[1, 1, 2, 2, 2, 1]);
-		assert_eq!(background_runs(&row).collect::<Vec<_>>(), [(0, 2, 1), (2, 3, 2), (5, 1, 1)]);
+		assert_eq!(background_runs(&row).collect::<Vec<_>>(), [(0, 2, 1, 0), (2, 3, 2, 0), (5, 1, 1, 0)]);
+	}
+
+	#[test]
+	fn runs_split_where_the_blend_changes() {
+		let mut row = cells(&[1, 1, 1]);
+		row[2].blend = 40;
+		assert_eq!(background_runs(&row).collect::<Vec<_>>(), [(0, 2, 1, 0), (2, 1, 1, 40)]);
 	}
 
 	#[test]
 	fn runs_of_a_plain_row() {
-		assert_eq!(background_runs(&cells(&[7; 4])).collect::<Vec<_>>(), [(0, 4, 7)]);
+		assert_eq!(background_runs(&cells(&[7; 4])).collect::<Vec<_>>(), [(0, 4, 7, 0)]);
 		assert_eq!(background_runs(&[]).count(), 0);
 	}
 
@@ -424,7 +438,7 @@ mod tests {
 	fn double_width_halves_keep_their_backgrounds() {
 		let mut row = cells(&[1, 2, 2, 1]);
 		row[2].text = ArrayString::new();
-		assert_eq!(background_runs(&row).collect::<Vec<_>>(), [(0, 1, 1), (1, 2, 2), (3, 1, 1)]);
+		assert_eq!(background_runs(&row).collect::<Vec<_>>(), [(0, 1, 1, 0), (1, 2, 2, 0), (3, 1, 1, 0)]);
 	}
 
 	/// Rectangles of a bar cursor at (row 2, col 3) of a layer placed at (row 1, col 1), with 8×19 px cells
@@ -455,6 +469,7 @@ mod tests {
 			text: ArrayString::from(" ").unwrap(),
 			style,
 			background: 0,
+			blend: 0,
 			decoration: Decoration::default(),
 		};
 		let mut cells = vec![blank; 6];

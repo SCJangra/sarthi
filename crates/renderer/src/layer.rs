@@ -81,6 +81,10 @@ pub struct RenderCell {
 	/// As `0xRRGGBB` in sRGB
 	pub background: u32,
 
+	/// How much of what's under the cell shows through its background: from 0, none, to 100, all of it, like Neovim's
+	/// `winblend`
+	pub blend: u8,
+
 	pub decoration: Decoration,
 }
 

@@ -454,6 +454,7 @@ mod tests {
 				text: ArrayString::from(text).unwrap(),
 				style,
 				background: 0,
+				blend: 0,
 				decoration: Decoration::default(),
 			})
 			.collect()
