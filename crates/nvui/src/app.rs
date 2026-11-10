@@ -15,11 +15,14 @@ use rpc::client::{IncomingRequest, Message, Nvim};
 use rpc::neovim::{
 	ClientInfo, ClientVersion, InputMouseParams, Notification, UiAttachParams, UiOptions, UiTryResizeParams,
 };
-use rpc::nvui::{Copied, GetClipboardArgs, LUA, Request, SetClipboardArgs, Settings, SetupArgs};
+use rpc::nvui::{
+	ChangeFontSizeArgs, Copied, GetClipboardArgs, LUA, Request, ResetFontSizeArgs, SetClipboardArgs, SetFontSizeArgs, Settings,
+	SetupArgs,
+};
 
 use crate::clipboard::Clipboard;
 use crate::error::Error;
-use crate::guifont::GuiFont;
+use crate::guifont::{self, FontSizes, GuiFont};
 use crate::input::neovim_keys;
 use crate::mouse::Mouse;
 use crate::settings;
@@ -39,6 +42,9 @@ pub struct App {
 
 	/// The `guifont` value last applied, so each value is applied (or reported as wrong) once
 	pub guifont: String,
+
+	/// What the font size functions changed `guifont` from, for a reset
+	pub font_sizes: FontSizes,
 
 	/// The `linespace` value last applied, in logical pixels
 	pub linespace: i64,
@@ -101,6 +107,7 @@ impl App {
 			editor: Editor::new(),
 			fonts: Fonts::new(),
 			guifont: String::new(),
+			font_sizes: FontSizes::default(),
 			linespace: 0,
 			nvim,
 			ui_size: GridSize { width: 0, height: 0 },
@@ -250,6 +257,19 @@ impl App {
 			},
 			Request::GetClipboard(GetClipboardArgs { register }) => {
 				responder.respond(self.clipboard().and_then(|clipboard| clipboard.paste(register)));
+			},
+			Request::SetFontSize(SetFontSizeArgs { guifont, points }) => {
+				let guifont = self.editor.strip_default_guifont(&guifont);
+				responder.respond(self.font_sizes.set(guifont, points));
+			},
+			Request::ChangeFontSize(ChangeFontSizeArgs { guifont, delta }) => {
+				let guifont = self.editor.strip_default_guifont(&guifont);
+				let default = guifont::points(self.config.font_size);
+				responder.respond(self.font_sizes.change(guifont, delta, default));
+			},
+			Request::ResetFontSize(ResetFontSizeArgs { guifont }) => {
+				let guifont = self.editor.strip_default_guifont(&guifont);
+				responder.respond(Ok::<_, String>(self.font_sizes.reset(guifont)));
 			},
 			Request::Other { method, .. } => responder.respond::<()>(Err(format!("nvui doesn't know {method}"))),
 		}

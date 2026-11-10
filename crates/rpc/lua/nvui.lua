@@ -16,6 +16,17 @@ local function merge(opts)
   return merged
 end
 
+-- Asks nvui `method` with the arguments, and returns its answer. A failed request (e.g. arguments nvui can't decode)
+-- is raised at the caller of the module's function.
+local function request(method, ...)
+  local ok, answer = pcall(vim.rpcrequest, channel, method, ...)
+  if not ok then
+    -- Without Neovim's "Vim:Invoking 'method' on channel …:" line before the message
+    error('nvui: ' .. answer:gsub('^Vim:Invoking.-\n', ''), 3)
+  end
+  return answer
+end
+
 package.preload.nvui = function()
   local M = {}
 
@@ -29,15 +40,29 @@ package.preload.nvui = function()
     local merged = merge(opts or {})
     -- Settings nvui can't decode (unknown keys, wrong types) fail the request; values it decodes but finds wrong
     -- (out of range) come back as the answer. Either way the mistake is raised here, at the caller's setup().
-    local ok, mistake = pcall(vim.rpcrequest, channel, 'setup', merged)
-    if not ok then
-      -- Without Neovim's "Vim:Invoking 'setup' on channel …:" line before the message
-      mistake = mistake:gsub('^Vim:Invoking.-\n', '')
-    end
+    local mistake = request('setup', merged)
     if mistake ~= vim.NIL then
       error('nvui: ' .. mistake, 2)
     end
     current = merged
+  end
+
+  --- Sets the font size, in points (4 to 96), by setting `:h` in `guifont`.
+  ---@param points number
+  function M.set_font_size(points)
+    vim.o.guifont = request('set_font_size', vim.o.guifont, points)
+  end
+
+  --- Makes the font `delta` points bigger, or smaller if negative, by setting `:h` in `guifont`. The size stays
+  --- within 4 to 96 points.
+  ---@param delta number
+  function M.change_font_size(delta)
+    vim.o.guifont = request('change_font_size', vim.o.guifont, delta)
+  end
+
+  --- Sets `guifont` back to its value before the font size was first changed, unless it was set otherwise since.
+  function M.reset_font_size()
+    vim.o.guifont = request('reset_font_size', vim.o.guifont)
   end
 
   return M

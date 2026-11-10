@@ -138,6 +138,11 @@ impl Editor {
 		&self.guifont
 	}
 
+	/// A `guifont` value the way [`Editor::guifont`] gives it: empty if it's Neovim's default
+	pub fn strip_default_guifont<'a>(&self, value: &'a str) -> &'a str {
+		if self.default_guifont.as_deref() == Some(value) { "" } else { value }
+	}
+
 	/// The `linespace` option (`:help 'linespace'`): logical pixels added between rows, or taken away if negative
 	pub fn linespace(&self) -> i64 {
 		self.linespace
@@ -773,6 +778,8 @@ mod tests {
 		let default = || option("guifont", OptionValue::String(String::from("Source Code Pro,monospace")));
 		flush(&mut editor, vec![default()]);
 		assert_eq!(editor.guifont(), "");
+		assert_eq!(editor.strip_default_guifont("Source Code Pro,monospace"), "");
+		assert_eq!(editor.strip_default_guifont("Iosevka"), "Iosevka");
 
 		let guifont = || option("guifont", OptionValue::String(String::from("Iosevka:h14")));
 		assert!(editor.apply(vec![guifont(), RedrawNotification::Flush]).is_some());

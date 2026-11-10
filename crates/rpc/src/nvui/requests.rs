@@ -19,6 +19,15 @@ pub enum Request {
 	/// The clipboard provider pasting from `+` or `*`
 	GetClipboard(GetClipboardArgs),
 
+	/// `require("nvui").set_font_size(points)`; answered with the `guifont` to set
+	SetFontSize(SetFontSizeArgs),
+
+	/// `require("nvui").change_font_size(delta)`; answered with the `guifont` to set
+	ChangeFontSize(ChangeFontSizeArgs),
+
+	/// `require("nvui").reset_font_size()`; answered with the `guifont` to set
+	ResetFontSize(ResetFontSizeArgs),
+
 	/// A method nvui doesn't know
 	Other { method: String, value: IgnoredAny },
 }
@@ -45,11 +54,34 @@ pub struct GetClipboardArgs {
 	pub register: Register,
 }
 
+/// The font size functions send `guifont` as it is when called, so changes in a row each start from the last one.
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct SetFontSizeArgs {
+	pub guifont: String,
+	pub points: f32,
+}
+
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct ChangeFontSizeArgs {
+	pub guifont: String,
+
+	/// In points
+	pub delta: f32,
+}
+
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct ResetFontSizeArgs {
+	pub guifont: String,
+}
+
 #[cfg(test)]
 mod tests {
 	use rmpv::Value;
 
-	use super::{Request, SetClipboardArgs};
+	use super::{Request, SetClipboardArgs, SetFontSizeArgs};
 	use crate::Register;
 
 	/// `[method, [args…]]`, the way Neovim sends a request after its id
@@ -76,6 +108,11 @@ mod tests {
 		// An empty Lua table arrives as an array: all settings at their defaults
 		let request = decode("setup", vec![Value::Array(Vec::new())]).unwrap();
 		assert!(matches!(request, Request::Setup(_)), "{request:?}");
+
+		// A Lua integer as a size
+		let request = decode("set_font_size", vec![Value::from("X"), Value::from(14)]).unwrap();
+		let expected = SetFontSizeArgs { guifont: String::from("X"), points: 14.0 };
+		assert_eq!(request, Request::SetFontSize(expected));
 	}
 
 	#[test]
