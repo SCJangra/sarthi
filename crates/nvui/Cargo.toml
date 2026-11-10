@@ -6,7 +6,7 @@ edition = { workspace = true }
 [dependencies]
 editor = { workspace = true }
 renderer = { workspace = true }
-nvim = { workspace = true }
+rpc = { workspace = true }
 smol = { workspace = true }
 winit = { workspace = true }
 thiserror = { workspace = true }

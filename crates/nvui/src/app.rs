@@ -10,23 +10,20 @@ use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use editor::Editor;
-use nvim::{
-	Nvim, NvimClientInfo, NvimClientVersion, NvimInputMouseParams, NvimMessage, NvimNotification, NvimRequest,
-	NvimUiAttachParams, NvimUiOptions, NvimUiTryResizeParams,
-};
 use renderer::{CellSize, FontChoice, Fonts, Frame, Renderer, RendererConfig, RendererError, TextSize};
+use rpc::client::{IncomingRequest, Message, Nvim};
+use rpc::neovim::{
+	ClientInfo, ClientVersion, InputMouseParams, Notification, UiAttachParams, UiOptions, UiTryResizeParams,
+};
+use rpc::nvui::{Copied, GetClipboardArgs, LUA, Request, SetClipboardArgs, Settings, SetupArgs};
 
-use crate::clipboard::{Clipboard, Copied, Register};
+use crate::clipboard::Clipboard;
 use crate::error::Error;
 use crate::guifont::GuiFont;
 use crate::input::neovim_keys;
 use crate::mouse::Mouse;
-use crate::settings::Settings;
+use crate::settings;
 use crate::windows::{GridSize, WindowConfig};
-
-/// Lua nvui runs before the user's config, each file with nvui's channel as its argument: what it sets up, and its code
-const LUA: [(&str, &str); 2] =
-	[("the clipboard", include_str!("../lua/clipboard.lua")), ("require(\"nvui\")", include_str!("../lua/nvui.lua"))];
 
 pub struct App {
 	pub config: WindowConfig,
@@ -75,7 +72,7 @@ pub struct WindowState {
 #[derive(Debug)]
 pub enum AppEvent {
 	/// A notification or request from Neovim
-	Nvim(NvimMessage),
+	Nvim(Message),
 
 	/// The connection to Neovim closed, e.g. after `:q`
 	NvimExited,
@@ -131,7 +128,8 @@ impl App {
 
 	fn create_renderer(window: &Arc<Window>, background: u32, settings: &Settings) -> Result<Renderer, Error> {
 		let size = window.inner_size();
-		let config = RendererConfig { background, scroll: settings.scroll_motion(), ..RendererConfig::default() };
+		let config =
+			RendererConfig { background, scroll: settings::scroll_motion(settings), ..RendererConfig::default() };
 		Ok(smol::block_on(Renderer::with_config(window.clone(), size.width, size.height, config))?)
 	}
 
@@ -142,7 +140,7 @@ impl App {
 		let line_space = (self.linespace as f64 * scale)
 			.round()
 			.clamp(f64::from(i32::MIN), f64::from(i32::MAX));
-		let underlines = self.settings.underlines().scaled(scale as f32);
+		let underlines = settings::underlines(&self.settings).scaled(scale as f32);
 		TextSize { font_size: self.font_size * scale as f32, line_space: line_space as i32, underlines }
 	}
 
@@ -160,8 +158,8 @@ impl App {
 		let size = self.grid_size(window);
 
 		// With multigrid, Neovim draws each window to its own grid, and nvui places and stacks them.
-		let options = NvimUiOptions::all();
-		let params = NvimUiAttachParams { width: size.width, height: size.height, options };
+		let options = UiOptions::all();
+		let params = UiAttachParams { width: size.width, height: size.height, options };
 
 		// Names nvui's channel, so plugins can tell it's nvui.
 		self.nvim.set_client_info(client_info())?;
@@ -186,7 +184,7 @@ impl App {
 			return Ok(());
 		}
 
-		let params = NvimUiTryResizeParams { width: size.width, height: size.height };
+		let params = UiTryResizeParams { width: size.width, height: size.height };
 
 		self.nvim.ui_try_resize(params)?;
 		self.ui_size = size;
@@ -195,8 +193,8 @@ impl App {
 
 	/// Applies Neovim's redraws, and shows the result once Neovim finished one, so events that arrive before the window
 	/// redraws can't show half-applied.
-	fn handle_nvim_notification(&mut self, notification: NvimNotification) {
-		let NvimNotification::Redraw(events) = notification else { return };
+	fn handle_nvim_notification(&mut self, notification: Notification) {
+		let Notification::Redraw(events) = notification else { return };
 		let Some(redraw) = self.editor.apply(events) else { return };
 		let fonts_changed = self.editor.guifont() != self.guifont;
 		if fonts_changed {
@@ -240,36 +238,27 @@ impl App {
 
 	/// Answers a request from Neovim, which waits for the answer, so this must not wait for Neovim. Dropping a request
 	/// answers it with an error.
-	fn handle_nvim_request(&mut self, request: NvimRequest) {
-		if request.method() == "nvui.setup" {
+	fn handle_nvim_request(&mut self, IncomingRequest { request, responder }: IncomingRequest) {
+		match request {
 			// A mistake isn't a failed request: setup() raises it in the user's config, at the call.
-			let settings = request.params::<(Settings,)>();
-			let mistake = settings.and_then(|(settings,)| self.apply_settings(settings)).err();
-			request.respond(Ok::<_, String>(mistake));
-			return;
-		}
-
-		let clipboard = self
-			.window
-			.as_mut()
-			.and_then(|state| state.clipboard.as_mut())
-			.ok_or("no clipboard");
-		let register = |name: &str| Register::from_name(name).ok_or_else(|| format!("no clipboard register {name}"));
-
-		match request.method() {
-			"nvui.set_clipboard" => {
-				let copied = request.params::<(String, Vec<String>, String)>();
-				let result = copied
-					.and_then(|(name, lines, regtype)| clipboard?.copy(register(&name)?, Copied { lines, regtype }));
-				request.respond(result);
+			Request::Setup(SetupArgs { settings }) => {
+				responder.respond(Ok::<_, String>(self.apply_settings(settings).err()))
 			},
-			"nvui.get_clipboard" => {
-				let name = request.params::<(String,)>();
-				let result = name.and_then(|(name,)| clipboard?.paste(register(&name)?));
-				request.respond(result);
+			Request::SetClipboard(SetClipboardArgs { register, lines, regtype }) => {
+				let copied = Copied { lines, regtype };
+				responder.respond(self.clipboard().and_then(|clipboard| clipboard.copy(register, copied)));
 			},
-			_ => (),
+			Request::GetClipboard(GetClipboardArgs { register }) => {
+				responder.respond(self.clipboard().and_then(|clipboard| clipboard.paste(register)));
+			},
+			Request::Other { method, .. } => responder.respond::<()>(Err(format!("nvui doesn't know {method}"))),
 		}
+	}
+
+	/// The clipboard of the window's display
+	fn clipboard(&mut self) -> Result<&mut Clipboard, String> {
+		let clipboard = self.window.as_mut().and_then(|state| state.clipboard.as_mut());
+		clipboard.ok_or_else(|| String::from("no clipboard"))
 	}
 
 	/// Uses `settings` from now on, if their values make sense. Text drawn with other underlines is laid out again.
@@ -277,7 +266,7 @@ impl App {
 		settings.validate()?;
 		self.mouse.set_touchpad_scroll(settings.touchpad.scroll_speed);
 		if let Some(state) = &mut self.window {
-			state.renderer.set_scroll_motion(settings.scroll_motion());
+			state.renderer.set_scroll_motion(settings::scroll_motion(&settings));
 			state.window.request_redraw();
 		}
 		self.settings = settings;
@@ -319,7 +308,7 @@ impl App {
 	}
 
 	/// Sends mouse events to Neovim. Errors mean the connection closed, after which the app exits anyway.
-	fn send_mouse(&self, events: impl IntoIterator<Item = NvimInputMouseParams>) {
+	fn send_mouse(&self, events: impl IntoIterator<Item = InputMouseParams>) {
 		for event in events {
 			if let Err(error) = self.nvim.input_mouse(event) {
 				tracing::warn!("Couldn't send a mouse event to Neovim: {error}");
@@ -435,20 +424,20 @@ impl ApplicationHandler<AppEvent> for App {
 
 	fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
 		match event {
-			AppEvent::Nvim(NvimMessage::Notification(notification)) => self.handle_nvim_notification(notification),
-			AppEvent::Nvim(NvimMessage::Request(request)) => self.handle_nvim_request(request),
+			AppEvent::Nvim(Message::Notification(notification)) => self.handle_nvim_notification(notification),
+			AppEvent::Nvim(Message::Request(request)) => self.handle_nvim_request(request),
 			AppEvent::NvimExited => event_loop.exit(),
 		}
 	}
 }
 
 /// How nvui introduces itself to Neovim (`:help nvim_set_client_info()`)
-fn client_info() -> NvimClientInfo {
+fn client_info() -> ClientInfo {
 	let number = |part: &str| part.parse().unwrap_or(0);
-	let version = NvimClientVersion {
+	let version = ClientVersion {
 		major: number(env!("CARGO_PKG_VERSION_MAJOR")),
 		minor: number(env!("CARGO_PKG_VERSION_MINOR")),
 		patch: number(env!("CARGO_PKG_VERSION_PATCH")),
 	};
-	NvimClientInfo { name: String::from("nvui"), version, kind: "ui" }
+	ClientInfo { name: String::from("nvui"), version, kind: "ui" }
 }

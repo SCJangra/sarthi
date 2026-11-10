@@ -1,5 +1,5 @@
-use nvim::CursorShape;
 use renderer::{BarOrientation, CellLayer, Cursor, Decoration, RenderCell, TextStyle};
+use rpc::neovim::CursorShape;
 
 use crate::cursor::CursorStyle;
 use crate::grid::Grid;
@@ -74,8 +74,8 @@ fn draw_cursor(layer: &mut CellLayer, row: usize, col: usize, style: CursorStyle
 
 #[cfg(test)]
 mod tests {
-	use nvim::{CellText, CursorShape, DefaultColorsSetEvent, GridCell, HlAttrDefineEvent, HlAttrs};
 	use renderer::{BarOrientation, Cursor, TextStyle};
+	use rpc::neovim::{CellText, CursorShape, DefaultColorsSetEvent, GridCell, HlAttrDefineEvent, HlAttrs};
 
 	use super::cell_layer;
 	use crate::cursor::CursorStyle;

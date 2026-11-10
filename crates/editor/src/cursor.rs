@@ -1,4 +1,4 @@
-use nvim::{CursorShape, ModeInfo};
+use rpc::neovim::{CursorShape, ModeInfo};
 
 /// How Neovim wants the cursor drawn, from `mode_info_set`, `mode_change`, `busy_start` and `busy_stop`
 /// (`:help ui-event-mode_info_set`)
@@ -61,7 +61,7 @@ impl CursorState {
 
 #[cfg(test)]
 mod tests {
-	use nvim::{CursorShape, ModeInfo};
+	use rpc::neovim::{CursorShape, ModeInfo};
 
 	use super::{CursorState, CursorStyle};
 

@@ -4,7 +4,7 @@ version = { workspace = true }
 edition = { workspace = true }
 
 [dependencies]
-nvim = { workspace = true }
+rpc = { workspace = true }
 renderer = { workspace = true }
 tracing = { workspace = true }
 

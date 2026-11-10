@@ -4,7 +4,7 @@ pub enum Error {
 	Renderer(#[from] renderer::RendererError),
 
 	#[error("Nvim({0})")]
-	Nvim(#[from] nvim::Error),
+	Nvim(#[from] rpc::client::Error),
 
 	#[error("CreateWindow({0})")]
 	Window(#[from] winit::error::OsError),

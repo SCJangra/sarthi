@@ -1,4 +1,4 @@
-use nvim::{CellText, GridCell as NvimGridCell};
+use rpc::neovim::{CellText, GridCell as NvimGridCell};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridCell {
@@ -117,7 +117,7 @@ impl Grid {
 #[cfg(test)]
 mod tests {
 	use super::{Grid, GridCell};
-	use nvim::{CellText, GridCell as NvimGridCell};
+	use rpc::neovim::{CellText, GridCell as NvimGridCell};
 
 	#[test]
 	fn new_grid() {

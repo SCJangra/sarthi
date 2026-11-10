@@ -7,8 +7,8 @@ pub mod highlight;
 
 use std::collections::HashMap;
 
-use nvim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification};
 use renderer::{CellLayer, Layer, Scroll};
+use rpc::neovim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification};
 
 use crate::compositor::cell_layer;
 use crate::cursor::CursorState;
@@ -475,13 +475,13 @@ fn clip_rows(layer: &mut Layer, height: u32) {
 
 #[cfg(test)]
 mod tests {
-	use nvim::{
+	use renderer::{CellLayer, Cursor, CursorShape, Layer};
+	use rpc::neovim::{
 		CellText, DefaultColorsSetEvent, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
 		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, OptionSetEvent, OptionValue,
 		RedrawNotification, WinCloseEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent, WinViewportEvent,
 		WinViewportMarginsEvent,
 	};
-	use renderer::{CellLayer, Cursor, CursorShape, Layer};
 	use serde::de::IgnoredAny;
 
 	use super::{Editor, GridPosition, Redraw};

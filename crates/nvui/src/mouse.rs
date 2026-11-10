@@ -2,8 +2,8 @@
 //! releases of buttons, wheel turns, and moves when the `mousemoveevent` option asks for them, each on a grid's cell.
 
 use editor::Editor;
-use nvim::{MouseButton, MouseInput, NvimInputMouseParams, WheelDirection};
 use renderer::CellSize;
+use rpc::neovim::{InputMouseParams, MouseButton, MouseInput, WheelDirection};
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, MouseButton as WinitButton, MouseScrollDelta};
 use winit::keyboard::ModifiersState;
@@ -47,7 +47,7 @@ impl Mouse {
 		editor: &Editor,
 		cell: CellSize,
 		modifiers: ModifiersState,
-	) -> Option<NvimInputMouseParams> {
+	) -> Option<InputMouseParams> {
 		self.position = Some(position);
 		let (row, col) = screen_cell(position, cell);
 
@@ -69,7 +69,7 @@ impl Mouse {
 			return None;
 		}
 		self.last = Some((grid, row, col));
-		Some(NvimInputMouseParams { input, modifiers: notation(modifiers), grid, row, col })
+		Some(InputMouseParams { input, modifiers: notation(modifiers), grid, row, col })
 	}
 
 	/// The pointer left the window. While a button is held, its last position stays, so the release, which may come
@@ -88,7 +88,7 @@ impl Mouse {
 		editor: &Editor,
 		cell: CellSize,
 		modifiers: ModifiersState,
-	) -> Option<NvimInputMouseParams> {
+	) -> Option<InputMouseParams> {
 		let button = match button {
 			WinitButton::Left => MouseButton::Left,
 			WinitButton::Right => MouseButton::Right,
@@ -109,7 +109,7 @@ impl Mouse {
 				self.held = Some((button, hit.grid));
 				self.last = Some((hit.grid, row, col));
 				let input = MouseInput::Press(button);
-				Some(NvimInputMouseParams { input, modifiers: notation(modifiers), grid: hit.grid, row, col })
+				Some(InputMouseParams { input, modifiers: notation(modifiers), grid: hit.grid, row, col })
 			},
 			// The press was sent, so the release is too, even if mouse input went off since.
 			ElementState::Released => {
@@ -118,7 +118,7 @@ impl Mouse {
 				let (top, left) = editor.grid_origin(grid)?;
 				let (row, col) = (row - i64::from(top), col - i64::from(left));
 				let input = MouseInput::Release(held);
-				Some(NvimInputMouseParams { input, modifiers: notation(modifiers), grid, row, col })
+				Some(InputMouseParams { input, modifiers: notation(modifiers), grid, row, col })
 			},
 		}
 	}
@@ -130,7 +130,7 @@ impl Mouse {
 		editor: &Editor,
 		cell: CellSize,
 		modifiers: ModifiersState,
-	) -> Vec<NvimInputMouseParams> {
+	) -> Vec<InputMouseParams> {
 		let (across, down) = match delta {
 			MouseScrollDelta::LineDelta(across, down) => (f64::from(across), f64::from(down)),
 			// A touchpad: rows (or columns) of movement, times the lines each scrolls, in notches
@@ -164,7 +164,7 @@ impl Mouse {
 		take(&mut self.wheel.0, WheelDirection::Left, WheelDirection::Right);
 
 		let (row, col) = (i64::from(hit.row), i64::from(hit.col));
-		let event = |direction| NvimInputMouseParams {
+		let event = |direction| InputMouseParams {
 			input: MouseInput::Wheel(direction),
 			modifiers: notation(modifiers),
 			grid: hit.grid,
@@ -204,11 +204,11 @@ fn notation(modifiers: ModifiersState) -> String {
 #[cfg(test)]
 mod tests {
 	use editor::Editor;
-	use nvim::{
-		GridResizeEvent, MouseButton, MouseInput, NvimInputMouseParams, OptionSetEvent, OptionValue,
-		RedrawNotification, WheelDirection, WinPosEvent,
-	};
 	use renderer::CellSize;
+	use rpc::neovim::{
+		GridResizeEvent, InputMouseParams, MouseButton, MouseInput, OptionSetEvent, OptionValue, RedrawNotification,
+		WheelDirection, WinPosEvent,
+	};
 	use serde::de::IgnoredAny;
 	use winit::dpi::PhysicalPosition;
 	use winit::event::{ElementState, MouseButton as WinitButton, MouseScrollDelta};
@@ -239,8 +239,8 @@ mod tests {
 		PhysicalPosition::new((col + 0.5) * 8.0, (row + 0.5) * 20.0)
 	}
 
-	fn event(input: MouseInput, grid: u32, row: i64, col: i64) -> Option<NvimInputMouseParams> {
-		Some(NvimInputMouseParams { input, modifiers: String::new(), grid, row, col })
+	fn event(input: MouseInput, grid: u32, row: i64, col: i64) -> Option<InputMouseParams> {
+		Some(InputMouseParams { input, modifiers: String::new(), grid, row, col })
 	}
 
 	const NONE: ModifiersState = ModifiersState::empty();
@@ -273,7 +273,7 @@ mod tests {
 		mouse.moved(at(0.0, 0.0), &editor, CELL, NONE);
 		let modifiers = ModifiersState::CONTROL | ModifiersState::SHIFT;
 		let press = mouse.button(WinitButton::Back, ElementState::Pressed, &editor, CELL, modifiers);
-		let expected = NvimInputMouseParams {
+		let expected = InputMouseParams {
 			input: MouseInput::Press(MouseButton::X1),
 			modifiers: String::from("SC"),
 			grid: 1,

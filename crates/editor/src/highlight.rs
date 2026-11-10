@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use nvim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent};
 use renderer::Underline;
+use rpc::neovim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent};
 
 /// Default colors until Neovim sends its own, matching what Neovim uses when none are set
 const INITIAL_DEFAULT_COLORS: DefaultColors =
@@ -134,7 +134,7 @@ fn underline(attrs: &HlAttrs) -> Option<Underline> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-	use nvim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs};
+	use rpc::neovim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs};
 
 	use super::{CellStyle, DefaultColors, HighlightState, INITIAL_DEFAULT_COLORS};
 	use renderer::Underline;

@@ -1326,8 +1326,8 @@ name = "nvui"
 version = "0.1.0"
 dependencies = [
  "nvui-editor",
- "nvui-nvim-client",
  "nvui-renderer",
+ "nvui-rpc",
  "rmpv",
  "serde",
  "smol",
@@ -1357,24 +1357,9 @@ dependencies = [
 name = "nvui-editor"
 version = "0.1.0"
 dependencies = [
- "nvui-nvim-client",
  "nvui-renderer",
+ "nvui-rpc",
  "serde",
- "tracing",
-]
-
-[[package]]
-name = "nvui-nvim-client"
-version = "0.1.0"
-dependencies = [
- "arrayvec",
- "flume",
- "nvui-derive",
- "rmp",
- "rmp-serde",
- "rmpv",
- "serde",
- "thiserror 2.0.18",
  "tracing",
 ]
 
@@ -1391,6 +1376,21 @@ dependencies = [
  "thiserror 2.0.18",
  "wgpu",
  "zeno",
+]
+
+[[package]]
+name = "nvui-rpc"
+version = "0.1.0"
+dependencies = [
+ "arrayvec",
+ "flume",
+ "nvui-derive",
+ "rmp",
+ "rmp-serde",
+ "rmpv",
+ "serde",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

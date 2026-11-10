@@ -2,9 +2,9 @@
 members = [
 	"crates/derive",
 	"crates/editor",
-	"crates/nvim-client",
 	"crates/nvui",
 	"crates/renderer",
+	"crates/rpc",
 ]
 resolver = "3"
 
@@ -12,7 +12,7 @@ resolver = "3"
 arrayvec = { version = "0.7", features = ["serde"] }
 editor = { package = "nvui-editor", path = "crates/editor" }
 renderer = { package = "nvui-renderer", path = "crates/renderer" }
-nvim = { package = "nvui-nvim-client", path = "crates/nvim-client" }
+rpc = { package = "nvui-rpc", path = "crates/rpc" }
 rmp = "0.8"
 rmp-serde = "1"
 rmpv = { version = "1", features = ["with-serde"] }

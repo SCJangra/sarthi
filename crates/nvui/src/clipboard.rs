@@ -1,4 +1,4 @@
-use serde::Serialize;
+use rpc::nvui::{Copied, Paste, Register};
 use winit::window::Window;
 
 /// The system clipboard, for Neovim's `+` and `*` registers
@@ -7,39 +7,6 @@ pub struct Clipboard {
 
 	/// What nvui last copied to `+` and to `*`, with its register type, so pasting it back keeps the type
 	copied: [Option<Copied>; 2],
-}
-
-/// Text Neovim copied: its lines, and its register type (`v`, `V` or a block like `^V10`)
-#[derive(Debug, Clone, PartialEq)]
-pub struct Copied {
-	pub lines: Vec<String>,
-	pub regtype: String,
-}
-
-/// What a paste returns to Neovim: the lines and their type when nvui copied them, so e.g. lines copied linewise
-/// paste linewise; otherwise only the lines, and Neovim takes a trailing empty line as linewise.
-#[derive(Debug, PartialEq, Serialize)]
-#[serde(untagged)]
-pub enum Paste {
-	Typed((Vec<String>, String)),
-	Lines(Vec<String>),
-}
-
-/// The `+` (clipboard) or `*` (primary selection) register
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Register {
-	Clipboard,
-	Primary,
-}
-
-impl Register {
-	pub fn from_name(name: &str) -> Option<Self> {
-		match name {
-			"+" => Some(Self::Clipboard),
-			"*" => Some(Self::Primary),
-			_ => None,
-		}
-	}
 }
 
 impl Clipboard {
@@ -88,7 +55,9 @@ fn paste(text: &str, copied: Option<&Copied>) -> Paste {
 
 #[cfg(test)]
 mod tests {
-	use super::{Copied, Paste, paste};
+	use rpc::nvui::{Copied, Paste};
+
+	use super::paste;
 
 	fn lines(lines: &[&str]) -> Vec<String> {
 		lines.iter().map(|line| line.to_string()).collect()
@@ -109,14 +78,5 @@ mod tests {
 
 		// Once something else changed the clipboard, the type no longer applies.
 		assert_eq!(paste("other", Some(&copied)), Paste::Lines(lines(&["other"])));
-	}
-
-	#[test]
-	fn paste_encodes_like_neovim_expects() {
-		let typed = Paste::Typed((lines(&["a"]), String::from("v")));
-		let encoded: rmpv::Value = rmpv::ext::to_value(&typed).unwrap();
-		assert_eq!(encoded.to_string(), r#"[["a"], "v"]"#);
-		let encoded: rmpv::Value = rmpv::ext::to_value(Paste::Lines(lines(&["a"]))).unwrap();
-		assert_eq!(encoded.to_string(), r#"["a"]"#);
 	}
 }
