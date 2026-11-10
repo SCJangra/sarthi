@@ -16,12 +16,17 @@ use nvim::{
 };
 use renderer::{CellSize, FontChoice, Fonts, Frame, Renderer, RendererConfig, RendererError, TextSize};
 
-use crate::clipboard::{self, Clipboard, Copied, Register};
+use crate::clipboard::{Clipboard, Copied, Register};
 use crate::error::Error;
 use crate::guifont::GuiFont;
 use crate::input::neovim_keys;
 use crate::mouse::Mouse;
+use crate::settings::Settings;
 use crate::windows::{GridSize, WindowConfig};
+
+/// Lua nvui runs before the user's config, each file with nvui's channel as its argument: what it sets up, and its code
+const LUA: [(&str, &str); 2] =
+	[("the clipboard", include_str!("../lua/clipboard.lua")), ("require(\"nvui\")", include_str!("../lua/nvui.lua"))];
 
 pub struct App {
 	pub config: WindowConfig,
@@ -51,6 +56,9 @@ pub struct App {
 
 	/// What the mouse is doing over the window
 	pub mouse: Mouse,
+
+	/// What the user set with `require("nvui").setup()`, or the defaults
+	pub settings: Settings,
 
 	pub error: Option<Error>,
 }
@@ -89,7 +97,8 @@ impl App {
 
 		Ok(Self {
 			font_size: config.font_size,
-			mouse: Mouse::new(config.touchpad_scroll),
+			mouse: Mouse::new(Settings::default().touchpad.scroll_speed),
+			settings: Settings::default(),
 			config,
 			window: None,
 			editor: Editor::new(),
@@ -112,7 +121,7 @@ impl App {
 
 	fn create_window(&mut self, event_loop: &ActiveEventLoop) -> Result<Arc<Window>, Error> {
 		let window = Arc::new(event_loop.create_window(Self::window_attributes(&self.config))?);
-		let renderer = Self::create_renderer(&window, self.editor.background())?;
+		let renderer = Self::create_renderer(&window, self.editor.background(), &self.settings)?;
 		let clipboard = Clipboard::connect(&window)
 			.inspect_err(|error| tracing::warn!("Couldn't connect to the clipboard: {error}"))
 			.ok();
@@ -120,9 +129,9 @@ impl App {
 		Ok(window)
 	}
 
-	fn create_renderer(window: &Arc<Window>, background: u32) -> Result<Renderer, Error> {
+	fn create_renderer(window: &Arc<Window>, background: u32, settings: &Settings) -> Result<Renderer, Error> {
 		let size = window.inner_size();
-		let config = RendererConfig { background, ..RendererConfig::default() };
+		let config = RendererConfig { background, scroll: settings.scroll_motion(), ..RendererConfig::default() };
 		Ok(smol::block_on(Renderer::with_config(window.clone(), size.width, size.height, config))?)
 	}
 
@@ -133,7 +142,7 @@ impl App {
 		let line_space = (self.linespace as f64 * scale)
 			.round()
 			.clamp(f64::from(i32::MIN), f64::from(i32::MAX));
-		let underlines = self.config.underlines.scaled(scale as f32);
+		let underlines = self.settings.underlines().scaled(scale as f32);
 		TextSize { font_size: self.font_size * scale as f32, line_space: line_space as i32, underlines }
 	}
 
@@ -154,12 +163,17 @@ impl App {
 		let options = NvimUiOptions::all();
 		let params = NvimUiAttachParams { width: size.width, height: size.height, options };
 
-		// Names nvui's channel, so Lua code (the clipboard below, plugins) can find it.
+		// Names nvui's channel, so plugins can tell it's nvui.
 		self.nvim.set_client_info(client_info())?;
 
-		// Before attaching, so it runs before the user's config, which Neovim sources once a UI attached.
-		if let Err(error) = self.nvim.exec_lua::<()>(clipboard::SETUP, ()) {
-			tracing::warn!("Couldn't set up the clipboard: {error}");
+		// All before attaching, so before the user's config, which Neovim sources once a UI attached. A config can then
+		// check for nvui (`if vim.g.nvui then … end`) and use `require("nvui")`.
+		self.nvim.set_var("nvui", true)?;
+		let channel = self.nvim.channel()?;
+		for (what, code) in LUA {
+			if let Err(error) = self.nvim.exec_lua::<()>(code, (channel,)) {
+				tracing::warn!("Couldn't set up {what}: {error}");
+			}
 		}
 		self.nvim.ui_attach(params)?;
 		self.ui_size = size;
@@ -227,6 +241,14 @@ impl App {
 	/// Answers a request from Neovim, which waits for the answer, so this must not wait for Neovim. Dropping a request
 	/// answers it with an error.
 	fn handle_nvim_request(&mut self, request: NvimRequest) {
+		if request.method() == "nvui.setup" {
+			// A mistake isn't a failed request: setup() raises it in the user's config, at the call.
+			let settings = request.params::<(Settings,)>();
+			let mistake = settings.and_then(|(settings,)| self.apply_settings(settings)).err();
+			request.respond(Ok::<_, String>(mistake));
+			return;
+		}
+
 		let clipboard = self
 			.window
 			.as_mut()
@@ -236,20 +258,30 @@ impl App {
 
 		match request.method() {
 			"nvui.set_clipboard" => {
-				let copied = request
-					.params::<(String, Vec<String>, String)>()
-					.map_err(|error| error.to_string());
+				let copied = request.params::<(String, Vec<String>, String)>();
 				let result = copied
 					.and_then(|(name, lines, regtype)| clipboard?.copy(register(&name)?, Copied { lines, regtype }));
 				request.respond(result);
 			},
 			"nvui.get_clipboard" => {
-				let name = request.params::<(String,)>().map_err(|error| error.to_string());
+				let name = request.params::<(String,)>();
 				let result = name.and_then(|(name,)| clipboard?.paste(register(&name)?));
 				request.respond(result);
 			},
 			_ => (),
 		}
+	}
+
+	/// Uses `settings` from now on, if their values make sense. Text drawn with other underlines is laid out again.
+	fn apply_settings(&mut self, settings: Settings) -> Result<(), String> {
+		settings.validate()?;
+		self.mouse.set_touchpad_scroll(settings.touchpad.scroll_speed);
+		if let Some(state) = &mut self.window {
+			state.renderer.set_scroll_motion(settings.scroll_motion());
+			state.window.request_redraw();
+		}
+		self.settings = settings;
+		Ok(())
 	}
 
 	fn resize_renderer(&mut self) {
@@ -276,7 +308,7 @@ impl App {
 			Ok(Frame::Reconfigured) => state.window.request_redraw(),
 			Err(RendererError::SurfaceLost) => {
 				let layers = state.renderer.layers().to_vec();
-				state.renderer = Self::create_renderer(&state.window, background)?;
+				state.renderer = Self::create_renderer(&state.window, background, &self.settings)?;
 				state.renderer.set_layers(layers);
 				state.window.request_redraw();
 			},

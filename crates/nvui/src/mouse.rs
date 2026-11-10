@@ -14,7 +14,7 @@ const LINES_PER_NOTCH: f64 = 3.0;
 /// What the mouse is doing over a window
 #[derive(Debug)]
 pub struct Mouse {
-	/// Lines a touchpad scrolls per row of finger movement (see [`crate::windows::WindowConfig::touchpad_scroll`])
+	/// Lines a touchpad scrolls per row of finger movement (see [`crate::settings::TouchpadSettings`])
 	touchpad_scroll: f64,
 
 	/// The pointer's position, in physical pixels from the window's top-left, while it's over the window
@@ -33,6 +33,10 @@ pub struct Mouse {
 impl Mouse {
 	pub fn new(touchpad_scroll: f64) -> Self {
 		Self { touchpad_scroll, position: None, held: None, last: None, wheel: (0.0, 0.0) }
+	}
+
+	pub fn set_touchpad_scroll(&mut self, touchpad_scroll: f64) {
+		self.touchpad_scroll = touchpad_scroll;
 	}
 
 	/// The pointer moved to `position` in the window: a drag while a button is held, otherwise a move if Neovim asks

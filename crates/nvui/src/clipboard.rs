@@ -1,9 +1,6 @@
 use serde::Serialize;
 use winit::window::Window;
 
-/// Lua that makes nvui Neovim's clipboard provider, run before the user's config
-pub const SETUP: &str = include_str!("../lua/clipboard.lua");
-
 /// The system clipboard, for Neovim's `+` and `*` registers
 pub struct Clipboard {
 	clipboard: window_clipboard::Clipboard,

@@ -4,6 +4,7 @@ mod error;
 mod guifont;
 mod input;
 mod mouse;
+mod settings;
 mod windows;
 
 use app::{App, AppEvent};
