@@ -7,7 +7,7 @@ pub mod highlight;
 
 use std::collections::{HashMap, HashSet};
 
-use renderer::{CellLayer, Layer, LayerShadow, Scroll, Shadow};
+use renderer::{CellLayer, Decoration, Layer, LayerShadow, RenderCell, Scroll, Shadow};
 use rpc::neovim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification, Window};
 
 use crate::compositor::cell_layer;
@@ -484,13 +484,37 @@ impl Editor {
 		let placed = self.stacked();
 
 		let mut shadows = self.float_shadows(&placed);
+		// What covers grid 1, and what covers the tiled windows: column, row, width, height in cells
+		let screen_width = self.grids.get(&1).map_or(0, |grid| grid.width as u32);
+		let area_of = |kind: fn(&Placement) -> Option<[u32; 2]>| -> Vec<[u32; 4]> {
+			placed
+				.iter()
+				.filter_map(|(id, placement)| Some((self.grids.get(id)?, kind(placement)?)))
+				.map(|(grid, [col, row])| [col, row, grid.width as u32, grid.height as u32])
+				.collect()
+		};
+		let tiled = area_of(|placement| match placement {
+			Placement::Tiled { row, col } => Some([*col, *row]),
+			_ => None,
+		});
+		let messages: Vec<[u32; 4]> = placed
+			.iter()
+			.filter_map(|(_, placement)| match placement {
+				Placement::Message { row, .. } => Some([0, *row, screen_width, screen_height.saturating_sub(*row)]),
+				_ => None,
+			})
+			.collect();
+		let under_windows: Vec<[u32; 4]> = tiled.iter().chain(&messages).copied().collect();
+
 		let mut layers = Vec::with_capacity(placed.len() + 2);
 		if self.grids.contains_key(&1) {
-			layers.push(self.see_through_cells(self.layer(1, 0, 0)));
+			layers.push(self.see_through_cells(self.layer(1, 0, 0), &under_windows));
 		}
 		for (id, placement) in placed {
 			match placement {
-				Placement::Tiled { row, col } => layers.push(self.see_through_cells(self.layer(id, *row, *col))),
+				Placement::Tiled { row, col } => {
+					layers.push(self.see_through_cells(self.layer(id, *row, *col), &messages))
+				},
 				Placement::Float { row, col, .. } => {
 					let mut layer = self.layer(id, *row, *col);
 					let Layer::Cells(cells) = &mut layer;
@@ -504,7 +528,7 @@ impl Editor {
 					let mut layer = self.layer(id, *row, 0);
 					// The message grid is as tall as the screen; only its rows from `row` down show.
 					clip_rows(&mut layer, screen_height.saturating_sub(*row));
-					layers.push(self.see_through_cells(layer));
+					layers.push(self.see_through_cells(layer, &[]));
 				},
 				Placement::Hidden => (),
 			}
@@ -515,11 +539,31 @@ impl Editor {
 	/// `layer`, a tiled window, grid 1 or the message grid, with cells in the default background drawing no background of
 	/// their own while the window is see-through, so what's behind the window shows. Floating windows keep theirs, or
 	/// what's under them would show.
-	fn see_through_cells(&self, mut layer: Layer) -> Layer {
-		if self.see_through {
-			let (Layer::Cells(cells), background) = (&mut layer, self.background());
-			for cell in cells.cells.iter_mut().filter(|cell| cell.background == background) {
-				cell.blend = 100;
+	///
+	/// Its cells under `covered` (column, row, width, height in cells of the screen), what other grids show over it, are
+	/// left blank then: like in Neovim's own compositor, a screen cell shows only its top grid. Neovim leaves old
+	/// separators and status lines in grid 1 under the windows, which opaque windows hide.
+	fn see_through_cells(&self, mut layer: Layer, covered: &[[u32; 4]]) -> Layer {
+		if !self.see_through {
+			return layer;
+		}
+		let (Layer::Cells(cells), background) = (&mut layer, self.background());
+		for cell in cells.cells.iter_mut().filter(|cell| cell.background == background) {
+			cell.blend = 100;
+		}
+
+		let blank = CellText::from(" ").expect("a space fits in a cell");
+		let (width, height) = (cells.width, cells.height);
+		for &[col, row, cover_width, cover_height] in covered {
+			// In the layer's cells
+			let (left, top) = (col.saturating_sub(cells.col).min(width), row.saturating_sub(cells.row));
+			let right = (col + cover_width).saturating_sub(cells.col).clamp(left, width);
+			let bottom = (row + cover_height).saturating_sub(cells.row).min(height);
+			for layer_row in top..bottom {
+				let start = layer_row * width;
+				for cell in &mut cells.cells[(start + left) as usize..(start + right) as usize] {
+					*cell = RenderCell { text: blank, blend: 100, decoration: Decoration::default(), ..*cell };
+				}
 			}
 		}
 		layer
@@ -945,6 +989,34 @@ mod tests {
 
 		editor.set_see_through(false);
 		assert!(blends(&flush(&mut editor, vec![]), 1).iter().all(|blend| *blend == 0));
+	}
+
+	#[test]
+	fn a_see_through_window_hides_what_grid_1_has_under_it() {
+		// Neovim leaves an old separator in grid 1, where window 2 now is.
+		let mut editor = screen();
+		flush(&mut editor, vec![line(1, 0, "  |"), line(1, 4, "  |"), win_pos(2, 0, 0)]);
+		let grid_1 = |redraw: &Redraw| {
+			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 1).unwrap();
+			layer
+				.cells
+				.iter()
+				.take(3)
+				.map(|cell| (cell.text.as_str().to_owned(), cell.blend))
+				.collect::<Vec<_>>()
+		};
+
+		// Opaque, the window hides it.
+		let redraw = flush(&mut editor, vec![line(2, 0, "a")]);
+		assert_eq!(grid_1(&redraw)[2], (String::from("|"), 0));
+
+		// See-through, grid 1 is blank under the window: only the window shows there.
+		editor.set_see_through(true);
+		let redraw = flush(&mut editor, vec![]);
+		assert_eq!(grid_1(&redraw)[2], (String::from(" "), 100));
+		// Outside the window, grid 1 keeps what it shows.
+		let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 1).unwrap();
+		assert_eq!(layer.cells[4 * 10 + 2].text.as_str(), "|");
 	}
 
 	#[test]
