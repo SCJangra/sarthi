@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::color::{rgba, wgpu_color};
 use crate::cursor::{CursorAnimation, cursor_rect};
 use crate::font::LineMetrics;
-use crate::quad::{Quad, QuadPipeline, area_shadow, bar_cursor, cell_backgrounds, cell_decorations};
+use crate::quad::{Quad, QuadPipeline, area_shadow, cell_backgrounds, cell_decorations, cursor_quad};
 use crate::scroll::ScrollAnimations;
 use crate::shape::ShapePipeline;
 use crate::text::TextPipeline;
@@ -390,7 +390,7 @@ fn pieces<'a>(
 }
 
 /// The cursor of `layer` as a layer of its own. A block is the cells under it, in the cursor's colors, so its
-/// character stays readable; a bar is drawn over nothing.
+/// character stays readable; a bar or an outline is drawn over nothing.
 fn cursor_layer(layer: &CellLayer, cursor: Cursor) -> CellLayer {
 	let (row, col) = (layer.row + cursor.row, layer.col + cursor.col);
 	let empty = CellLayer {
@@ -460,7 +460,7 @@ fn layer_quads(
 	let middle = quads.len();
 	cell_decorations(quads, layer, cell, lines, srgb, |row| text.ink(piece, row));
 	if piece.kind == PieceKind::Cursor && !moving {
-		bar_cursor(quads, layer, cell, srgb);
+		cursor_quad(quads, layer, cell, lines.thickness, srgb);
 	}
 	for quad in &mut quads[start..] {
 		quad.rect[1] += piece.offset;
@@ -783,6 +783,19 @@ mod tests {
 		// Not there yet: nothing shows.
 		let away = [[20.0, 0.0], [30.0, 0.0], [30.0, 19.0], [20.0, 19.0]];
 		assert_eq!(super::covered(cursor, away, cell_size)[2], 0);
+	}
+
+	#[test]
+	fn gpu_an_outline_cursor_leaves_its_cell_as_it_is() {
+		// A red outline around a black cell
+		let layer = with_cursor(cell(1, " ", 0x000000), crate::CursorShape::Outline);
+		let Some((pixels, cell)) = drawn(&[layer], None) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		let at = |x: u32, y: u32| pixels[(y * WIDTH + x) as usize];
+		assert_eq!(at(cell.width / 2, 9), [0, 0, 0, 255]);
+		assert_eq!((at(0, 9), at(cell.width / 2, 0)), ([255, 0, 0, 255], [255, 0, 0, 255]));
 	}
 
 	#[test]

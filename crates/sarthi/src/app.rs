@@ -480,6 +480,9 @@ impl ApplicationHandler<AppEvent> for App {
 			// Synthetic presses are keys already held when the window gained focus.
 			WindowEvent::KeyboardInput { event, is_synthetic: false, .. } => self.send_key(&event),
 			WindowEvent::Focused(focused) => {
+				// The cursor shows whether keys go here.
+				self.editor.set_focused(focused);
+				self.refresh();
 				if let Err(error) = self.nvim.ui_set_focus(focused) {
 					tracing::warn!("Couldn't tell Neovim about focus: {error}");
 				}

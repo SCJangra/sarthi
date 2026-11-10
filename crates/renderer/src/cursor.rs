@@ -118,7 +118,7 @@ pub(crate) fn cursor_rect(layer: &CellLayer, cursor: Cursor, cell: CellSize) -> 
 	// In pixels like `bar_cursor`, as a share of the cell
 	let thickness = |size: u32, percentage: u32| (size * percentage).div_ceil(100).clamp(1, size) as f32 / size as f32;
 	match cursor.shape {
-		CursorShape::Block => [left, top, width, 1.0],
+		CursorShape::Block | CursorShape::Outline => [left, top, width, 1.0],
 		CursorShape::Bar { orientation: BarOrientation::Vertical, percentage } => {
 			[left, top, thickness(cell.width, percentage), 1.0]
 		},

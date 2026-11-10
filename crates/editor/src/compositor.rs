@@ -65,6 +65,7 @@ fn draw_cursor(layer: &mut CellLayer, row: usize, col: usize, style: CursorStyle
 
 	let bar = |orientation| renderer::CursorShape::Bar { orientation, percentage: style.percentage };
 	let shape = match style.shape {
+		CursorShape::Block if style.outline => renderer::CursorShape::Outline,
 		CursorShape::Block => renderer::CursorShape::Block,
 		CursorShape::Vertical => bar(BarOrientation::Vertical),
 		CursorShape::Horizontal => bar(BarOrientation::Horizontal),
@@ -139,7 +140,7 @@ mod tests {
 	}
 
 	fn style(shape: CursorShape, percentage: u32, attr_id: u32) -> CursorStyle {
-		CursorStyle { shape, percentage, attr_id, animate: true }
+		CursorStyle { shape, percentage, attr_id, animate: true, outline: false }
 	}
 
 	/// A 4×1 grid "ab漢" (the last cell is the right half of 漢) with the cursor at `col`
@@ -181,6 +182,18 @@ mod tests {
 	fn block_cursor_covers_both_halves_of_a_double_width_character() {
 		let layer = cell_layer(1, &grid_with_cursor(2), &highlights(), Some(style(CursorShape::Block, 0, 3)));
 		assert_eq!(layer.cursor.map(|cursor| (cursor.col, cursor.width)), Some((2, 2)));
+	}
+
+	#[test]
+	fn an_unfocused_block_is_an_outline() {
+		let outline = CursorStyle { outline: true, ..style(CursorShape::Block, 0, 0) };
+		let layer = cell_layer(1, &grid_with_cursor(1), &highlights(), Some(outline));
+		assert_eq!(layer.cursor.map(|cursor| cursor.shape), Some(renderer::CursorShape::Outline));
+
+		// A bar stays a bar.
+		let bar = CursorStyle { outline: true, ..style(CursorShape::Vertical, 25, 0) };
+		let layer = cell_layer(1, &grid_with_cursor(1), &highlights(), Some(bar));
+		assert!(matches!(layer.cursor.map(|cursor| cursor.shape), Some(renderer::CursorShape::Bar { .. })));
 	}
 
 	#[test]

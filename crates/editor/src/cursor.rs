@@ -19,6 +19,9 @@ pub struct CursorState {
 	/// Whether moves animate in insert and replace mode, and into and out of the command line
 	animate_insert_mode: bool,
 	animate_cmdline: bool,
+
+	/// Whether the window has the focus
+	focused: bool,
 }
 
 impl Default for CursorState {
@@ -32,6 +35,7 @@ impl Default for CursorState {
 			hidden: false,
 			animate_insert_mode: true,
 			animate_cmdline: true,
+			focused: true,
 		}
 	}
 }
@@ -49,6 +53,9 @@ pub struct CursorStyle {
 
 	/// Whether moving here animates
 	pub animate: bool,
+
+	/// Drawn as an outline, the cell's character in its own colors: while the window doesn't have the focus
+	pub outline: bool,
 }
 
 impl CursorState {
@@ -67,6 +74,11 @@ impl CursorState {
 		(self.animate_insert_mode, self.animate_cmdline) = (insert_mode, cmdline);
 	}
 
+	/// Whether the window has the focus. Without it, the cursor is an outline and jumps to where it moves.
+	pub fn set_focused(&mut self, focused: bool) {
+		self.focused = focused;
+	}
+
 	/// The cursor was drawn in the current mode.
 	pub fn drawn(&mut self) {
 		self.drawn_mode.clone_from(&self.mode_name);
@@ -83,7 +95,8 @@ impl CursorState {
 			return None;
 		}
 
-		let block = CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: 0, animate: self.animates() };
+		let (animate, outline) = (self.focused && self.animates(), !self.focused);
+		let block = CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: 0, animate, outline };
 		let Some(mode) = self.modes.get(self.mode).filter(|_| self.style_enabled) else {
 			return Some(block);
 		};
@@ -111,7 +124,8 @@ mod tests {
 
 	use super::{CursorState, CursorStyle};
 
-	const BLOCK: CursorStyle = CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: 0, animate: true };
+	const BLOCK: CursorStyle =
+		CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: 0, animate: true, outline: false };
 
 	fn modes() -> Vec<ModeInfo> {
 		vec![
@@ -178,6 +192,16 @@ mod tests {
 		// Once drawn outside it, moves animate again.
 		cursor.drawn();
 		assert!(animates(&cursor));
+	}
+
+	#[test]
+	fn an_outline_without_the_focus() {
+		let mut cursor = CursorState::default();
+		cursor.set_focused(false);
+		// An outline, which jumps instead of moving
+		assert_eq!(cursor.style(), Some(CursorStyle { animate: false, outline: true, ..BLOCK }));
+		cursor.set_focused(true);
+		assert_eq!(cursor.style(), Some(BLOCK));
 	}
 
 	#[test]

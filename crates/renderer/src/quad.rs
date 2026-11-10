@@ -4,9 +4,7 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::color::rgba;
 use crate::font::LineMetrics;
-use crate::{
-	BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, LayerShadow, RenderCell, Shadow, Underline,
-};
+use crate::{BarOrientation, CellLayer, CellSize, CursorShape, Decoration, LayerShadow, RenderCell, Shadow, Underline};
 
 /// A rectangle in physical pixels, with optional rounded corners and border
 #[repr(C)]
@@ -316,14 +314,29 @@ fn cut(quads: &mut Vec<Quad>, start: usize, gaps: &[Range<f32>]) {
 	quads.extend(pieces);
 }
 
-/// Adds a quad for the cursor of `layer`, if it's a bar. A block cursor is drawn as the cells under it (see
-/// `cursor_piece` in the renderer).
-pub(crate) fn bar_cursor(quads: &mut Vec<Quad>, layer: &CellLayer, cell: CellSize, srgb_surface: bool) {
-	let Some(cursor @ Cursor { shape: CursorShape::Bar { orientation, percentage }, .. }) = layer.cursor else {
-		return;
+/// Adds a quad for the cursor of `layer`, if it's a bar or an outline, `thickness` pixels thick for an outline. A block
+/// cursor is drawn as the cells under it (see `cursor_layer` in the renderer).
+pub(crate) fn cursor_quad(
+	quads: &mut Vec<Quad>,
+	layer: &CellLayer,
+	cell: CellSize,
+	thickness: f32,
+	srgb_surface: bool,
+) {
+	let Some(cursor) = layer.cursor else { return };
+	let (left, top) = ((layer.col + cursor.col) * cell.width, (layer.row + cursor.row) * cell.height);
+	let (orientation, percentage) = match cursor.shape {
+		CursorShape::Block => return,
+		CursorShape::Bar { orientation, percentage } => (orientation, percentage),
+		CursorShape::Outline => {
+			let rect = [left, top, cursor.width * cell.width, cell.height].map(|value| value as f32);
+			let color = rgba(cursor.color, srgb_surface);
+			let border_width = thickness.round().max(1.0);
+			quads.push(Quad { border_color: color, border_width, ..Quad::fill(rect, [0.0; 4]) });
+			return;
+		},
 	};
 
-	let (left, top) = ((layer.col + cursor.col) * cell.width, (layer.row + cursor.row) * cell.height);
 	let thickness = |size: u32| (size * percentage).div_ceil(100).clamp(1, size);
 	let rect = match orientation {
 		BarOrientation::Vertical => [left, top, thickness(cell.width), cell.height],
@@ -395,7 +408,7 @@ fn background_runs(cells: &[RenderCell]) -> impl Iterator<Item = (u32, u32, u32,
 mod tests {
 	use arrayvec::ArrayString;
 
-	use super::{DASHES, DOTS, Quad, QuadPipeline, WAVE, background_runs, bar_cursor, cell_decorations, disjoint};
+	use super::{DASHES, DOTS, Quad, QuadPipeline, WAVE, background_runs, cell_decorations, cursor_quad, disjoint};
 	use crate::font::LineMetrics;
 	use crate::{
 		BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, RenderCell, TextStyle, Underline,
@@ -457,7 +470,7 @@ mod tests {
 			shadow: None,
 		};
 		let mut quads = Vec::new();
-		bar_cursor(&mut quads, &layer, CellSize { width: 8, height: 19 }, false);
+		cursor_quad(&mut quads, &layer, CellSize { width: 8, height: 19 }, 1.0, false);
 		quads[0].rect
 	}
 

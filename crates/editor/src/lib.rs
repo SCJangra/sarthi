@@ -171,6 +171,12 @@ impl Editor {
 		}
 	}
 
+	/// Whether the window has the focus: without it, the cursor is drawn as an outline.
+	pub fn set_focused(&mut self, focused: bool) {
+		self.cursor.set_focused(focused);
+		self.stale = true;
+	}
+
 	/// Whether the cursor's moves animate in insert and replace mode, and into and out of the command line
 	pub fn set_cursor_animation(&mut self, insert_mode: bool, cmdline: bool) {
 		self.cursor.set_animation(insert_mode, cmdline);

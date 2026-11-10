@@ -149,6 +149,10 @@ pub enum CursorShape {
 
 	/// A bar covering `percentage` percent of the cell
 	Bar { orientation: BarOrientation, percentage: u32 },
+
+	/// The whole cell's outline, as thick as underlines, with its character in its own colors: e.g. while the window
+	/// doesn't have the focus
+	Outline,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
