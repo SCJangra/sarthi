@@ -7,9 +7,9 @@ use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::event_loop::EventLoopProxy;
 use winit::keyboard::ModifiersState;
-use winit::window::{Window, WindowAttributes, WindowId};
+use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
-use editor::{Editor, FloatShadow, Redraw};
+use editor::{Editor, FloatShadow, Pointer, Redraw};
 use renderer::{CellSize, FontChoice, Fonts, Frame, Renderer, RendererConfig, RendererError, TextSize};
 use rpc::client::{IncomingRequest, Message, Nvim};
 use rpc::neovim::{
@@ -62,6 +62,9 @@ pub struct App {
 	/// What the mouse is doing over the window
 	pub mouse: Mouse,
 
+	/// How the pointer looks over the window, as last set
+	pub pointer: Pointer,
+
 	/// What the user set with `require("sarthi").setup()`, or the defaults
 	pub settings: Settings,
 
@@ -106,6 +109,7 @@ impl App {
 		Ok(Self {
 			font_size: config.font_size,
 			mouse: Mouse::new(Settings::default().touchpad.scroll_speed),
+			pointer: Pointer::Arrow,
 			settings: Settings::default(),
 			config,
 			window: None,
@@ -232,6 +236,20 @@ impl App {
 				self.refresh();
 			},
 			Notification::Other { .. } => (),
+		}
+	}
+
+	/// Shows the pointer's look for what's under it in `window`, if it changed
+	fn update_pointer(&mut self, window: &Window) {
+		let Some(pointer) = self.mouse.pointer(&self.editor, self.cell_size(window)) else { return };
+		if pointer != self.pointer {
+			self.pointer = pointer;
+			window.set_cursor(match pointer {
+				Pointer::Arrow => CursorIcon::Default,
+				Pointer::Text => CursorIcon::Text,
+				Pointer::ResizeColumns => CursorIcon::ColResize,
+				Pointer::ResizeRows => CursorIcon::RowResize,
+			});
 		}
 	}
 
@@ -479,12 +497,15 @@ impl ApplicationHandler<AppEvent> for App {
 					.mouse
 					.moved(position, &self.editor, self.cell_size(&window), self.modifiers);
 				self.send_mouse(event);
+				self.update_pointer(&window);
 			},
 			WindowEvent::CursorLeft { .. } => self.mouse.left(),
 			WindowEvent::MouseInput { state, button, .. } => {
 				let cell = self.cell_size(&window);
 				let event = self.mouse.button(button, state, &self.editor, cell, self.modifiers);
 				self.send_mouse(event);
+				// A drag may end over something else.
+				self.update_pointer(&window);
 			},
 			WindowEvent::MouseWheel { delta, .. } => {
 				let events = self.mouse.wheel(delta, &self.editor, self.cell_size(&window), self.modifiers);

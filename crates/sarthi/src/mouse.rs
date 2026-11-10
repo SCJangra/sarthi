@@ -1,7 +1,7 @@
 //! Mouse input for Neovim, sent like the TUI does: while Neovim has mouse input on (`mouse_on`), as presses, drags and
 //! releases of buttons, wheel turns, and moves when the `mousemoveevent` option asks for them, each on a grid's cell.
 
-use editor::Editor;
+use editor::{Editor, Pointer};
 use renderer::CellSize;
 use rpc::neovim::{InputMouseParams, MouseButton, MouseInput, WheelDirection};
 use winit::dpi::PhysicalPosition;
@@ -70,6 +70,17 @@ impl Mouse {
 		}
 		self.last = Some((grid, row, col));
 		Some(InputMouseParams { input, modifiers: notation(modifiers), grid, row, col })
+	}
+
+	/// How the pointer should look where it is, or `None` to keep its look: while a button is held, e.g. dragging a
+	/// separator, it stays as it was where the drag started.
+	pub fn pointer(&self, editor: &Editor, cell: CellSize) -> Option<Pointer> {
+		if self.held.is_some() {
+			return None;
+		}
+		let (row, col) = screen_cell(self.position?, cell);
+		let (row, col) = (u32::try_from(row).ok()?, u32::try_from(col).ok()?);
+		Some(editor.pointer_at(row, col))
 	}
 
 	/// The pointer left the window. While a button is held, its last position stays, so the release, which may come

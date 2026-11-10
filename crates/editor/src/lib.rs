@@ -108,6 +108,21 @@ pub struct FloatShadow {
 	pub parent: Option<Window>,
 }
 
+/// How the mouse pointer looks, by what's under it (see [`Editor::pointer_at`])
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pointer {
+	Arrow,
+
+	/// Over text
+	Text,
+
+	/// Over a separator between windows side by side, which drags left and right
+	ResizeColumns,
+
+	/// Over a status line, which drags up and down
+	ResizeRows,
+}
+
 /// A cell of a grid
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridPosition {
@@ -251,6 +266,39 @@ impl Editor {
 		});
 		let (grid, top, left) = over.or_else(|| covers(1, 0, 0, screen_height).then_some((1, 0, 0)))?;
 		Some(GridPosition { grid, row: row - top, col: col - left })
+	}
+
+	/// How the mouse pointer looks over cell `row`, `col` of the screen: text in windows, a resize arrow over separators
+	/// and status lines, which can be dragged, and an arrow elsewhere, or while Neovim's mouse is off
+	pub fn pointer_at(&self, row: u32, col: u32) -> Pointer {
+		if !self.mouse {
+			return Pointer::Arrow;
+		}
+		match self.grid_at(row, col) {
+			Some(GridPosition { grid: 1, .. }) => self.border_at(row, col),
+			Some(_) => Pointer::Text,
+			None => Pointer::Arrow,
+		}
+	}
+
+	/// What of grid 1 cell `row`, `col` is: a window's separator, right of it, or its status line, below it
+	fn border_at(&self, row: u32, col: u32) -> Pointer {
+		let windows = self.placements.iter().filter_map(|(id, placement)| match placement {
+			Placement::Tiled { row, col } => Some((*row, *col, self.grids.get(id)?)),
+			_ => None,
+		});
+		let mut pointer = Pointer::Arrow;
+		for (top, left, grid) in windows {
+			let (bottom, right) = (top + grid.height as u32, left + grid.width as u32);
+			// A status line wins where it meets a separator.
+			if row == bottom && (left..=right).contains(&col) {
+				return Pointer::ResizeRows;
+			}
+			if col == right && (top..bottom).contains(&row) {
+				pointer = Pointer::ResizeColumns;
+			}
+		}
+		pointer
 	}
 
 	/// The cell of the screen where grid `id`'s top-left cell is shown, if the grid is shown
@@ -675,7 +723,7 @@ mod tests {
 	};
 	use serde::de::IgnoredAny;
 
-	use super::{Editor, FloatShadow, GridPosition, Redraw};
+	use super::{Editor, FloatShadow, GridPosition, Pointer, Redraw};
 
 	const FG: u32 = 0xC7C7C7;
 	const BG: u32 = 0x1C1C1C;
@@ -1017,6 +1065,22 @@ mod tests {
 		// Outside the window, grid 1 keeps what it shows.
 		let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 1).unwrap();
 		assert_eq!(layer.cells[4 * 10 + 2].text.as_str(), "|");
+	}
+
+	#[test]
+	fn the_pointer_follows_whats_under_it() {
+		// A 4×3 window at the top-left of the 10×5 screen: its separator is column 4, its status line row 3.
+		let mut editor = screen();
+		flush(&mut editor, vec![win_pos(2, 0, 0)]);
+		assert_eq!(editor.pointer_at(0, 0), Pointer::Arrow, "the mouse is off");
+
+		editor.apply(vec![RedrawNotification::MouseOn]);
+		let at = |row, col| editor.pointer_at(row, col);
+		assert_eq!((at(0, 0), at(2, 3)), (Pointer::Text, Pointer::Text));
+		assert_eq!((at(0, 4), at(2, 4)), (Pointer::ResizeColumns, Pointer::ResizeColumns));
+		assert_eq!((at(3, 0), at(3, 3)), (Pointer::ResizeRows, Pointer::ResizeRows));
+		// Where they meet, and away from both
+		assert_eq!((at(3, 4), at(4, 8), at(1, 7)), (Pointer::ResizeRows, Pointer::Arrow, Pointer::Arrow));
 	}
 
 	#[test]
