@@ -27,6 +27,25 @@ pub struct CellLayer {
 
 	/// How the text moved since the layer was last shown, so the renderer can slide it to its new place
 	pub scroll: Option<Scroll>,
+
+	/// A shadow under the layer's rectangle, e.g. for a floating window
+	pub shadow: Option<Shadow>,
+}
+
+/// A soft shadow under a rectangle, like CSS's `box-shadow`, in physical pixels
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shadow {
+	/// How far the edge fades out, like CSS's blur radius: twice the Gaussian blur's standard deviation
+	pub blur: f32,
+
+	/// How far the shadow is moved from the rectangle: right and down, or left and up if negative
+	pub offset: [f32; 2],
+
+	/// As `0xRRGGBB` in sRGB
+	pub color: u32,
+
+	/// From 0, invisible, to 1, as dark as `color` where fully shadowed
+	pub opacity: f32,
 }
 
 /// Text of a [`CellLayer`] that moved since the layer was last shown, e.g. a window that scrolled

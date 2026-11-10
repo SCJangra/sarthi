@@ -265,8 +265,17 @@ mod tests {
 
 	#[test]
 	fn cursor_rects() {
-		let layer =
-			CellLayer { id: 1, row: 1, col: 2, width: 10, height: 5, cells: Vec::new(), cursor: None, scroll: None };
+		let layer = CellLayer {
+			id: 1,
+			row: 1,
+			col: 2,
+			width: 10,
+			height: 5,
+			cells: Vec::new(),
+			cursor: None,
+			scroll: None,
+			shadow: None,
+		};
 		let cursor = |shape| Cursor { row: 2, col: 3, width: 1, shape, color: 0, text_color: 0, animate: true };
 		assert_eq!(cursor_rect(&layer, cursor(CursorShape::Block), CELL), [5.0, 3.0, 1.0, 1.0]);
 		let bar = |orientation, percentage| CursorShape::Bar { orientation, percentage };

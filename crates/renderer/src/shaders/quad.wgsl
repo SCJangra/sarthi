@@ -1,5 +1,5 @@
-// Rectangles with optional rounded corners and border, or patterned lines (curly, dotted and dashed underlines),
-// one instance per quad. Positions are in physical pixels from the top-left corner of the surface.
+// Rectangles with optional rounded corners and border, patterned lines (curly, dotted and dashed underlines), or soft
+// shadows, one instance per quad. Positions are in physical pixels from the top-left corner of the surface.
 
 // Surface size in pixels (xy); zw is padding
 @group(0) @binding(0) var<uniform> viewport: vec4<f32>;
@@ -11,7 +11,8 @@ struct Quad {
 	@location(2) border_color: vec4<f32>,
 	// Corner radius, border width
 	@location(3) radius_border: vec2<f32>,
-	// Kind (0: none, 1: wave, 2: dots, 3: dashes), period and line thickness in pixels, unused
+	// Kind (0: none, 1: wave, 2: dots, 3: dashes), period and line thickness in pixels, unused; or for a shadow
+	// (kind 4), its blur radius in pixels
 	@location(4) pattern: vec4<f32>,
 }
 
@@ -77,8 +78,30 @@ fn pattern_coverage(in: VertexOutput) -> f32 {
 	}
 }
 
+// The error function, to within 5e-4 (Abramowitz and Stegun 7.1.27), for both values of `x`
+fn erf(x: vec2<f32>) -> vec2<f32> {
+	let s = sign(x);
+	let a = abs(x);
+	var y = 1.0 + (0.278393 + (0.230389 + 0.078108 * a * a) * a) * a;
+	y = y * y;
+	return s - s / (y * y);
+}
+
+// How much of a box shadow covers this pixel: a box of `half_size` blurred with a Gaussian of standard deviation
+// `sigma`, which is exact for a box (the blur is separable). The quad reaches 3 sigma past the box on each side.
+fn shadow_coverage(in: VertexOutput, sigma: f32) -> f32 {
+	let half = max(in.half_size - 3.0 * sigma, vec2<f32>(0.0));
+	let scale = 1.0 / (sqrt(2.0) * sigma);
+	let both = 0.5 * (erf((in.local + half) * scale) - erf((in.local - half) * scale));
+	return both.x * both.y;
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+	if u32(in.pattern.x + 0.5) == 4u {
+		let sigma = max(in.pattern.y * 0.5, 0.01);
+		return vec4<f32>(in.color.rgb * in.color.a, in.color.a) * shadow_coverage(in, sigma);
+	}
 	if in.pattern.x > 0.5 {
 		return vec4<f32>(in.color.rgb * in.color.a, in.color.a) * pattern_coverage(in);
 	}

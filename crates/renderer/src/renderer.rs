@@ -393,7 +393,17 @@ fn pieces<'a>(
 /// character stays readable; a bar is drawn over nothing.
 fn cursor_layer(layer: &CellLayer, cursor: Cursor) -> CellLayer {
 	let (row, col) = (layer.row + cursor.row, layer.col + cursor.col);
-	let empty = CellLayer { row, col, width: 0, height: 0, cells: Vec::new(), cursor: None, scroll: None, ..*layer };
+	let empty = CellLayer {
+		row,
+		col,
+		width: 0,
+		height: 0,
+		cells: Vec::new(),
+		cursor: None,
+		scroll: None,
+		shadow: None,
+		..*layer
+	};
 	if cursor.shape != CursorShape::Block {
 		return CellLayer { row: layer.row, col: layer.col, cursor: Some(cursor), ..empty };
 	}
@@ -411,9 +421,11 @@ fn cursor_layer(layer: &CellLayer, cursor: Cursor) -> CellLayer {
 	CellLayer { width: cursor.width, height: 1, cells, ..empty }
 }
 
-/// A layer's ranges of the frame's quads: its backgrounds, drawn under its text, and its decorations and bar cursor,
-/// drawn over it; and the rectangle they and the text are cut to
+/// A layer's ranges of the frame's quads: its shadow, drawn first and uncut since it reaches past the layer; its
+/// backgrounds, drawn under its text, and its decorations and bar cursor, drawn over it; and the rectangle these and the
+/// text are cut to
 struct LayerQuads {
+	shadow: Range<u32>,
 	under_text: Range<u32>,
 	over_text: Range<u32>,
 	clip: [u32; 4],
@@ -434,6 +446,12 @@ fn layer_quads(
 	moving: bool,
 ) -> LayerQuads {
 	let layer = &piece.layer;
+	let shadow = quads.len();
+	if let Some(layer_shadow) = layer.shadow.filter(|_| piece.kind == PieceKind::Layer) {
+		let (width, height) = (layer.width * cell.width, layer.height * cell.height);
+		let rect = [layer.col * cell.width, layer.row * cell.height, width, height].map(|value| value as f32);
+		quads.push(Quad::shadow(rect, layer_shadow, srgb));
+	}
 	let start = quads.len();
 	// The shape of a cursor on its way stands in for its background or bar.
 	if !moving {
@@ -448,6 +466,7 @@ fn layer_quads(
 		quad.rect[1] += piece.offset;
 	}
 	LayerQuads {
+		shadow: shadow as u32..start as u32,
 		under_text: start as u32..middle as u32,
 		over_text: middle as u32..quads.len() as u32,
 		clip: piece.clip,
@@ -456,8 +475,8 @@ fn layer_quads(
 }
 
 /// Draws the layers one after another, each with its backgrounds, text, then decorations and cursor, so a later
-/// layer (e.g. a floating window) covers everything of the earlier ones. The cursor's shape, drawn first for the cursor
-/// on its way, isn't cut to its layer: on a `surface` of width × height pixels, it may be anywhere.
+/// layer (e.g. a floating window) covers everything of the earlier ones. A layer's shadow, and the cursor's shape drawn
+/// first for the cursor on its way, aren't cut to the layer: on a `surface` of width × height pixels, they reach past it.
 fn draw_layers(
 	pass: &mut wgpu::RenderPass<'_>,
 	quads: &QuadPipeline,
@@ -467,6 +486,10 @@ fn draw_layers(
 	layers: &[LayerQuads],
 ) -> Result<(), RendererError> {
 	for (index, layer) in layers.iter().enumerate() {
+		if !layer.shadow.is_empty() {
+			pass.set_scissor_rect(0, 0, surface.0, surface.1);
+			quads.render(pass, layer.shadow.clone());
+		}
 		if layer.shape {
 			pass.set_scissor_rect(0, 0, surface.0, surface.1);
 			shape.render(pass);
@@ -507,6 +530,7 @@ mod tests {
 			cells: vec![cell],
 			cursor: None,
 			scroll: None,
+			shadow: None,
 		})
 	}
 
@@ -518,7 +542,17 @@ mod tests {
 
 	/// Like [`middle_pixel`], with a cursor shape over the layers if given: its corners in pixels, and its color
 	fn drawn_pixel(layers: &[Layer], shape: Option<([[f32; 2]; 4], u32)>) -> Option<[u8; 4]> {
-		let (width, height) = (64, 19);
+		let (pixels, cell) = drawn(layers, shape)?;
+		Some(pixels[(9 * WIDTH + cell.width / 2) as usize])
+	}
+
+	/// Width of the texture the GPU tests draw to, 19 pixels (a row of cells) high
+	const WIDTH: u32 = 64;
+
+	/// Draws `layers` like the renderer does, with a cursor shape over them if given, into a [`WIDTH`] × 19 texture,
+	/// and returns its pixels row by row and the cell size, or `None` without a GPU
+	fn drawn(layers: &[Layer], shape: Option<([[f32; 2]; 4], u32)>) -> Option<(Vec<[u8; 4]>, crate::CellSize)> {
+		let (width, height) = (WIDTH, 19);
 		smol::block_on(async {
 			let instance = wgpu::Instance::default();
 			let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await.ok()?;
@@ -550,6 +584,7 @@ mod tests {
 				.iter()
 				.map(|piece| layer_quads(&mut quads, piece, &text, cell, lines, false, false))
 				.chain(shape.map(|_| super::LayerQuads {
+					shadow: 0..0,
 					under_text: 0..0,
 					over_text: 0..0,
 					clip: [0, 0, 1, 1],
@@ -603,7 +638,7 @@ mod tests {
 			device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 
 			let pixels = buffer.get_mapped_range(..).unwrap().as_chunks::<4>().0.to_vec();
-			Some(pixels[(9 * width + cell.width / 2) as usize])
+			Some((pixels, cell))
 		})
 	}
 
@@ -675,6 +710,30 @@ mod tests {
 		// Corners that briefly cross, so the shape isn't convex, still fill.
 		let crossed = [[0.0, 0.0], [20.0, 0.0], [0.0, 19.0], [20.0, 19.0]];
 		assert_eq!(drawn_pixel(&[cell(1, " ", 0x000000)], Some((crossed, 0x00FF00))).unwrap(), [0, 255, 0, 255]);
+	}
+
+	#[test]
+	fn gpu_a_shadow_fades_out_around_its_layer() {
+		// A white cell at column 3, with a red shadow, on black
+		let shadow = crate::Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
+		let Layer::Cells(white) = cell(1, " ", 0xFFFFFF);
+		let layer = Layer::Cells(CellLayer { col: 3, shadow: Some(shadow), ..white });
+		let Some((pixels, cell)) = drawn(&[layer], None) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		let left = 3 * cell.width;
+		let at = |x: u32| pixels[(9 * WIDTH + x) as usize];
+
+		// The layer itself covers its shadow.
+		assert_eq!(at(left + 1), [255, 255, 255, 255]);
+		// Just outside, about half shadowed; less further out; gone past three standard deviations (12 pixels)
+		let reds: Vec<u8> = [1, 4, 8].map(|distance| at(left - distance)[0]).to_vec();
+		assert!((100..=140).contains(&reds[0]), "{reds:?}");
+		assert!(reds[0] > reds[1] && reds[1] > reds[2] && reds[2] > 0, "{reds:?}");
+		assert_eq!(at(left - 14), [0, 0, 0, 255]);
+		// It's only a shadow: no green or blue in it
+		assert_eq!(&at(left - 1)[1..3], &[0, 0]);
 	}
 
 	#[test]

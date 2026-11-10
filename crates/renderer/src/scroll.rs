@@ -177,6 +177,7 @@ impl Animation {
 			cells,
 			cursor: None,
 			scroll: None,
+			shadow: None,
 		};
 		SlidingRegion { layer: region_layer, offset: first as f32 + offset, height: self.height() as u32 }
 	}
@@ -235,7 +236,17 @@ mod tests {
 			.collect();
 		let width = rows[0].len() as u32;
 		let scroll = (scroll != 0).then_some(Scroll { rows: scroll, top, bottom, left: 0, right: width });
-		Layer::Cells(CellLayer { id: 1, row: 0, col: 0, width, height: rows.len() as u32, cells, cursor: None, scroll })
+		Layer::Cells(CellLayer {
+			id: 1,
+			row: 0,
+			col: 0,
+			width,
+			height: rows.len() as u32,
+			cells,
+			cursor: None,
+			scroll,
+			shadow: None,
+		})
 	}
 
 	/// The rows of the sliding region of `layer` at `now`, and the rows it's drawn below the region's top

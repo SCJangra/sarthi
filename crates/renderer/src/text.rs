@@ -485,6 +485,7 @@ mod tests {
 			cells: cells(rows, PLAIN),
 			cursor: None,
 			scroll: None,
+			shadow: None,
 		}
 	}
 

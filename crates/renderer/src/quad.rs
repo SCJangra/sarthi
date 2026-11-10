@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::color::rgba;
 use crate::font::LineMetrics;
-use crate::{BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, RenderCell, Underline};
+use crate::{BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, RenderCell, Shadow, Underline};
 
 /// A rectangle in physical pixels, with optional rounded corners and border
 #[repr(C)]
@@ -21,18 +21,32 @@ pub(crate) struct Quad {
 	pub border_width: f32,
 
 	/// Draws a patterned line instead of a rectangle: kind ([`WAVE`], [`DOTS`] or [`DASHES`]; 0 for none), period and
-	/// line thickness in pixels, unused
+	/// line thickness in pixels, unused; or a shadow instead ([`SHADOW`]), with its blur radius in pixels
 	pub pattern: [f32; 4],
 }
 
 const WAVE: f32 = 1.0;
 const DOTS: f32 = 2.0;
 const DASHES: f32 = 3.0;
+const SHADOW: f32 = 4.0;
 
 impl Quad {
 	/// A plain rectangle without rounded corners or border
 	pub fn fill(rect: [f32; 4], color: [f32; 4]) -> Self {
 		Self { rect, color, border_color: [0.0; 4], corner_radius: 0.0, border_width: 0.0, pattern: [0.0; 4] }
+	}
+
+	/// `shadow` under a rectangle `rect` (left, top, width, height), for a surface of the given kind: the quad reaches as
+	/// far as the shadow does.
+	pub fn shadow(rect: [f32; 4], shadow: Shadow, srgb_surface: bool) -> Self {
+		// Three standard deviations of the blur, past which the shadow is gone
+		let reach = 1.5 * shadow.blur.max(0.0);
+		let [left, top, width, height] = rect;
+		let [x, y] = shadow.offset;
+		let rect = [left + x - reach, top + y - reach, width + 2.0 * reach, height + 2.0 * reach];
+		let [r, g, b, _] = rgba(shadow.color, srgb_surface);
+		let color = [r, g, b, shadow.opacity.clamp(0.0, 1.0)];
+		Self { pattern: [SHADOW, shadow.blur.max(0.0), 0.0, 0.0], ..Self::fill(rect, color) }
 	}
 
 	/// A line of `kind` across `rect`, `thickness` pixels thick, repeating every `period` pixels
@@ -378,6 +392,7 @@ mod tests {
 			cells: Vec::new(),
 			cursor: Some(cursor),
 			scroll: None,
+			shadow: None,
 		};
 		let mut quads = Vec::new();
 		bar_cursor(&mut quads, &layer, CellSize { width: 8, height: 19 }, false);
@@ -398,7 +413,8 @@ mod tests {
 		for cell in &mut cells[2..5] {
 			cell.decoration = decoration;
 		}
-		let layer = CellLayer { id: 1, row: 1, col: 0, width: 6, height: 1, cells, cursor: None, scroll: None };
+		let layer =
+			CellLayer { id: 1, row: 1, col: 0, width: 6, height: 1, cells, cursor: None, scroll: None, shadow: None };
 		let lines = LineMetrics {
 			underline_top: 17.0,
 			thickness: 1.0,
