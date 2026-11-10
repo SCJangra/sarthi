@@ -35,7 +35,8 @@ pub enum Request {
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SetupArgs {
-	pub settings: Settings,
+	/// Boxed: the settings are large, and other messages shouldn't take their room.
+	pub settings: Box<Settings>,
 }
 
 #[derive(Debug, Deserialize)]

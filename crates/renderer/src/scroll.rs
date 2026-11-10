@@ -64,10 +64,6 @@ impl ScrollAnimations {
 
 		for Layer::Cells(layer) in layers {
 			let Some(scroll) = layer.scroll else { continue };
-			// Sliding text is drawn over the layer's own: through transparent backgrounds, both would show.
-			if layer.cells.iter().any(|cell| cell.blend > 0) {
-				continue;
-			}
 			// A new layer has no text to slide from; neither has one that changed size, e.g. a resized window.
 			let previous = shown
 				.iter()
@@ -284,14 +280,15 @@ mod tests {
 	}
 
 	#[test]
-	fn transparent_text_doesnt_slide() {
+	fn see_through_text_slides_too() {
 		let (mut scrolls, now) = (animations(), Instant::now());
 		let shown = [layer(&["a", "b", "c"], 0, 0, 3)];
 		let [Layer::Cells(mut scrolled)] = [layer(&["b", "c", "d"], 1, 0, 3)];
 		scrolled.cells[1].blend = 30;
 		let scrolled = [Layer::Cells(scrolled)];
 		scrolls.update(&shown, &scrolled, now);
-		assert_eq!(region(&scrolls, &scrolled[0], now), None);
+		// The renderer leaves the region out of the layer under it (see `pieces`).
+		assert!(region(&scrolls, &scrolled[0], now).is_some());
 	}
 
 	#[test]

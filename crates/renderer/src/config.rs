@@ -15,6 +15,9 @@ pub struct RendererConfig {
 
 	/// How the cursor moves to a new place, until [`crate::Renderer::set_cursor_motion`] changes it
 	pub cursor: CursorMotion,
+
+	/// How opaque the window's background is, from 0 to 1, until [`crate::Renderer::set_opacity`] changes it
+	pub opacity: f32,
 }
 
 impl Default for RendererConfig {
@@ -27,6 +30,7 @@ impl Default for RendererConfig {
 			desired_maximum_frame_latency: 2,
 			scroll: Motion::Spring { stiffness: 400.0, damping: 32.0 },
 			cursor: CursorMotion::default(),
+			opacity: 1.0,
 		}
 	}
 }

@@ -122,6 +122,8 @@ impl App {
 			.with_title(config.title.clone())
 			.with_inner_size(LogicalSize::new(f64::from(config.width), f64::from(config.height)))
 			.with_resizable(config.resizable)
+			// So `window.opacity` can make the background see-through: decided here, before the user's config runs
+			.with_transparent(true)
 	}
 
 	fn create_window(&mut self, event_loop: &ActiveEventLoop) -> Result<Arc<Window>, Error> {
@@ -141,6 +143,7 @@ impl App {
 			background,
 			scroll: settings::scroll_motion(settings),
 			cursor: settings::cursor_motion(settings),
+			opacity: settings.window.opacity,
 			..RendererConfig::default()
 		};
 		Ok(smol::block_on(Renderer::with_config(window.clone(), size.width, size.height, config))?)
@@ -293,7 +296,7 @@ impl App {
 		match request {
 			// A mistake isn't a failed request: setup() raises it in the user's config, at the call.
 			Request::Setup(SetupArgs { settings }) => {
-				responder.respond(Ok::<_, String>(self.apply_settings(settings).err()))
+				responder.respond(Ok::<_, String>(self.apply_settings(*settings).err()))
 			},
 			Request::SetClipboard(SetClipboardArgs { register, lines, regtype }) => {
 				let copied = Copied { lines, regtype };
@@ -331,9 +334,13 @@ impl App {
 		self.mouse.set_touchpad_scroll(settings.touchpad.scroll_speed);
 		self.editor
 			.set_cursor_animation(settings.cursor.animate_insert_mode, settings.cursor.animate_cmdline);
+		self.editor.set_see_through(settings.window.opacity < 1.0);
 		if let Some(state) = &mut self.window {
 			state.renderer.set_scroll_motion(settings::scroll_motion(&settings));
 			state.renderer.set_cursor_motion(settings::cursor_motion(&settings));
+			state.renderer.set_opacity(settings.window.opacity);
+			// The compositor blurs the desktop behind the window, where it can.
+			state.window.set_blur(settings.window.blur);
 			state.window.request_redraw();
 		}
 		self.settings = settings;

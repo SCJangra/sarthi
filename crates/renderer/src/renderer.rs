@@ -2,16 +2,18 @@ use std::borrow::Cow;
 use std::ops::Range;
 use std::time::Instant;
 
+use arrayvec::ArrayString;
+
 use crate::color::{rgba, wgpu_color};
 use crate::cursor::{CursorAnimation, cursor_rect};
 use crate::font::LineMetrics;
 use crate::quad::{Quad, QuadPipeline, area_shadow, cell_backgrounds, cell_decorations, cursor_quad};
-use crate::scroll::ScrollAnimations;
+use crate::scroll::{ScrollAnimations, SlidingRegion};
 use crate::shape::ShapePipeline;
 use crate::text::TextPipeline;
 use crate::{
-	CellLayer, CellSize, Cursor, CursorMotion, CursorShape, Fonts, Layer, Motion, RenderCell, RendererConfig,
-	RendererError, TextSize, TextStyle,
+	CellLayer, CellSize, Cursor, CursorMotion, CursorShape, Decoration, Fonts, Layer, Motion, RenderCell,
+	RendererConfig, RendererError, TextSize, TextStyle,
 };
 
 pub struct Renderer {
@@ -19,7 +21,9 @@ pub struct Renderer {
 	device: wgpu::Device,
 	queue: wgpu::Queue,
 	config: wgpu::SurfaceConfiguration,
-	clear_color: wgpu::Color,
+	/// The window's background, `0xRRGGBB` in sRGB, and how opaque it is, from 0 to 1: what the window is cleared to
+	background: u32,
+	opacity: f32,
 	quads: QuadPipeline,
 	text: TextPipeline,
 	shape: ShapePipeline,
@@ -107,7 +111,12 @@ impl Renderer {
 				.ok_or(RendererError::NoPresentMode)?,
 		};
 
-		let alpha_mode = capabilities.alpha_modes.first().copied().ok_or(RendererError::NoAlphaMode)?;
+		// Premultiplied, like everything drawn, so the window can be see-through; otherwise whatever the surface offers
+		let alpha_mode = if capabilities.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
+			wgpu::CompositeAlphaMode::PreMultiplied
+		} else {
+			capabilities.alpha_modes.first().copied().ok_or(RendererError::NoAlphaMode)?
+		};
 
 		let config = wgpu::SurfaceConfiguration {
 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -123,8 +132,6 @@ impl Renderer {
 
 		surface.configure(&device, &config);
 
-		let clear_color = wgpu_color(renderer_config.background, config.format.is_srgb());
-
 		let quads = QuadPipeline::new(&device, config.format);
 		let text = TextPipeline::new(&device, &queue, config.format);
 		let shape = ShapePipeline::new(&device, config.format);
@@ -134,7 +141,8 @@ impl Renderer {
 			device,
 			queue,
 			config,
-			clear_color,
+			background: renderer_config.background,
+			opacity: renderer_config.opacity,
 			quads,
 			text,
 			shape,
@@ -154,7 +162,20 @@ impl Renderer {
 
 	/// Sets the color the window is cleared to, as `0xRRGGBB` in sRGB (the format Neovim uses)
 	pub fn set_clear_color(&mut self, rgb: u32) {
-		self.clear_color = wgpu_color(rgb, self.config.format.is_srgb());
+		self.background = rgb;
+	}
+
+	/// Sets how opaque the window's background is, from 0 (see-through) to 1, where the surface allows it. Cells that
+	/// should show it draw no background of their own (a `blend` of 100).
+	pub fn set_opacity(&mut self, opacity: f32) {
+		self.opacity = opacity.clamp(0.0, 1.0);
+	}
+
+	/// The color the window is cleared to: the background at its opacity, premultiplied like everything drawn
+	fn clear_color(&self) -> wgpu::Color {
+		let color = wgpu_color(self.background, self.config.format.is_srgb());
+		let opacity = f64::from(self.opacity);
+		wgpu::Color { r: color.r * opacity, g: color.g * opacity, b: color.b * opacity, a: opacity }
 	}
 
 	/// Shows `layers` from the next frame on, drawn in order so later ones cover earlier ones. Text that scrolled
@@ -249,7 +270,10 @@ impl Renderer {
 					view: &view,
 					resolve_target: None,
 					depth_slice: None,
-					ops: wgpu::Operations { load: wgpu::LoadOp::Clear(self.clear_color), store: wgpu::StoreOp::Store },
+					ops: wgpu::Operations {
+						load: wgpu::LoadOp::Clear(self.clear_color()),
+						store: wgpu::StoreOp::Store,
+					},
 				})],
 				depth_stencil_attachment: None,
 				occlusion_query_set: None,
@@ -370,9 +394,16 @@ fn pieces<'a>(
 	let mut cursor_piece = None;
 	for Layer::Cells(layer) in layers {
 		let whole = clip(layer.col, layer.row, layer.width, layer.height);
-		pieces.push(Piece { layer: Cow::Borrowed(layer), kind: PieceKind::Layer, offset: 0.0, clip: whole });
+		let region = scrolls.region(layer, now);
+		// The sliding text is drawn over the layer: where what's under shows through, the layer's own text would too.
+		let see_through = layer.cells.iter().any(|cell| cell.blend > 0);
+		let base = match &region {
+			Some(region) if see_through => Cow::Owned(without(layer, region)),
+			_ => Cow::Borrowed(layer),
+		};
+		pieces.push(Piece { layer: base, kind: PieceKind::Layer, offset: 0.0, clip: whole });
 
-		if let Some(region) = scrolls.region(layer, now) {
+		if let Some(region) = region {
 			let clip = clip(region.layer.col, region.layer.row, region.layer.width, region.height);
 			// Whole pixels keep the text sharp.
 			let offset = (region.offset * cell.height as f32).round();
@@ -387,6 +418,20 @@ fn pieces<'a>(
 	// Over everything, like in the TUI
 	pieces.extend(cursor_piece);
 	pieces
+}
+
+/// `layer` without the text and backgrounds of its `region` that slides, which is drawn over it
+fn without(layer: &CellLayer, region: &SlidingRegion) -> CellLayer {
+	let (top, left) = (region.layer.row - layer.row, region.layer.col - layer.col);
+	let Some(&first) = layer.cells.first() else { return layer.clone() };
+	let text = ArrayString::from(" ").unwrap_or_default();
+	let blank = RenderCell { text, blend: 100, decoration: Decoration::default(), ..first };
+	let mut cells = layer.cells.clone();
+	for row in top..(top + region.height).min(layer.height) {
+		let start = (row * layer.width + left) as usize;
+		cells[start..start + region.layer.width as usize].fill(blank);
+	}
+	CellLayer { cells, cursor: None, scroll: None, shadow: layer.shadow.clone(), ..*layer }
 }
 
 /// The cursor of `layer` as a layer of its own. A block is the cells under it, in the cursor's colors, so its
@@ -846,5 +891,39 @@ mod tests {
 		assert!(drawn[1].offset != 0.0, "{}", drawn[1].offset);
 		assert_eq!(drawn[2].offset, 0.0);
 		assert_eq!((drawn[2].layer.row, drawn[2].layer.cells[0].text.as_str()), (2, "d"));
+	}
+
+	#[test]
+	fn under_see_through_sliding_text_the_layer_leaves_the_region_out() {
+		let column = |rows: [&str; 3], scroll: bool, blend: u8| {
+			let Layer::Cells(top) = cell(1, rows[0], 0x000000);
+			let cells =
+				rows.iter()
+					.map(|text| RenderCell { text: ArrayString::from(text).unwrap(), blend, ..top.cells[0] });
+			let scroll = scroll.then_some(crate::Scroll { rows: 1, top: 1, bottom: 3, left: 0, right: 1 });
+			Layer::Cells(CellLayer { height: 3, cells: cells.collect(), scroll, ..top })
+		};
+		let cell_size = crate::CellSize { width: 8, height: 19 };
+		let layer_text = |blend: u8| {
+			let (shown, scrolled) = (column(["x", "b", "c"], false, blend), column(["x", "c", "d"], true, blend));
+			let (mut scrolls, now) = (ScrollAnimations::new(RendererConfig::default().scroll), Instant::now());
+			scrolls.update(std::slice::from_ref(&shown), std::slice::from_ref(&scrolled), now);
+			let later = now + std::time::Duration::from_millis(50);
+			let drawn = pieces(std::slice::from_ref(&scrolled), &scrolls, cell_size, (8, 57), later);
+			assert_eq!(drawn[1].kind, PieceKind::Region);
+			drawn[0]
+				.layer
+				.cells
+				.iter()
+				.map(|cell| (cell.text.as_str().to_owned(), cell.blend))
+				.collect::<Vec<_>>()
+		};
+
+		// See-through: the region's rows (1 and 2) are blank and draw no background; the row above stays.
+		let blank = (String::from(" "), 100);
+		assert_eq!(layer_text(100), [(String::from("x"), 100), blank.clone(), blank]);
+		// Opaque: the layer is drawn whole, and the region covers it.
+		let whole: Vec<_> = ["x", "c", "d"].map(|text| (String::from(text), 0)).to_vec();
+		assert_eq!(layer_text(0), whole);
 	}
 }

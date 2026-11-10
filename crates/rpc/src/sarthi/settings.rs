@@ -12,6 +12,7 @@ pub struct Settings {
 	pub shadow: ShadowSettings,
 	pub underline: UnderlineSettings,
 	pub touchpad: TouchpadSettings,
+	pub window: WindowSettings,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -144,6 +145,25 @@ impl Default for ShadowSettings {
 	}
 }
 
+/// The OS window: how see-through its background is, and whether the desktop behind it is blurred
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowSettings {
+	/// How opaque the editor's background is, from 0 to 1. Text, highlighted backgrounds and floating windows stay
+	/// opaque. Needs a compositor that shows windows' transparency.
+	pub opacity: f32,
+
+	/// Whether the desktop behind a see-through background is blurred. The compositor does it, where it can (e.g. KDE
+	/// Plasma, macOS); elsewhere the background is only see-through.
+	pub blur: bool,
+}
+
+impl Default for WindowSettings {
+	fn default() -> Self {
+		Self { opacity: 1.0, blur: false }
+	}
+}
+
 /// How underlines are drawn, as adjustments to the font's own, in logical pixels
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -197,6 +217,7 @@ impl Settings {
 		check(underline.wave_height > 0.0, "underline.wave_height must be more than 0")?;
 		check(underline.ink_gaps.is_none_or(|clearance| clearance >= 0.0), "underline.ink_gaps can't be negative")?;
 		check(self.touchpad.scroll_speed > 0.0, "touchpad.scroll_speed must be more than 0")?;
+		check((0.0..=1.0).contains(&self.window.opacity), "window.opacity must be from 0 to 1")?;
 		Ok(())
 	}
 }
@@ -353,6 +374,18 @@ mod tests {
 		assert_eq!(error, "shadow.opacity must be from 0 to 1");
 		let error = shadow(vec![("offset", Value::from(3))]).unwrap_err();
 		assert!(error.contains("invalid type"), "{error}");
+	}
+
+	#[test]
+	fn window() {
+		let window = |pairs| parse(table(vec![("window", table(pairs))]));
+		let settings = window(vec![("opacity", Value::from(0.85)), ("blur", Value::from(true))])
+			.unwrap()
+			.window;
+		assert_eq!((settings.opacity, settings.blur), (0.85, true));
+		assert_eq!(Settings::default().window.opacity, 1.0);
+		let error = window(vec![("opacity", Value::from(1.5))]).unwrap_err();
+		assert_eq!(error, "window.opacity must be from 0 to 1");
 	}
 
 	#[test]

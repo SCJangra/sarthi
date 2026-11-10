@@ -31,6 +31,9 @@ pub struct Editor {
 	/// Windows whose text jumps to its new place when it scrolls, rather than sliding
 	jumping: HashSet<Window>,
 
+	/// Whether the window is see-through, so the default background isn't drawn in cells (see [`Editor::see_through_cells`])
+	see_through: bool,
+
 	/// The shadow under floating windows, if any, and what decides each float's part in it
 	shadow: Option<Shadow>,
 	floats: HashMap<Window, FloatShadow>,
@@ -138,6 +141,7 @@ impl Editor {
 			jumping: HashSet::new(),
 			shadow: None,
 			floats: HashMap::new(),
+			see_through: false,
 			highlights: HighlightState::new(),
 			cursor: CursorState::default(),
 			cursor_grid: 1,
@@ -169,6 +173,12 @@ impl Editor {
 		} else {
 			self.jumping.insert(win);
 		}
+	}
+
+	/// Whether the window is see-through: then cells in the default background draw none, outside floating windows.
+	pub fn set_see_through(&mut self, see_through: bool) {
+		self.stale |= self.see_through != see_through;
+		self.see_through = see_through;
 	}
 
 	/// Whether the window has the focus: without it, the cursor is drawn as an outline.
@@ -476,11 +486,11 @@ impl Editor {
 		let mut shadows = self.float_shadows(&placed);
 		let mut layers = Vec::with_capacity(placed.len() + 2);
 		if self.grids.contains_key(&1) {
-			layers.push(self.layer(1, 0, 0));
+			layers.push(self.see_through_cells(self.layer(1, 0, 0)));
 		}
 		for (id, placement) in placed {
 			match placement {
-				Placement::Tiled { row, col } => layers.push(self.layer(id, *row, *col)),
+				Placement::Tiled { row, col } => layers.push(self.see_through_cells(self.layer(id, *row, *col))),
 				Placement::Float { row, col, .. } => {
 					let mut layer = self.layer(id, *row, *col);
 					let Layer::Cells(cells) = &mut layer;
@@ -494,12 +504,25 @@ impl Editor {
 					let mut layer = self.layer(id, *row, 0);
 					// The message grid is as tall as the screen; only its rows from `row` down show.
 					clip_rows(&mut layer, screen_height.saturating_sub(*row));
-					layers.push(layer);
+					layers.push(self.see_through_cells(layer));
 				},
 				Placement::Hidden => (),
 			}
 		}
 		layers
+	}
+
+	/// `layer`, a tiled window, grid 1 or the message grid, with cells in the default background drawing no background of
+	/// their own while the window is see-through, so what's behind the window shows. Floating windows keep theirs, or
+	/// what's under them would show.
+	fn see_through_cells(&self, mut layer: Layer) -> Layer {
+		if self.see_through {
+			let (Layer::Cells(cells), background) = (&mut layer, self.background());
+			for cell in cells.cells.iter_mut().filter(|cell| cell.background == background) {
+				cell.blend = 100;
+			}
+		}
+		layer
 	}
 
 	/// The shadows under the floating windows among `placed`, by the grid of the window each is drawn with. Floats at one
@@ -895,6 +918,33 @@ mod tests {
 		assert_eq!(scroll_of(&redraw, 2), None);
 		let redraw = flush(&mut editor, vec![viewport(2, 300, -294), line(2, 0, "a")]);
 		assert_eq!(scroll_of(&redraw, 2), None);
+	}
+
+	#[test]
+	fn a_see_through_window_shows_through_the_default_background() {
+		let blends = |redraw: &Redraw, id: u64| {
+			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
+			layer.cells.iter().map(|cell| cell.blend).collect::<Vec<_>>()
+		};
+		let mut editor = screen();
+		flush(&mut editor, vec![resize(3, 2, 1), win_pos(2, 0, 0), float(3, 1, 1, 1)]);
+		editor.set_see_through(true);
+		// In the window, a cell with its own background stays opaque.
+		let attrs = crate::highlight::tests::attrs;
+		let rgb_attr = HlAttrs { background: Some(0x123456), ..attrs() };
+		let colored = HlAttrDefineEvent { id: 1, rgb_attr, cterm_attr: attrs(), info: vec![] };
+		let cell = GridCell { text: CellText::from("a").unwrap(), hl_id: Some(1), repeat: None };
+		let line = GridLineEvent { grid: 2, row: 0, col_start: 0, cells: vec![cell], wrap: false };
+		let events = vec![RedrawNotification::HlAttrDefine(vec![colored]), RedrawNotification::GridLine(vec![line])];
+		let redraw = flush(&mut editor, events);
+
+		assert_eq!(&blends(&redraw, 2)[..2], [0, 100]);
+		assert!(blends(&redraw, 1).iter().all(|blend| *blend == 100));
+		// The float keeps its background.
+		assert_eq!(blends(&redraw, 3), [0, 0]);
+
+		editor.set_see_through(false);
+		assert!(blends(&flush(&mut editor, vec![]), 1).iter().all(|blend| *blend == 0));
 	}
 
 	#[test]
