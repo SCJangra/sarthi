@@ -20,7 +20,7 @@ use rpc::neovim::{
 use rpc::sarthi::{
 	ChangeFontSizeArgs, CheckWindowOptionsArgs, Copied, FloatsChangedArgs, GetClipboardArgs, MODULES, PlaceWindowArgs,
 	Request, ResetFontSizeArgs, STARTUP, SetClipboardArgs, SetFontSizeArgs, Settings, SetupArgs, WinScrolledArgs,
-	WindowOptions, WindowVariable,
+	WindowFont, WindowFontArgs, WindowOptions, WindowVariable,
 };
 
 use crate::blur::Blur;
@@ -58,6 +58,12 @@ pub struct App {
 
 	/// Grid size last sent to Neovim, so resizes that don't change it aren't sent again
 	pub ui_size: GridSize,
+
+	/// The fonts `guifont` chose, which windows with fonts of their own but no family of their own use too
+	pub font_choice: FontChoice,
+
+	/// The fonts external windows asked for (`sarthi.font`), by window, so they're sized again with the main ones
+	pub window_fonts: HashMap<rpc::neovim::Window, WindowFont>,
 
 	/// Modifier keys held right now, for the keys and mouse events sent to Neovim
 	pub modifiers: ModifiersState,
@@ -127,6 +133,8 @@ impl App {
 			linespace: 0,
 			nvim,
 			ui_size: GridSize { width: 0, height: 0 },
+			font_choice: FontChoice::default(),
+			window_fonts: HashMap::new(),
 			modifiers: ModifiersState::empty(),
 			error: None,
 		})
@@ -169,13 +177,19 @@ impl App {
 
 	/// Size of text in `window`, in physical pixels
 	fn text_size(&self, window: &Window) -> TextSize {
+		self.text_size_of(window, self.font_size)
+	}
+
+	/// Size of text of `font_size` logical pixels in `window`, in physical pixels, with the line space and underlines of
+	/// the main fonts' text
+	fn text_size_of(&self, window: &Window, font_size: f32) -> TextSize {
 		let scale = window.scale_factor();
 		// Logical pixels like the font size, in whole physical ones
 		let line_space = (self.linespace as f64 * scale)
 			.round()
 			.clamp(f64::from(i32::MIN), f64::from(i32::MAX));
 		let underlines = settings::underlines(&self.settings).scaled(scale as f32);
-		TextSize { font_size: self.font_size * scale as f32, line_space: line_space as i32, underlines }
+		TextSize { font_size: font_size * scale as f32, line_space: line_space as i32, underlines }
 	}
 
 	/// Size of a grid cell, in physical pixels: of the main fonts, as last sized (see [`App::update_text_size`])
@@ -189,13 +203,55 @@ impl App {
 	}
 
 	/// Sizes the main fonts' text for the window, and tells the editor the size of its cells, which places its layers:
-	/// after the font size, line space, underlines or scale changed
+	/// after the font size, line space, underlines or scale changed. The windows with fonts of their own are sized again
+	/// too, since theirs follow the main ones.
 	fn update_text_size(&mut self) {
-		if let Some(state) = &self.window {
-			let size = self.text_size(&state.window);
-			self.fonts.set_size(FontId::MAIN, size);
-			self.editor.set_cell_size(self.cell_size());
+		let Some(window) = self.window.as_ref().map(|state| state.window.clone()) else { return };
+		let size = self.text_size(&window);
+		self.fonts.set_size(FontId::MAIN, size);
+		self.editor.set_cell_size(self.cell_size());
+
+		// Closed windows are forgotten by the editor.
+		let open: Vec<_> = self.editor.external_fonts().collect();
+		self.window_fonts.retain(|win, _| open.contains(win));
+		for (win, font) in self.window_fonts.clone() {
+			match self.resolve_window_font(&window, &font) {
+				Ok(resolved) => self.editor.set_external_font(win, Some(resolved)),
+				Err(error) => tracing::warn!("Couldn't size the fonts of window {}: {error}", win.0),
+			}
 		}
+	}
+
+	/// Draws external window `win`'s text in `font` (`sarthi.font`), or the main fonts for `None`; or what's wrong with
+	/// the fonts
+	fn set_window_font(&mut self, win: rpc::neovim::Window, font: Option<WindowFont>) -> Result<(), String> {
+		let Some(font) = font else {
+			self.window_fonts.remove(&win);
+			self.editor.set_external_font(win, None);
+			self.refresh();
+			return Ok(());
+		};
+		let window = self.window.as_ref().map(|state| state.window.clone()).ok_or("no window yet")?;
+		let resolved = self.resolve_window_font(&window, &font)?;
+		self.window_fonts.insert(win, font);
+		self.editor.set_external_font(win, Some(resolved));
+		self.refresh();
+		Ok(())
+	}
+
+	/// The fonts of `font` in `window`, and the size of their cells: its families, or `guifont`'s; at its size, or
+	/// `guifont`'s
+	fn resolve_window_font(&mut self, window: &Window, font: &WindowFont) -> Result<(FontId, CellSize), String> {
+		let choice = match &font.family {
+			Some(families) => FontChoice { families: families.clone().into_vec(), ..FontChoice::default() },
+			None => self.font_choice.clone(),
+		};
+		let pixels = font.size.map_or(Ok(self.font_size), guifont::pixels)?;
+		let id = self
+			.fonts
+			.add(&choice, self.text_size_of(window, pixels))
+			.map_err(|error| error.to_string())?;
+		Ok((id, self.fonts.cell_size(id)))
 	}
 
 	fn attach_ui(&mut self, window: &Window) -> Result<(), Error> {
@@ -347,6 +403,7 @@ impl App {
 			let pixels = font.pixels();
 			let choice = FontChoice { families: font.families, bold: font.bold, italic: font.italic };
 			self.fonts.choose(&choice).map_err(|error| error.to_string())?;
+			self.font_choice = choice;
 			Ok(pixels)
 		});
 
@@ -387,6 +444,11 @@ impl App {
 			Request::ResetFontSize(ResetFontSizeArgs { guifont }) => {
 				let guifont = self.editor.strip_default_guifont(&guifont);
 				responder.respond(Ok::<_, String>(self.font_sizes.reset(guifont)));
+			},
+			// A mistake is raised in Lua, at the call that gave the window its fonts.
+			Request::WindowFont(WindowFontArgs { win, font }) => {
+				let mistake = self.set_window_font(win, font.map(|font| *font)).err();
+				responder.respond(Ok::<_, String>(mistake));
 			},
 			// A mistake is raised in Lua, at the call that placed the window.
 			Request::PlaceWindow(PlaceWindowArgs { win, place }) => match place::place(place.as_deref()) {

@@ -1,12 +1,14 @@
 //! sarthi's own API, between sarthi and its Lua: the requests and notifications the Lua sends, and the Lua itself
 
 mod clipboard;
+mod font;
 mod notifications;
 mod place;
 mod requests;
 mod settings;
 
 pub use clipboard::*;
+pub use font::*;
 pub use notifications::*;
 pub use place::*;
 pub use requests::*;

@@ -61,6 +61,14 @@ pub fn points(pixels: f32) -> f32 {
 	pixels / PIXELS_PER_POINT
 }
 
+/// Logical pixels in a font size of `points`, if it's a size the font size functions accept too
+pub fn pixels(points: f32) -> Result<f32, String> {
+	if !SIZES.contains(&points) {
+		return Err(format!("font size {points} is outside {}..{} points", SIZES.start(), SIZES.end()));
+	}
+	Ok(points * PIXELS_PER_POINT)
+}
+
 /// `guifont` with its size set to `points`: the first family gets `:h<points>`, any other `:h` goes, and the rest
 /// stays as it was.
 fn with_size(guifont: &str, points: f32) -> String {
@@ -91,9 +99,7 @@ pub struct FontSizes {
 impl FontSizes {
 	/// `guifont` at `points`, an error outside [`SIZES`]
 	pub fn set(&mut self, guifont: &str, points: f32) -> Result<String, String> {
-		if !SIZES.contains(&points) {
-			return Err(format!("font size {points} is outside {}..{} points", SIZES.start(), SIZES.end()));
-		}
+		pixels(points)?;
 		GuiFont::parse(guifont)?;
 		Ok(self.change_to(guifont, with_size(guifont, points)))
 	}

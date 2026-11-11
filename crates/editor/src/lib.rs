@@ -8,7 +8,7 @@ pub mod highlight;
 
 use std::collections::HashMap;
 
-use renderer::{CellLayer, CellSize, Decoration, Layer, LayerShadow, Motion, RenderCell, Scroll, Shadow};
+use renderer::{CellLayer, CellSize, Decoration, FontId, Layer, LayerShadow, Motion, RenderCell, Scroll, Shadow};
 use rpc::neovim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification, Window};
 
 use crate::compositor::cell_layer;
@@ -74,6 +74,10 @@ pub struct Editor {
 
 	/// Where external windows go, by window; centered unless placed (see [`Editor::set_external_place`])
 	places: HashMap<Window, Place>,
+
+	/// The fonts of external windows that have their own, and the size of their cells, by window (see
+	/// [`Editor::set_external_font`])
+	external_fonts: HashMap<Window, (FontId, CellSize)>,
 
 	/// Whether anything changed since the last `flush`, so it's drawn on the next one
 	stale: bool,
@@ -190,6 +194,7 @@ impl Editor {
 			cell: CellSize { width: 1, height: 1 },
 			external_order: 0,
 			places: HashMap::new(),
+			external_fonts: HashMap::new(),
 			stale: false,
 		}
 	}
@@ -250,6 +255,35 @@ impl Editor {
 	pub fn set_default_float_style(&mut self, style: FloatStyle) {
 		self.stale |= self.default_float != style;
 		self.default_float = style;
+	}
+
+	/// Draws external window `win`'s text with the fonts of set `font`, in cells of `cell`, or with the main fonts for
+	/// `None`: from now on until it closes
+	pub fn set_external_font(&mut self, win: Window, font: Option<(FontId, CellSize)>) {
+		let changed = match font {
+			Some(font) => self.external_fonts.insert(win, font) != Some(font),
+			None => self.external_fonts.remove(&win).is_some(),
+		};
+		self.stale |= changed;
+	}
+
+	/// The windows with fonts of their own (see [`Editor::set_external_font`])
+	pub fn external_fonts(&self) -> impl Iterator<Item = Window> + '_ {
+		self.external_fonts.keys().copied()
+	}
+
+	/// The fonts grid `id` is drawn with, and the size of its cells: an external window's own, or the main ones
+	fn font_of(&self, id: u32) -> (FontId, CellSize) {
+		match self.placements.get(&id) {
+			Some(Placement::External { win, .. }) => self.external_fonts.get(win).copied(),
+			_ => None,
+		}
+		.unwrap_or((FontId::MAIN, self.cell))
+	}
+
+	/// Size of grid `id`'s cells, in pixels (see [`Editor::font_of`])
+	fn cell_of(&self, id: u32) -> CellSize {
+		self.font_of(id).1
 	}
 
 	/// Where external window `win` goes, from now on until it closes. One placed by the cursor goes where the cursor is
@@ -347,7 +381,7 @@ impl Editor {
 		let ([left, top], cell) = match self.placements.get(&id) {
 			Some(Placement::External { win, .. }) => {
 				let [left, top, ..] = self.external_rect(id, *win);
-				([f64::from(left), f64::from(top)], self.cell)
+				([f64::from(left), f64::from(top)], self.cell_of(id))
 			},
 			_ => {
 				let (row, col) = self.grid_origin(id)?;
@@ -441,7 +475,10 @@ impl Editor {
 					}
 					match self.placements.remove(&destroy.grid) {
 						Some(Placement::Float { win, .. }) => _ = self.floats.remove(&win),
-						Some(Placement::External { win, .. }) => _ = self.places.remove(&win),
+						Some(Placement::External { win, .. }) => {
+							self.places.remove(&win);
+							self.external_fonts.remove(&win);
+						},
 						_ => (),
 					}
 					self.stale = true;
@@ -790,7 +827,9 @@ impl Editor {
 	/// Grid `id` as a layer at `row`, `col` of the screen, with the cursor if it's in this grid
 	fn layer(&self, id: u32, row: u32, col: u32) -> Layer {
 		let cursor = (id == self.cursor_grid).then(|| self.cursor.style()).flatten();
-		let mut layer = cell_layer(id, &self.grids[&id], &self.highlights, cursor, self.cell);
+		let (font, cell) = self.font_of(id);
+		let mut layer = cell_layer(id, &self.grids[&id], &self.highlights, cursor, cell);
+		layer.font = font;
 		(layer.x, layer.y) = (col * self.cell.width, row * self.cell.height);
 		layer.scroll = self.scroll(id, layer.width, layer.height);
 		Layer::Cells(layer)
@@ -810,8 +849,8 @@ impl Editor {
 
 	/// Where external window `win`, grid `id`, is: left, top, width, height in pixels
 	fn external_rect(&self, id: u32, win: Window) -> [u32; 4] {
-		let grid = &self.grids[&id];
-		let size = [grid.width as u32 * self.cell.width, grid.height as u32 * self.cell.height];
+		let (grid, cell) = (&self.grids[&id], self.cell_of(id));
+		let size = [grid.width as u32 * cell.width, grid.height as u32 * cell.height];
 		let screen = self
 			.grids
 			.get(&1)
@@ -875,7 +914,7 @@ fn clip_rows(layer: &mut Layer, height: u32) {
 
 #[cfg(test)]
 mod tests {
-	use renderer::{CellLayer, CellSize, Cursor, CursorShape, Layer, Motion, Shadow};
+	use renderer::{CellLayer, CellSize, Cursor, CursorShape, FontId, Layer, Motion, Shadow};
 	use rpc::neovim::{
 		CellText, DefaultColorsSetEvent, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
 		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, OptionSetEvent, OptionValue,
@@ -1323,6 +1362,27 @@ mod tests {
 		assert_eq!(editor.grid_cell(4, 0.0, 0.0), Some((-2, -3)));
 		assert_eq!(editor.grid_cell(2, 8.0, 16.0), Some((1, 1)));
 		assert_eq!(editor.grid_cell(9, 0.0, 0.0), None);
+	}
+
+	#[test]
+	fn an_external_window_in_fonts_of_its_own() {
+		let mut editor = screen();
+		flush(&mut editor, vec![resize(4, 4, 2), external(4)]);
+		// Cells of 10×20 pixels: 40×40 for its 4×2 cells, centered on the 80×80 pixel screen
+		let cell = CellSize { width: 10, height: 20 };
+		editor.set_external_font(win_of(4), Some((FontId::MAIN, cell)));
+		assert_eq!(editor.external_fonts().collect::<Vec<_>>(), [win_of(4)]);
+		let redraw = editor.refresh().expect("its cells changed");
+		let Layer::Cells(window) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 4).unwrap();
+		assert_eq!((window.x, window.y, window.cell), (20, 20, cell));
+		// The mouse goes by its cells too.
+		assert_eq!(editor.grid_at(20.0 + 10.0 + 1.0, 20.0 + 1.0), Some(GridPosition { grid: 4, row: 0, col: 1 }));
+
+		// Back to the main fonts
+		editor.set_external_font(win_of(4), None);
+		let redraw = editor.refresh().expect("its cells changed");
+		let Layer::Cells(window) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 4).unwrap();
+		assert_eq!(window.cell, CELL);
 	}
 
 	#[test]

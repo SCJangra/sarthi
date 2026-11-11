@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde::de::IgnoredAny;
 
 use crate::sarthi::notifications::window_number;
-use crate::{DeserializeTaggedEnum, Register, Settings, Window, WindowOptions, WindowPlace};
+use crate::{DeserializeTaggedEnum, Register, Settings, Window, WindowFont, WindowOptions, WindowPlace};
 
 #[derive(Debug, DeserializeTaggedEnum)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -36,6 +36,9 @@ pub enum Request {
 	/// `require("sarthi").api` checking a window's own values of the settings (`w:sarthi`) before setting them; answered
 	/// with what's wrong with their values, if anything. One sarthi can't decode fails the request.
 	CheckWindowOptions(CheckWindowOptionsArgs),
+	/// `require("sarthi").api` giving external window `win` its own fonts (`sarthi.font`), or the main ones for none;
+	/// answered with what's wrong with them, if anything
+	WindowFont(WindowFontArgs),
 
 	/// A method sarthi doesn't know
 	Other { method: String, value: IgnoredAny },
@@ -63,6 +66,15 @@ pub struct PlaceWindowArgs {
 
 	/// Boxed like the settings, so other messages don't take its room
 	pub place: Option<Box<WindowPlace>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct WindowFontArgs {
+	#[serde(deserialize_with = "window_number")]
+	pub win: Window,
+
+	pub font: Option<Box<WindowFont>>,
 }
 
 #[derive(Debug, Deserialize)]

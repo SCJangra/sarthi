@@ -12,6 +12,9 @@
 --           `{ center = true }` centers it, as it is until placed; `{ relative = …, anchor = …, row = …, col = … }`
 --           places it like a floating window: relative to the 'editor', a 'win' (`win`, or the current window) or the
 --           'cursor', with its `anchor` corner ('NW', 'NE', 'SW', 'SE') at `row`, `col`.
+--   font    For external windows: the fonts its text is drawn with, `{ family = …, size = … }`: a family or a list of
+--           them (the first draws what it has the characters for), and a size in points, like `guifont`'s `:h`. Either
+--           left out is `guifont`'s. The window is as many of its own cells as its config says.
 --   shadow, scroll
 --           The window's own values of `setup()`'s sections of these names, with the same keys, each in place of the
 --           setting's, e.g. `shadow = { enabled = true, opacity = 0.6 }`; `enabled` wins over `exclude_filetypes`.
@@ -28,6 +31,10 @@ local M = {}
 ---@field row? number
 ---@field col? number
 
+---@class sarthi.WindowFont
+---@field family? string|string[]
+---@field size? number
+
 ---@class sarthi.ShadowOptions
 ---@field enabled? boolean
 ---@field blur? number
@@ -40,6 +47,7 @@ local M = {}
 
 ---@class sarthi.WindowConfig
 ---@field place? sarthi.WindowPlace
+---@field font? sarthi.WindowFont
 ---@field shadow? sarthi.ShadowOptions
 ---@field scroll? sarthi.ScrollOptions
 
@@ -49,6 +57,7 @@ local configs = {}
 -- What only external windows take, and why
 local EXTERNAL_ONLY = {
   place = 'floating windows are placed by Neovim',
+  font = "floating windows share the main grid's cells",
 }
 
 -- The sections of the settings a window can have its own values of, kept in `w:sarthi`
@@ -114,11 +123,25 @@ local function apply(win, sarthi, options, level)
   if place ~= nil and place.relative == 'win' and place.win == nil then
     place = vim.tbl_extend('force', place, { win = vim.api.nvim_get_current_win() })
   end
+  -- By the cursor where it is now, which sarthi only learns with Neovim's next redraw: relative to the editor, at the
+  -- cursor's cell of the screen
+  if place ~= nil and place.relative == 'cursor' then
+    local cursor = vim.fn.screenpos(0, vim.fn.line('.'), vim.fn.col('.'))
+    place = vim.tbl_extend('force', place, {
+      relative = 'editor',
+      row = cursor.row - 1 + (place.row or 0),
+      col = cursor.col - 1 + (place.col or 0),
+    })
+  end
   local mistake = rpc.request('place_window', win, place or vim.NIL)
   if mistake ~= vim.NIL then
     error('sarthi: `sarthi.place`: ' .. mistake, level)
   end
-  configs[win] = { place = vim.deepcopy(sarthi.place) }
+  mistake = rpc.request('window_font', win, sarthi.font or vim.NIL)
+  if mistake ~= vim.NIL then
+    error('sarthi: `sarthi.font`: ' .. mistake, level)
+  end
+  configs[win] = { place = vim.deepcopy(sarthi.place), font = vim.deepcopy(sarthi.font) }
 end
 
 --- Like `vim.api.nvim_open_win()`, with a `sarthi` table in `config` (see above)
@@ -159,9 +182,10 @@ function M.nvim_win_set_config(win, config)
   end
 
   local merged = vim.tbl_extend('force', configs[win] or {}, sarthi or {})
-  -- No longer external: its place no longer applies.
+  -- No longer external: its place and fonts no longer apply.
   if not external then
     merged.place = nil
+    merged.font = nil
   end
   apply(win, merged, options, 3)
 end
