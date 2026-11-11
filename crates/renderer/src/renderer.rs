@@ -873,7 +873,8 @@ mod tests {
 			let cells = rows
 				.iter()
 				.map(|text| RenderCell { text: ArrayString::from(text).unwrap(), ..top.cells[0] });
-			let scroll = scroll.then_some(crate::Scroll { rows: 1, top: 0, bottom: 3, left: 0, right: 1 });
+			let scroll =
+				scroll.then_some(crate::Scroll { rows: 1, top: 0, bottom: 3, left: 0, right: 1, motion: None });
 			let cursor = crate::Cursor {
 				row: 2,
 				col: 0,
@@ -907,7 +908,8 @@ mod tests {
 			let cells =
 				rows.iter()
 					.map(|text| RenderCell { text: ArrayString::from(text).unwrap(), blend, ..top.cells[0] });
-			let scroll = scroll.then_some(crate::Scroll { rows: 1, top: 1, bottom: 3, left: 0, right: 1 });
+			let scroll =
+				scroll.then_some(crate::Scroll { rows: 1, top: 1, bottom: 3, left: 0, right: 1, motion: None });
 			Layer::Cells(CellLayer { height: 3, cells: cells.collect(), scroll, ..top })
 		};
 		let layer_text = |blend: u8| {

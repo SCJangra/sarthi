@@ -1,5 +1,9 @@
 //! sarthi's settings, set from Lua with `require("sarthi").setup({ … })`. Each section and value is optional: what
 //! isn't given keeps its default. Fonts aren't here: they're Neovim's own `guifont` and `linespace` options.
+//!
+//! The sections about a window can be set for one window too, in its `w:sarthi` table ([`WindowOptions`]): the same
+//! sections with the same keys, each replacing the setting's value for that window, e.g.
+//! `vim.w[win].sarthi = { shadow = { opacity = 0.6 } }`.
 
 use serde::Deserialize;
 use serde::de::{self, Deserializer, Visitor};
@@ -15,15 +19,24 @@ pub struct Settings {
 	pub window: WindowSettings,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ScrollSettings {
-	/// How text that scrolled moves to its new place
+	/// Whether text that scrolled slides to its new place, or jumps there
+	pub enabled: bool,
+
+	/// How it moves to its new place
 	pub animation: Animation,
 
-	/// Windows showing these filetypes jump to their new place, e.g. menus whose selected line is highlighted text. A
-	/// window's `w:sarthi_smooth_scroll` overrides this.
+	/// Windows showing these filetypes jump to their new place, e.g. menus whose selected line is highlighted text,
+	/// unless their `w:sarthi` gives `scroll.enabled`
 	pub exclude_filetypes: Vec<String>,
+}
+
+impl Default for ScrollSettings {
+	fn default() -> Self {
+		Self { enabled: true, animation: Animation::default(), exclude_filetypes: Vec::new() }
+	}
 }
 
 /// An animation's curve, e.g. `{ curve = "spring", stiffness = 400, damping = 32 }`. Durations are in milliseconds.
@@ -134,8 +147,8 @@ pub struct ShadowSettings {
 	/// From 0, invisible, to 1, black where fully shadowed
 	pub opacity: f32,
 
-	/// Floating windows showing these filetypes have no shadow, e.g. scrollbars. A window's `w:sarthi_shadow` overrides
-	/// this.
+	/// Floating windows showing these filetypes have no shadow, e.g. scrollbars, unless their `w:sarthi` gives
+	/// `shadow.enabled`
 	pub exclude_filetypes: Vec<String>,
 }
 
@@ -202,7 +215,56 @@ impl Default for TouchpadSettings {
 	}
 }
 
+/// Declares `$options`, the values of settings section `$settings` that one window can have of its own: each optional,
+/// left out keeping the setting's
+macro_rules! window_options {
+	($(#[$doc:meta])* $options:ident for $settings:ident { $($field:ident: $type:ty),* $(,)? }) => {
+		$(#[$doc])*
+		#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+		#[serde(default, deny_unknown_fields)]
+		pub struct $options {
+			$(pub $field: Option<$type>,)*
+		}
+
+		impl $settings {
+			/// These settings, with the values `options` gives in their place
+			pub fn with(&self, options: &$options) -> Self {
+				let mut settings = self.clone();
+				$(if let Some(value) = &options.$field {
+					settings.$field = value.clone();
+				})*
+				settings
+			}
+		}
+	};
+}
+
+window_options! {
+	/// A window's own [`ScrollSettings`]
+	ScrollOptions for ScrollSettings { enabled: bool, animation: Animation }
+}
+
+window_options! {
+	/// A window's own [`ShadowSettings`]
+	ShadowOptions for ShadowSettings { enabled: bool, blur: f32, offset: [f32; 2], opacity: f32 }
+}
+
+/// What a window's `w:sarthi` sets for it: the sections of the settings about a window, with the same keys. Each value
+/// given replaces the setting's for this window. `exclude_filetypes` is only in the settings: the window gives
+/// `enabled` itself.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowOptions {
+	pub scroll: ScrollOptions,
+	pub shadow: ShadowOptions,
+}
+
 impl Settings {
+	/// These settings with what `options` gives a window in their place, e.g. to validate them
+	pub fn for_window(&self, options: &WindowOptions) -> Self {
+		Self { scroll: self.scroll.with(&options.scroll), shadow: self.shadow.with(&options.shadow), ..self.clone() }
+	}
+
 	/// Whether the values make sense, beyond their types; the error names the first that doesn't
 	pub fn validate(&self) -> Result<(), String> {
 		validate_animation("scroll.animation", self.scroll.animation)?;
@@ -282,7 +344,7 @@ fn number_or_false<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<
 mod tests {
 	use rmpv::Value;
 
-	use super::{Animation, Settings};
+	use super::{Animation, Settings, WindowOptions};
 
 	/// A Lua table as Neovim sends it: a map, or an array when empty
 	fn table(pairs: Vec<(&str, Value)>) -> Value {
@@ -374,6 +436,28 @@ mod tests {
 		assert_eq!(error, "shadow.opacity must be from 0 to 1");
 		let error = shadow(vec![("offset", Value::from(3))]).unwrap_err();
 		assert!(error.contains("invalid type"), "{error}");
+	}
+
+	#[test]
+	fn window_options() {
+		// `w:sarthi`: the same sections and keys, each replacing the setting's
+		let shadow = table(vec![("opacity", Value::from(0.6)), ("offset", Value::Array(vec![1.into(), 2.into()]))]);
+		let scroll = table(vec![("enabled", Value::from(false))]);
+		let options: WindowOptions =
+			rmpv::ext::from_value(table(vec![("shadow", shadow), ("scroll", scroll)])).unwrap();
+		let settings = Settings::default().for_window(&options);
+		assert_eq!((settings.shadow.opacity, settings.shadow.offset, settings.shadow.blur), (0.6, [1.0, 2.0], 16.0));
+		assert!(settings.shadow.enabled && !settings.scroll.enabled);
+		assert_eq!(rmpv::ext::from_value::<WindowOptions>(table(vec![])).unwrap(), WindowOptions::default());
+
+		// Only the sections about a window, without their filetypes: the window gives `enabled` itself
+		let filetypes = table(vec![("exclude_filetypes", Value::Array(vec![]))]);
+		assert!(rmpv::ext::from_value::<WindowOptions>(table(vec![("shadow", filetypes)])).is_err());
+		assert!(rmpv::ext::from_value::<WindowOptions>(table(vec![("cursor", table(vec![]))])).is_err());
+		let opacity = table(vec![("shadow", table(vec![("opacity", Value::from(2))]))]);
+		let options: WindowOptions = rmpv::ext::from_value(opacity).unwrap();
+		let error = Settings::default().for_window(&options).validate().unwrap_err();
+		assert_eq!(error, "shadow.opacity must be from 0 to 1");
 	}
 
 	#[test]

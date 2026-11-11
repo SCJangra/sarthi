@@ -85,7 +85,7 @@ impl ScrollAnimations {
 			let animation = self.layers.entry(layer.id).or_insert_with(|| Animation {
 				size: (layer.width, layer.height),
 				region: scroll,
-				offset: Approach::new(self.motion, now),
+				offset: Approach::new(scroll.motion.unwrap_or(self.motion), now),
 				rows: BTreeMap::new(),
 			});
 			animation.scroll(previous, scroll, now);
@@ -246,7 +246,7 @@ mod tests {
 			})
 			.collect();
 		let width = rows[0].len() as u32;
-		let scroll = (scroll != 0).then_some(Scroll { rows: scroll, top, bottom, left: 0, right: width });
+		let scroll = (scroll != 0).then_some(Scroll { rows: scroll, top, bottom, left: 0, right: width, motion: None });
 		Layer::Cells(CellLayer {
 			id: 1,
 			x: 0,
@@ -398,5 +398,21 @@ mod tests {
 		let (rows, offset) = region(&scrolls, &scrolled[0], now + DURATION * 3 / 5).unwrap();
 		assert_eq!(rows, ["b", "c", "d", " "]);
 		assert!(offset < 0.0, "{offset}");
+	}
+
+	#[test]
+	fn a_layer_can_slide_its_own_way() {
+		let now = Instant::now();
+		let mut scrolls = animations();
+		let shown = [layer(&["a", "b", "c"], 0, 0, 3)];
+		let mut scrolled = layer(&["b", "c", "d"], 1, 0, 3);
+		let Layer::Cells(cells) = &mut scrolled;
+		let linear = Motion::Ease { easing: Easing::Linear, duration: DURATION * 2 };
+		cells.scroll = cells.scroll.map(|scroll| Scroll { motion: Some(linear), ..scroll });
+		scrolls.update(&shown, std::slice::from_ref(&scrolled), now);
+
+		// Linearly over twice the duration: half a row from its place at the duration the others take
+		let (_, offset) = region(&scrolls, &scrolled, now + DURATION).unwrap();
+		assert!((offset + 0.5).abs() < 0.01, "{offset}");
 	}
 }

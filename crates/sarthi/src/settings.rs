@@ -2,8 +2,9 @@
 
 use std::time::Duration;
 
+use editor::FloatStyle;
 use renderer::{CursorMotion, Easing, Motion, Shadow, UnderlineSize};
-use rpc::sarthi::{Animation, FloatWindow, ScrolledWindow, Settings};
+use rpc::sarthi::{Animation, FloatWindow, ScrolledWindow, Settings, WindowOptions, WindowVariable};
 
 /// How the renderer moves scrolled text
 pub fn scroll_motion(settings: &Settings) -> Motion {
@@ -32,27 +33,54 @@ fn motion(animation: Animation) -> Motion {
 	}
 }
 
-/// Whether `window`'s text slides when it scrolls: unless its filetype is excluded, or its `w:sarthi_smooth_scroll`
-/// says otherwise
-pub fn smooth_scroll(settings: &Settings, window: &ScrolledWindow) -> bool {
+/// What a window's `w:sarthi` gives it, if it's one sarthi can decode with values that make sense; otherwise what's
+/// wrong with it
+pub fn window_options(settings: &Settings, variable: &WindowVariable) -> Result<WindowOptions, String> {
+	let WindowVariable::Options(options) = variable else {
+		return Err(String::from("has a key sarthi doesn't know, or a value of the wrong type"));
+	};
+	if *options != WindowOptions::default() {
+		settings.for_window(options).validate()?;
+	}
+	Ok(options.clone())
+}
+
+/// How `window`'s text moves when it scrolls, with `options` from its `w:sarthi`: slides as its scroll settings say,
+/// or jumps to its new place for `None`. It slides if `options` say so, or else if sliding is enabled and its filetype
+/// isn't excluded.
+pub fn window_scroll(settings: &Settings, window: &ScrolledWindow, options: &WindowOptions) -> Option<Motion> {
 	let excluded = settings.scroll.exclude_filetypes.contains(&window.filetype);
-	window.smooth_scroll.unwrap_or(!excluded)
+	let scroll = settings.scroll.with(&options.scroll);
+	let enabled = options.scroll.enabled.unwrap_or(scroll.enabled && !excluded);
+	enabled.then(|| motion(scroll.animation))
 }
 
-/// The shadow under floating windows, in physical pixels for a display of `scale`, unless it's off
-pub fn shadow(settings: &Settings, scale: f32) -> Option<Shadow> {
-	let shadow = &settings.shadow;
-	let [x, y] = shadow.offset;
-	let shadow =
-		Shadow { blur: shadow.blur * scale, offset: [x * scale, y * scale], color: 0x000000, opacity: shadow.opacity };
-	settings.shadow.enabled.then_some(shadow)
+/// How floating or external window `window` looks besides its cells, with `options` from its `w:sarthi`, in logical
+/// pixels (see [`style`])
+pub fn float_style(settings: &Settings, window: &FloatWindow, options: &WindowOptions) -> FloatStyle {
+	FloatStyle { parent: window.parent, ..style(settings, options, &window.filetype, window.winblend) }
 }
 
-/// Whether floating window `window` casts a shadow: unless it's fully transparent, or its filetype is excluded and
-/// its `w:sarthi_shadow` doesn't say otherwise, or that says so
-pub fn float_shadow(settings: &Settings, window: &FloatWindow) -> bool {
-	let excluded = settings.shadow.exclude_filetypes.contains(&window.filetype);
-	window.winblend < 100 && window.shadow.unwrap_or(!excluded)
+/// How floating and external windows look until sarthi learns about them
+pub fn default_float_style(settings: &Settings) -> FloatStyle {
+	style(settings, &WindowOptions::default(), "", 0)
+}
+
+/// How a floating or external window showing `filetype`, `winblend` transparent, looks besides its cells: the settings,
+/// with what `options` gives in their place. Each part shows if `options` say so, or else if it's enabled and
+/// `filetype` isn't excluded; none around a fully transparent window.
+fn style(settings: &Settings, options: &WindowOptions, filetype: &str, winblend: u32) -> FloatStyle {
+	let shows = |enabled: Option<bool>, default: bool, excluded: &[String]| {
+		winblend < 100 && enabled.unwrap_or(default && !excluded.iter().any(|excluded| excluded == filetype))
+	};
+	let shadow = settings.shadow.with(&options.shadow);
+	let shadow = shows(options.shadow.enabled, shadow.enabled, &shadow.exclude_filetypes).then_some(Shadow {
+		blur: shadow.blur,
+		offset: shadow.offset,
+		color: 0x000000,
+		opacity: shadow.opacity,
+	});
+	FloatStyle { shadow, parent: None }
 }
 
 /// How the renderer draws underlines, in logical pixels
@@ -68,53 +96,98 @@ pub fn underlines(settings: &Settings) -> UnderlineSize {
 
 #[cfg(test)]
 mod tests {
+	use renderer::Motion;
 	use rpc::neovim::Window;
-	use rpc::sarthi::{FloatWindow, ScrolledWindow, Settings};
+	use rpc::sarthi::{
+		Animation, FloatWindow, ScrollOptions, ScrolledWindow, Settings, ShadowOptions, WindowOptions, WindowVariable,
+	};
+	use serde::de::IgnoredAny;
 
-	use super::smooth_scroll;
+	fn float(filetype: &str) -> FloatWindow {
+		FloatWindow {
+			win: Window(1000),
+			filetype: filetype.into(),
+			sarthi: WindowVariable::default(),
+			winblend: 0,
+			parent: None,
+		}
+	}
+
+	fn shadow(options: ShadowOptions) -> WindowOptions {
+		WindowOptions { shadow: options, ..Default::default() }
+	}
 
 	#[test]
 	fn shadows() {
 		let mut settings = Settings::default();
-		let shadow = super::shadow(&settings, 2.0).unwrap();
-		assert_eq!((shadow.blur, shadow.offset, shadow.opacity), (32.0, [0.0, 8.0], 0.3));
-		settings.shadow.enabled = false;
-		assert_eq!(super::shadow(&settings, 2.0), None);
+		let none = WindowOptions::default();
+		let style = super::float_style(&settings, &float("lua"), &none);
+		let cast = style.shadow.unwrap();
+		assert_eq!((cast.blur, cast.offset, cast.opacity), (16.0, [0.0, 4.0], 0.3));
+		assert_eq!(super::default_float_style(&settings).shadow, Some(cast));
+
+		// The window's own values, each in place of the setting's
+		let own = shadow(ShadowOptions { opacity: Some(0.6), offset: Some([1.0, 2.0]), ..Default::default() });
+		let cast = super::float_style(&settings, &float("lua"), &own).shadow.unwrap();
+		assert_eq!((cast.blur, cast.offset, cast.opacity), (16.0, [1.0, 2.0], 0.6));
 
 		settings.shadow.exclude_filetypes = vec![String::from("satellite")];
-		let window = |filetype: &str, shadow| FloatWindow {
-			win: Window(1000),
-			filetype: filetype.into(),
-			shadow,
-			winblend: 0,
-			parent: None,
-		};
-		assert!(super::float_shadow(&settings, &window("TelescopeResults", None)));
-		assert!(!super::float_shadow(&settings, &window("satellite", None)));
-		// The window's variable wins.
-		assert!(super::float_shadow(&settings, &window("satellite", Some(true))));
-		assert!(!super::float_shadow(&settings, &window("lua", Some(false))));
-		// Fully transparent: no shadow, whatever the variable says
-		let transparent = FloatWindow { winblend: 100, ..window("lua", Some(true)) };
-		assert!(!super::float_shadow(&settings, &transparent));
+		assert!(super::float_style(&settings, &float("satellite"), &none).shadow.is_none());
+		// The window's `enabled` wins, over excluded filetypes and the setting.
+		let on = shadow(ShadowOptions { enabled: Some(true), ..Default::default() });
+		let off = shadow(ShadowOptions { enabled: Some(false), ..Default::default() });
+		assert!(super::float_style(&settings, &float("satellite"), &on).shadow.is_some());
+		assert!(super::float_style(&settings, &float("lua"), &off).shadow.is_none());
+		settings.shadow.enabled = false;
+		assert!(super::float_style(&settings, &float("lua"), &none).shadow.is_none());
+		assert!(super::float_style(&settings, &float("lua"), &on).shadow.is_some());
+		// Fully transparent: no shadow, whatever the window says
+		let transparent = FloatWindow { winblend: 100, ..float("lua") };
+		assert!(super::float_style(&settings, &transparent, &on).shadow.is_none());
+	}
+
+	#[test]
+	fn mistakes_in_window_options() {
+		let settings = Settings::default();
+		let opacity = shadow(ShadowOptions { opacity: Some(2.0), ..Default::default() });
+		let mistake = super::window_options(&settings, &WindowVariable::Options(opacity)).unwrap_err();
+		assert_eq!(mistake, "shadow.opacity must be from 0 to 1");
+		assert!(super::window_options(&settings, &WindowVariable::Invalid(IgnoredAny)).is_err());
+		assert_eq!(super::window_options(&settings, &WindowVariable::default()), Ok(WindowOptions::default()));
 	}
 
 	#[test]
 	fn which_windows_slide() {
 		let mut settings = Settings::default();
 		settings.scroll.exclude_filetypes = vec![String::from("cmp_menu")];
-		let window = |filetype: &str, smooth_scroll| ScrolledWindow {
+		let window = |filetype: &str| ScrolledWindow {
 			win: Window(1000),
 			filetype: filetype.into(),
-			smooth_scroll,
+			sarthi: WindowVariable::default(),
 		};
+		let scroll = |options: ScrollOptions| WindowOptions { scroll: options, ..Default::default() };
+		let (none, on, off) = (
+			WindowOptions::default(),
+			scroll(ScrollOptions { enabled: Some(true), ..Default::default() }),
+			scroll(ScrollOptions { enabled: Some(false), ..Default::default() }),
+		);
+		let slides =
+			|settings: &Settings, filetype, options| super::window_scroll(settings, &window(filetype), options);
 
-		assert!(smooth_scroll(&settings, &window("lua", None)));
-		assert!(!smooth_scroll(&settings, &window("cmp_menu", None)));
-		// The window's variable wins.
-		assert!(smooth_scroll(&settings, &window("cmp_menu", Some(true))));
-		assert!(!smooth_scroll(&settings, &window("lua", Some(false))));
-		// Nothing is excluded by default.
-		assert!(smooth_scroll(&Settings::default(), &window("cmp_menu", None)));
+		assert!(slides(&settings, "lua", &none).is_some());
+		assert!(slides(&settings, "cmp_menu", &none).is_none());
+		// The window's `enabled` wins.
+		assert!(slides(&settings, "cmp_menu", &on).is_some());
+		assert!(slides(&settings, "lua", &off).is_none());
+		// Nothing is excluded by default, and nothing slides with sliding off, unless the window says so.
+		assert!(slides(&Settings::default(), "cmp_menu", &none).is_some());
+		settings.scroll.enabled = false;
+		assert!(slides(&settings, "lua", &none).is_none());
+		assert!(slides(&settings, "lua", &on).is_some());
+
+		// Its own animation
+		let linear = scroll(ScrollOptions { animation: Some(Animation::None), ..Default::default() });
+		let motion = slides(&Settings::default(), "lua", &linear);
+		assert!(matches!(motion, Some(Motion::Ease { duration, .. }) if duration.is_zero()), "{motion:?}");
 	}
 }

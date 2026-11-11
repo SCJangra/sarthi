@@ -1,15 +1,12 @@
--- Tells sarthi about floating windows before Neovim draws them, so sarthi can decide which cast a shadow: it knows the
--- settings (`shadow.exclude_filetypes`), and Neovim knows each window's filetype, `w:sarthi_shadow`, `winblend`, and
--- the floating window it's attached to, if any. Sends a window again only when these change.
+-- Tells sarthi about floating windows before Neovim draws them, so sarthi can decide how each looks, e.g. whether it
+-- casts a shadow: it knows the settings, and Neovim knows each window's filetype, `w:sarthi` (its own values of the
+-- settings), `winblend`, and the floating window it's attached to, if any. Sends a window again only when these change.
 local rpc = require('sarthi.rpc')
 
 local M = {}
 
 -- What was last sent for each window, by handle
 local sent = {}
-
--- What's sent about each window, besides its handle; any may be nil
-local FACTS = { 'filetype', 'shadow', 'winblend', 'parent' }
 
 --- Whether `win` is a floating window
 local function is_float(win)
@@ -24,16 +21,11 @@ local function forward()
       local window = {
         win = win,
         filetype = vim.bo[vim.api.nvim_win_get_buf(win)].filetype,
-        shadow = vim.w[win].sarthi_shadow,
+        sarthi = vim.w[win].sarthi,
         winblend = vim.wo[win].winblend,
         parent = config.relative == 'win' and is_float(config.win) and config.win or nil,
       }
-      local last = sent[win]
-      local changed = not last
-      for _, key in ipairs(FACTS) do
-        changed = changed or last[key] ~= window[key]
-      end
-      if changed then
+      if not vim.deep_equal(sent[win], window) then
         sent[win] = window
         table.insert(windows, window)
       end

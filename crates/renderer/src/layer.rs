@@ -1,6 +1,6 @@
 use arrayvec::ArrayString;
 
-use crate::{CellSize, FontId};
+use crate::{CellSize, FontId, Motion};
 
 /// Something to draw in a window. Layers are drawn in order, so later ones cover earlier ones.
 #[derive(Debug, Clone, PartialEq)]
@@ -75,7 +75,7 @@ pub struct Shadow {
 }
 
 /// Text of a [`CellLayer`] that moved since the layer was last shown, e.g. a window that scrolled
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scroll {
 	/// Rows the text moved up, or down if negative
 	pub rows: i32,
@@ -86,6 +86,10 @@ pub struct Scroll {
 	pub bottom: u32,
 	pub left: u32,
 	pub right: u32,
+
+	/// How the text slides to its new place, if not as the renderer's other scrolled text does (see
+	/// [`crate::Renderer::set_scroll_motion`])
+	pub motion: Option<Motion>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

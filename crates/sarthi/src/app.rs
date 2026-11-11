@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
 
@@ -9,7 +10,7 @@ use winit::event_loop::EventLoopProxy;
 use winit::keyboard::ModifiersState;
 use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
-use editor::{Editor, FloatShadow, Pointer, Redraw};
+use editor::{Editor, Pointer, Redraw};
 use renderer::{CellSize, FontChoice, FontId, Fonts, Frame, Renderer, RendererConfig, RendererError, TextSize};
 use rpc::client::{IncomingRequest, Message, Nvim};
 use rpc::neovim::{
@@ -18,7 +19,7 @@ use rpc::neovim::{
 };
 use rpc::sarthi::{
 	ChangeFontSizeArgs, Copied, FloatsChangedArgs, GetClipboardArgs, MODULES, Request, ResetFontSizeArgs, STARTUP,
-	SetClipboardArgs, SetFontSizeArgs, Settings, SetupArgs, WinScrolledArgs,
+	SetClipboardArgs, SetFontSizeArgs, Settings, SetupArgs, WinScrolledArgs, WindowOptions, WindowVariable,
 };
 
 use crate::blur::Blur;
@@ -68,6 +69,9 @@ pub struct App {
 	/// What the user set with `require("sarthi").setup()`, or the defaults
 	pub settings: Settings,
 
+	/// The mistake last reported in each window's `w:sarthi`, so each is reported once
+	pub window_mistakes: HashMap<rpc::neovim::Window, String>,
+
 	pub error: Option<Error>,
 }
 
@@ -111,6 +115,7 @@ impl App {
 			mouse: Mouse::new(Settings::default().touchpad.scroll_speed),
 			pointer: Pointer::Arrow,
 			settings: Settings::default(),
+			window_mistakes: HashMap::new(),
 			config,
 			window: None,
 			editor: Editor::new(),
@@ -143,7 +148,7 @@ impl App {
 		let mut blur = Blur::new(window.clone());
 		blur.set(self.settings.window.blur);
 		self.window = Some(WindowState { clipboard, blur, window: window.clone(), renderer });
-		self.update_shadow();
+		self.update_float_styles();
 		self.update_text_size();
 		Ok(window)
 	}
@@ -232,16 +237,17 @@ impl App {
 			// Before the redraw that scrolls them
 			Notification::WinScrolled(WinScrolledArgs { windows }) => {
 				for window in windows {
-					let smooth = settings::smooth_scroll(&self.settings, &window);
-					self.editor.set_smooth_scroll(window.win, smooth);
+					let options = self.window_options(window.win, &window.sarthi);
+					let motion = settings::window_scroll(&self.settings, &window, &options);
+					self.editor.set_scroll_motion(window.win, motion);
 				}
 			},
 			// Before Neovim draws them
 			Notification::FloatsChanged(FloatsChangedArgs { windows }) => {
 				for window in windows {
-					let casts = settings::float_shadow(&self.settings, &window);
-					self.editor
-						.set_float_shadow(window.win, FloatShadow { casts, parent: window.parent });
+					let options = self.window_options(window.win, &window.sarthi);
+					let style = settings::float_style(&self.settings, &window, &options);
+					self.editor.set_float_style(window.win, style);
 				}
 				// E.g. a float made transparent: Neovim drew it already, and won't again for this.
 				self.refresh();
@@ -264,10 +270,34 @@ impl App {
 		}
 	}
 
-	/// Gives the editor the shadow for floating windows, in physical pixels of the window's display
-	fn update_shadow(&mut self) {
+	/// Gives the editor how floating windows look until sarthi learns about them, and the scale of the window's display,
+	/// which their styles are drawn at
+	fn update_float_styles(&mut self) {
 		let scale = self.window.as_ref().map_or(1.0, |state| state.window.scale_factor()) as f32;
-		self.editor.set_shadow(settings::shadow(&self.settings, scale));
+		self.editor.set_scale(scale);
+		self.editor
+			.set_default_float_style(settings::default_float_style(&self.settings));
+	}
+
+	/// What window `win`'s `w:sarthi` gives it. A mistake in it is shown in Neovim, once, and the window gets nothing of
+	/// its own until it's fixed.
+	fn window_options(&mut self, win: rpc::neovim::Window, variable: &WindowVariable) -> WindowOptions {
+		match settings::window_options(&self.settings, variable) {
+			Ok(options) => {
+				self.window_mistakes.remove(&win);
+				options
+			},
+			Err(mistake) => {
+				if self.window_mistakes.get(&win) != Some(&mistake) {
+					let message = format!("sarthi: w:sarthi of window {}: {mistake}", win.0);
+					if let Err(error) = self.nvim.show_error(&message) {
+						tracing::warn!("Couldn't report a mistake in w:sarthi to Neovim: {error}");
+					}
+					self.window_mistakes.insert(win, mistake);
+				}
+				WindowOptions::default()
+			},
+		}
 	}
 
 	/// Applies Neovim's redraws, and shows the result once Neovim finished one, so events that arrive before the window
@@ -382,7 +412,7 @@ impl App {
 			state.window.request_redraw();
 		}
 		self.settings = settings;
-		self.update_shadow();
+		self.update_float_styles();
 		// The underlines' sizes are the text's.
 		self.update_text_size();
 		self.refresh();
@@ -497,7 +527,7 @@ impl ApplicationHandler<AppEvent> for App {
 			},
 			WindowEvent::ScaleFactorChanged { .. } => {
 				self.resize_renderer();
-				self.update_shadow();
+				self.update_float_styles();
 				self.update_text_size();
 				self.refresh();
 				if let Err(error) = self.resize_nvim_ui(&window) {

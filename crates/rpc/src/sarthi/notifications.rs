@@ -1,9 +1,10 @@
 //! What sarthi's Lua tells sarthi without waiting for an answer, so Neovim goes on at once. Each is a variant of
 //! [`Notification`](crate::Notification), with the method named like a request's.
 
+use serde::de::IgnoredAny;
 use serde::{Deserialize, Deserializer};
 
-use crate::Window;
+use crate::{Window, WindowOptions};
 
 /// Windows that scrolled (`WinScrolled`), sent before Neovim redraws them
 #[derive(Debug, Deserialize)]
@@ -21,9 +22,9 @@ pub struct ScrolledWindow {
 	/// Of the buffer the window shows
 	pub filetype: String,
 
-	/// The window's `w:sarthi_smooth_scroll`, if set
+	/// The window's `w:sarthi`, if set
 	#[serde(default)]
-	pub smooth_scroll: Option<bool>,
+	pub sarthi: WindowVariable,
 }
 
 /// Floating windows whose filetype or variables changed since they were last sent, sent before Neovim draws them
@@ -42,9 +43,9 @@ pub struct FloatWindow {
 	/// Of the buffer the window shows
 	pub filetype: String,
 
-	/// The window's `w:sarthi_shadow`, if set
+	/// The window's `w:sarthi`, if set
 	#[serde(default)]
-	pub shadow: Option<bool>,
+	pub sarthi: WindowVariable,
 
 	/// How transparent the window is, from 0 to 100 (`winblend`)
 	#[serde(default)]
@@ -53,6 +54,22 @@ pub struct FloatWindow {
 	/// The floating window it's attached to (`relative = 'win'`), like a scrollbar to its menu
 	#[serde(default, deserialize_with = "optional_window_number")]
 	pub parent: Option<Window>,
+}
+
+/// A window's `w:sarthi`, or a value that isn't one, e.g. with a key sarthi doesn't know: a mistake in one window's
+/// table doesn't lose what's sent about the others.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum WindowVariable {
+	Options(WindowOptions),
+	Invalid(IgnoredAny),
+}
+
+impl Default for WindowVariable {
+	/// Not set: nothing of the window's own
+	fn default() -> Self {
+		Self::Options(WindowOptions::default())
+	}
 }
 
 /// Lua's window handles are plain numbers.
@@ -67,59 +84,78 @@ fn optional_window_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<
 #[cfg(test)]
 mod tests {
 	use rmpv::Value;
+	use serde::de::IgnoredAny;
 
-	use super::{FloatWindow, FloatsChangedArgs, ScrolledWindow, WinScrolledArgs};
-	use crate::{Notification, Window};
+	use super::{FloatWindow, FloatsChangedArgs, ScrolledWindow, WinScrolledArgs, WindowVariable};
+	use crate::{Notification, ScrollOptions, ShadowOptions, Window, WindowOptions};
+
+	fn decode(method: &str, windows: Vec<Value>) -> Notification {
+		let notification = Value::Array(vec![Value::from(method), Value::Array(vec![Value::Array(windows)])]);
+		rmp_serde::from_slice(&rmp_serde::to_vec(&notification).unwrap()).unwrap()
+	}
+
+	fn map(pairs: Vec<(&str, Value)>) -> Value {
+		Value::Map(pairs.into_iter().map(|(key, value)| (Value::from(key), value)).collect())
+	}
 
 	#[test]
 	fn win_scrolled() {
 		// `rpcnotify(channel, 'win_scrolled', { { win = 1000, filetype = 'lua' }, … })`
-		let window = |win: i64, filetype: &str, smooth: Option<bool>| {
-			let mut fields =
-				vec![(Value::from("win"), Value::from(win)), (Value::from("filetype"), Value::from(filetype))];
-			fields.extend(smooth.map(|smooth| (Value::from("smooth_scroll"), Value::from(smooth))));
-			Value::Map(fields)
-		};
-		let windows = Value::Array(vec![window(1000, "lua", None), window(1001, "", Some(false))]);
-		let notification = Value::Array(vec![Value::from("win_scrolled"), Value::Array(vec![windows])]);
-		let decoded: Notification = rmp_serde::from_slice(&rmp_serde::to_vec(&notification).unwrap()).unwrap();
+		let scroll = map(vec![("scroll", map(vec![("enabled", Value::from(false))]))]);
+		let windows = vec![
+			map(vec![("win", Value::from(1000)), ("filetype", Value::from("lua"))]),
+			map(vec![("win", Value::from(1001)), ("filetype", Value::from("")), ("sarthi", scroll)]),
+		];
 
+		let off = WindowOptions {
+			scroll: ScrollOptions { enabled: Some(false), ..Default::default() },
+			..Default::default()
+		};
 		let expected = WinScrolledArgs {
 			windows: vec![
-				ScrolledWindow { win: Window(1000), filetype: String::from("lua"), smooth_scroll: None },
-				ScrolledWindow { win: Window(1001), filetype: String::new(), smooth_scroll: Some(false) },
+				ScrolledWindow { win: Window(1000), filetype: String::from("lua"), sarthi: WindowVariable::default() },
+				ScrolledWindow { win: Window(1001), filetype: String::new(), sarthi: WindowVariable::Options(off) },
 			],
 		};
-		assert_eq!(decoded, Notification::WinScrolled(expected));
+		assert_eq!(decode("win_scrolled", windows), Notification::WinScrolled(expected));
 	}
 
 	#[test]
 	fn floats_changed() {
-		// `rpcnotify(channel, 'floats_changed', { { win = 1002, filetype = '', shadow = false } })`
-		let fields = vec![
-			(Value::from("win"), Value::from(1002)),
-			(Value::from("filetype"), Value::from("")),
-			(Value::from("shadow"), Value::from(false)),
+		// `rpcnotify(channel, 'floats_changed', { { win = 1002, filetype = '', sarthi = { shadow = { … } } } })`
+		let shadow = map(vec![("enabled", Value::from(true)), ("blur", Value::from(4))]);
+		let windows = vec![
+			map(vec![
+				("win", Value::from(1002)),
+				("filetype", Value::from("")),
+				("sarthi", map(vec![("shadow", shadow)])),
+			]),
+			map(vec![
+				("win", Value::from(1003)),
+				("filetype", Value::from("")),
+				("winblend", Value::from(100)),
+				("parent", Value::from(1002)),
+			]),
+			// A mistake in its `w:sarthi` doesn't lose the others.
+			map(vec![
+				("win", Value::from(1004)),
+				("filetype", Value::from("")),
+				("sarthi", map(vec![("shadow", Value::from(false))])),
+			]),
 		];
-		let attached = vec![
-			(Value::from("win"), Value::from(1003)),
-			(Value::from("filetype"), Value::from("")),
-			(Value::from("winblend"), Value::from(100)),
-			(Value::from("parent"), Value::from(1002)),
-		];
-		let windows = Value::Array(vec![Value::Map(fields), Value::Map(attached)]);
-		let notification = Value::Array(vec![Value::from("floats_changed"), Value::Array(vec![windows])]);
-		let decoded: Notification = rmp_serde::from_slice(&rmp_serde::to_vec(&notification).unwrap()).unwrap();
 
+		let shadow = ShadowOptions { enabled: Some(true), blur: Some(4.0), ..Default::default() };
+		let options = WindowOptions { shadow, ..Default::default() };
 		let window =
-			FloatWindow { win: Window(1002), filetype: String::new(), shadow: Some(false), winblend: 0, parent: None };
-		let attached = FloatWindow {
-			win: Window(1003),
-			winblend: 100,
-			parent: Some(Window(1002)),
-			shadow: None,
-			filetype: String::new(),
-		};
-		assert_eq!(decoded, Notification::FloatsChanged(FloatsChangedArgs { windows: vec![window, attached] }));
+			|win, sarthi| FloatWindow { win: Window(win), filetype: String::new(), sarthi, winblend: 0, parent: None };
+		let expected = vec![
+			window(1002, WindowVariable::Options(options)),
+			FloatWindow { winblend: 100, parent: Some(Window(1002)), ..window(1003, WindowVariable::default()) },
+			window(1004, WindowVariable::Invalid(IgnoredAny)),
+		];
+		assert_eq!(
+			decode("floats_changed", windows),
+			Notification::FloatsChanged(FloatsChangedArgs { windows: expected })
+		);
 	}
 }
