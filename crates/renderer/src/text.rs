@@ -85,7 +85,6 @@ impl TextPipeline {
 		pieces: &[Piece],
 		size: TextSize,
 	) -> Result<(), RendererError> {
-		let cell = fonts.cell_size(size);
 		if (size, fonts.generation) != (self.size, self.fonts) {
 			(self.size, self.fonts) = (size, fonts.generation);
 			self.layers.clear();
@@ -108,7 +107,7 @@ impl TextPipeline {
 				self.renderers.push(renderer);
 			}
 
-			let text_areas = text_areas(&self.layers[&key_of(piece)], piece, cell, &self.empty);
+			let text_areas = text_areas(&self.layers[&key_of(piece)], piece, &self.empty);
 			self.renderers[index].prepare_with_custom(
 				device,
 				queue,
@@ -154,14 +153,9 @@ fn key_of(piece: &Piece) -> (u64, PieceKind) {
 
 /// The text areas of `piece`, whose rows are laid out in `rows`: a segment of text each, and the custom glyphs of
 /// each row in an `empty` buffer
-fn text_areas<'a>(
-	rows: &'a [Row],
-	piece: &Piece,
-	cell: CellSize,
-	empty: &'a Buffer,
-) -> impl Iterator<Item = TextArea<'a>> {
-	let left = (piece.layer.col * cell.width) as f32;
-	let top = (piece.layer.row * cell.height) as f32 + piece.offset;
+fn text_areas<'a>(rows: &'a [Row], piece: &Piece, empty: &'a Buffer) -> impl Iterator<Item = TextArea<'a>> {
+	let cell = piece.layer.cell;
+	let (left, top) = (piece.layer.x as f32, piece.layer.y as f32 + piece.offset);
 	// Clipped like the rest of the piece, so e.g. a wide fallback glyph can't spill out of a floating window
 	let [clip_left, clip_top, width, height] = piece.clip;
 	let bounds = TextBounds {
@@ -446,7 +440,7 @@ mod tests {
 	use arrayvec::ArrayString;
 
 	use super::{CellLayer, Fonts, RenderCell, Run, Segment, TextSize, TextStyle, segments, update_rows};
-	use crate::Decoration;
+	use crate::{CellSize, Decoration};
 
 	const PLAIN: TextStyle = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
 	const BOLD: TextStyle = TextStyle { bold: true, ..PLAIN };
@@ -482,8 +476,9 @@ mod tests {
 	fn column(rows: &[&str]) -> CellLayer {
 		CellLayer {
 			id: 1,
-			row: 0,
-			col: 0,
+			x: 0,
+			y: 0,
+			cell: CellSize { width: 8, height: 19 },
 			width: 1,
 			height: rows.len() as u32,
 			cells: cells(rows, PLAIN),

@@ -46,10 +46,11 @@ pub(crate) struct CursorAnimation {
 
 #[derive(Debug, Clone, Copy)]
 struct Corner {
-	/// Where the corner goes, in cells from the window's top-left corner: x, y
+	/// Where the corner goes, in pixels from the window's top-left corner: x, y. In pixels, not cells, so the cursor can
+	/// move between layers with cells of different sizes.
 	target: [f32; 2],
 
-	/// How far it still is from there, in cells, each moving towards 0
+	/// How far it still is from there, in pixels, each moving towards 0
 	offset: [Approach; 2],
 }
 
@@ -63,8 +64,8 @@ impl CursorAnimation {
 		self.motion = motion;
 	}
 
-	/// Moves the cursor to `rect` (left, top, width, height in cells) at `now`: animated, unless `animate` is false or
-	/// it's the first cursor. Leading and trailing corners are told apart in pixels, with cells of `cell`.
+	/// Moves the cursor to `rect` (left, top, width, height in pixels) at `now`: animated, unless `animate` is false or
+	/// it's the first cursor. A move is short by cells of `cell`, the cell size where the cursor goes.
 	pub(crate) fn update(&mut self, rect: [f32; 4], animate: bool, cell: CellSize, now: Instant) {
 		let targets = corners_of(rect);
 		let at_rest = |target: [f32; 2]| Corner { target, offset: [Approach::new(self.motion.motion, now); 2] };
@@ -81,8 +82,8 @@ impl CursorAnimation {
 		}
 
 		let (from, to) = (center(&corners.map(|corner| corner.target)), center(&targets));
-		let travel = [(to[0] - from[0]) * cell.width as f32, (to[1] - from[1]) * cell.height as f32];
-		let short = corners[0].target[1] == targets[0][1] && (to[0] - from[0]).abs() <= SHORT_MOVE;
+		let travel = [to[0] - from[0], to[1] - from[1]];
+		let short = corners[0].target[1] == targets[0][1] && travel[0].abs() <= SHORT_MOVE * cell.width as f32;
 		let motion = if short { self.motion.short } else { self.motion.motion };
 
 		for ((corner, target), share) in corners.iter_mut().zip(targets).zip(lead(travel, self.motion.trail)) {
@@ -97,7 +98,7 @@ impl CursorAnimation {
 		}
 	}
 
-	/// Where the corners are at `now`, in cells: top-left, top-right, bottom-right and bottom-left
+	/// Where the corners are at `now`, in pixels: top-left, top-right, bottom-right and bottom-left
 	pub(crate) fn corners(&self, now: Instant) -> Option<[[f32; 2]; 4]> {
 		let corners = self.corners.as_ref()?;
 		Some(corners.map(|corner| [0, 1].map(|axis| corner.target[axis] + corner.offset[axis].value(now))))
@@ -110,23 +111,25 @@ impl CursorAnimation {
 	}
 }
 
-/// Where `cursor` of `layer` is, in cells from the window's top-left corner, with cells of `cell`: left, top, width,
-/// height. A bar is as thick as it's drawn at rest.
-pub(crate) fn cursor_rect(layer: &CellLayer, cursor: Cursor, cell: CellSize) -> [f32; 4] {
-	let (left, top) = ((layer.col + cursor.col) as f32, (layer.row + cursor.row) as f32);
-	let width = cursor.width as f32;
-	// In pixels like `bar_cursor`, as a share of the cell
-	let thickness = |size: u32, percentage: u32| (size * percentage).div_ceil(100).clamp(1, size) as f32 / size as f32;
-	match cursor.shape {
-		CursorShape::Block | CursorShape::Outline => [left, top, width, 1.0],
+/// Where `cursor` of `layer` is, in pixels from the window's top-left corner: left, top, width, height. A bar is as
+/// thick as it's drawn at rest.
+pub(crate) fn cursor_rect(layer: &CellLayer, cursor: Cursor) -> [f32; 4] {
+	let cell = layer.cell;
+	let (left, top) = (layer.x + cursor.col * cell.width, layer.y + cursor.row * cell.height);
+	let width = cursor.width * cell.width;
+	// Like `cursor_quad`
+	let thickness = |size: u32, percentage: u32| (size * percentage).div_ceil(100).clamp(1, size);
+	let rect = match cursor.shape {
+		CursorShape::Block | CursorShape::Outline => [left, top, width, cell.height],
 		CursorShape::Bar { orientation: BarOrientation::Vertical, percentage } => {
-			[left, top, thickness(cell.width, percentage), 1.0]
+			[left, top, thickness(cell.width, percentage), cell.height]
 		},
 		CursorShape::Bar { orientation: BarOrientation::Horizontal, percentage } => {
 			let height = thickness(cell.height, percentage);
-			[left, top + 1.0 - height, width, height]
+			[left, top + cell.height - height, width, height]
 		},
-	}
+	};
+	rect.map(|value| value as f32)
 }
 
 /// The corners of `rect` (left, top, width, height): top-left, top-right, bottom-right and bottom-left
@@ -164,6 +167,9 @@ mod tests {
 
 	const CELL: CellSize = CellSize { width: 10, height: 20 };
 
+	/// Cells a pixel large, so the moves below are as many cells as pixels, e.g. for what's a short move
+	const PIXEL: CellSize = CellSize { width: 1, height: 1 };
+
 	fn linear(millis: u64) -> Motion {
 		Motion::Ease { easing: Easing::Linear, duration: Duration::from_millis(millis) }
 	}
@@ -172,6 +178,7 @@ mod tests {
 		CursorAnimation::new(CursorMotion { motion: linear(100), short: linear(10), trail })
 	}
 
+	/// A block cursor of a one-pixel cell
 	fn block(col: f32, row: f32) -> [f32; 4] {
 		[col, row, 1.0, 1.0]
 	}
@@ -196,7 +203,7 @@ mod tests {
 	fn the_first_cursor_is_in_place_at_once() {
 		let (now, mut cursor) = (Instant::now(), animation(0.5));
 		assert_eq!(cursor.corners(now), None);
-		cursor.update(block(3.0, 2.0), true, CELL, now);
+		cursor.update(block(3.0, 2.0), true, PIXEL, now);
 		assert_eq!(cursor.corners(now), Some([[3.0, 2.0], [4.0, 2.0], [4.0, 3.0], [3.0, 3.0]]));
 		assert!(!cursor.is_animating(now));
 	}
@@ -204,8 +211,8 @@ mod tests {
 	#[test]
 	fn a_move_stretches_the_cursor_then_settles() {
 		let (now, mut cursor) = (Instant::now(), animation(0.5));
-		cursor.update(block(0.0, 0.0), true, CELL, now);
-		cursor.update(block(10.0, 0.0), true, CELL, now);
+		cursor.update(block(0.0, 0.0), true, PIXEL, now);
+		cursor.update(block(10.0, 0.0), true, PIXEL, now);
 		assert!(cursor.is_animating(now));
 
 		// Halfway through the leading corners' time: they're halfway, the trailing ones a quarter of the way.
@@ -223,20 +230,20 @@ mod tests {
 	#[test]
 	fn short_moves_along_a_row_are_quicker() {
 		let (now, mut cursor) = (Instant::now(), animation(0.0));
-		cursor.update(block(4.0, 1.0), true, CELL, now);
-		cursor.update(block(5.0, 1.0), true, CELL, now);
+		cursor.update(block(4.0, 1.0), true, PIXEL, now);
+		cursor.update(block(5.0, 1.0), true, PIXEL, now);
 		assert!(!cursor.is_animating(now + Duration::from_millis(10)));
 
 		// The same distance down a column isn't short.
-		cursor.update(block(5.0, 2.0), true, CELL, now);
+		cursor.update(block(5.0, 2.0), true, PIXEL, now);
 		assert!(cursor.is_animating(now + Duration::from_millis(10)));
 	}
 
 	#[test]
 	fn a_move_without_animation_jumps() {
 		let (now, mut cursor) = (Instant::now(), animation(0.5));
-		cursor.update(block(0.0, 0.0), true, CELL, now);
-		cursor.update(block(10.0, 5.0), false, CELL, now);
+		cursor.update(block(0.0, 0.0), true, PIXEL, now);
+		cursor.update(block(10.0, 5.0), false, PIXEL, now);
 		assert!(!cursor.is_animating(now));
 		assert_eq!(cursor.corners(now).unwrap()[0], [10.0, 5.0]);
 	}
@@ -244,10 +251,10 @@ mod tests {
 	#[test]
 	fn a_new_target_on_the_way_starts_from_where_the_corners_are() {
 		let (now, mut cursor) = (Instant::now(), animation(0.0));
-		cursor.update(block(0.0, 0.0), true, CELL, now);
-		cursor.update(block(10.0, 0.0), true, CELL, now);
+		cursor.update(block(0.0, 0.0), true, PIXEL, now);
+		cursor.update(block(10.0, 0.0), true, PIXEL, now);
 		let halfway = now + Duration::from_millis(50);
-		cursor.update(block(10.0, 4.0), true, CELL, halfway);
+		cursor.update(block(10.0, 4.0), true, PIXEL, halfway);
 		// No jump: still halfway along the row, and only starting down
 		let corners = cursor.corners(halfway).unwrap();
 		assert!(close(corners, [[5.0, 0.0], [6.0, 0.0], [6.0, 1.0], [5.0, 1.0]]), "{corners:?}");
@@ -256,8 +263,8 @@ mod tests {
 	#[test]
 	fn a_shape_change_animates_in_place() {
 		let (now, mut cursor) = (Instant::now(), animation(0.5));
-		cursor.update(block(2.0, 0.0), true, CELL, now);
-		cursor.update([2.0, 0.0, 0.2, 1.0], true, CELL, now);
+		cursor.update(block(2.0, 0.0), true, PIXEL, now);
+		cursor.update([2.0, 0.0, 0.2, 1.0], true, PIXEL, now);
 		// A short move: halfway through the short motion, the right edge is on its way from 3 to 2.2, the left one in place.
 		let corners = cursor.corners(now + Duration::from_millis(5)).unwrap();
 		assert!(close(corners, [[2.0, 0.0], [2.6, 0.0], [2.6, 1.0], [2.0, 1.0]]), "{corners:?}");
@@ -265,10 +272,12 @@ mod tests {
 
 	#[test]
 	fn cursor_rects() {
+		// At row 1, column 2 of the window's cells
 		let layer = CellLayer {
 			id: 1,
-			row: 1,
-			col: 2,
+			x: 20,
+			y: 20,
+			cell: CELL,
 			width: 10,
 			height: 5,
 			cells: Vec::new(),
@@ -277,10 +286,10 @@ mod tests {
 			shadow: None,
 		};
 		let cursor = |shape| Cursor { row: 2, col: 3, width: 1, shape, color: 0, text_color: 0, animate: true };
-		assert_eq!(cursor_rect(&layer, cursor(CursorShape::Block), CELL), [5.0, 3.0, 1.0, 1.0]);
+		assert_eq!(cursor_rect(&layer, cursor(CursorShape::Block)), [50.0, 60.0, 10.0, 20.0]);
 		let bar = |orientation, percentage| CursorShape::Bar { orientation, percentage };
 		// 25% of 10 pixels rounds up to 3, as drawn at rest.
-		assert_eq!(cursor_rect(&layer, cursor(bar(BarOrientation::Vertical, 25)), CELL), [5.0, 3.0, 0.3, 1.0]);
-		assert_eq!(cursor_rect(&layer, cursor(bar(BarOrientation::Horizontal, 20)), CELL), [5.0, 3.8, 1.0, 0.2]);
+		assert_eq!(cursor_rect(&layer, cursor(bar(BarOrientation::Vertical, 25))), [50.0, 60.0, 3.0, 20.0]);
+		assert_eq!(cursor_rect(&layer, cursor(bar(BarOrientation::Horizontal, 20))), [50.0, 76.0, 10.0, 4.0]);
 	}
 }

@@ -12,8 +12,8 @@ use crate::scroll::{ScrollAnimations, SlidingRegion};
 use crate::shape::ShapePipeline;
 use crate::text::TextPipeline;
 use crate::{
-	CellLayer, CellSize, Cursor, CursorMotion, CursorShape, Decoration, Fonts, Layer, Motion, RenderCell,
-	RendererConfig, RendererError, TextSize, TextStyle,
+	CellLayer, Cursor, CursorMotion, CursorShape, Decoration, Fonts, Layer, Motion, RenderCell, RendererConfig,
+	RendererError, TextSize, TextStyle,
 };
 
 pub struct Renderer {
@@ -231,14 +231,14 @@ impl Renderer {
 			wgpu::CurrentSurfaceTexture::Validation => return Err(RendererError::SurfaceValidation),
 		};
 
-		let (cell, lines, srgb) = (fonts.cell_size(size), fonts.line_metrics(size), self.config.format.is_srgb());
+		let (lines, srgb) = (fonts.line_metrics(size), self.config.format.is_srgb());
 		let (surface, now) = ((self.config.width, self.config.height), Instant::now());
 		// On its way, the cursor is drawn as its shape, with a block's character only where the shape covers its cell.
-		let moving = self.move_cursor(cell, now);
-		let mut pieces = pieces(&self.layers, &self.scrolls, cell, surface, now);
+		let moving = self.move_cursor(now);
+		let mut pieces = pieces(&self.layers, &self.scrolls, surface, now);
 		if let Some((corners, cursor)) = moving {
 			if let Some(piece) = pieces.last_mut().filter(|piece| piece.kind == PieceKind::Cursor) {
-				piece.clip = covered(piece, corners, cell);
+				piece.clip = covered(piece, corners);
 			}
 			self.shape
 				.prepare(&self.queue, surface.0, surface.1, corners, rgba(cursor.color, srgb));
@@ -252,7 +252,7 @@ impl Renderer {
 		for piece in &pieces {
 			let moving = moving.is_some() && piece.kind == PieceKind::Cursor;
 			self.layer_quads
-				.push(layer_quads(&mut self.frame_quads, piece, &self.text, cell, lines, srgb, moving));
+				.push(layer_quads(&mut self.frame_quads, piece, &self.text, lines, srgb, moving));
 		}
 		self.quads.prepare(
 			&self.device,
@@ -304,36 +304,34 @@ impl Renderer {
 }
 
 impl Renderer {
-	/// Moves the cursor animation on to the layers' cursor, with cells of `cell`, and gives the cursor and its corners
-	/// at `now` (in pixels: top-left, top-right, bottom-right, bottom-left) while it's on its way.
-	fn move_cursor(&mut self, cell: CellSize, now: Instant) -> Option<([[f32; 2]; 4], Cursor)> {
+	/// Moves the cursor animation on to the layers' cursor, and gives the cursor and its corners at `now` (in pixels:
+	/// top-left, top-right, bottom-right, bottom-left) while it's on its way.
+	fn move_cursor(&mut self, now: Instant) -> Option<([[f32; 2]; 4], Cursor)> {
 		let (layer, cursor) = self
 			.layers
 			.iter()
 			.find_map(|Layer::Cells(layer)| Some((layer, layer.cursor?)))?;
-		self.cursor.update(cursor_rect(layer, cursor, cell), cursor.animate, cell, now);
+		self.cursor.update(cursor_rect(layer, cursor), cursor.animate, layer.cell, now);
 		if !self.cursor.is_animating(now) {
 			return None;
 		}
-		let corners = self.cursor.corners(now)?;
-		Some((corners.map(|[x, y]| [x * cell.width as f32, y * cell.height as f32]), cursor))
+		Some((self.cursor.corners(now)?, cursor))
 	}
 }
 
 /// The part of the cursor `piece`, within its clip, that the cursor's shape covers while on its way, with `corners` in
-/// pixels and cells of `cell`
-fn covered(piece: &Piece, corners: [[f32; 2]; 4], cell: CellSize) -> [u32; 4] {
-	let layer = &piece.layer;
+/// pixels
+fn covered(piece: &Piece, corners: [[f32; 2]; 4]) -> [u32; 4] {
 	let [left, top, width, height] = piece.clip;
 	let (mut low, mut high) = ([left, top], [left + width, top + height]);
-	let cells = [[layer.col, layer.row], [layer.col + layer.width, layer.row + layer.height]];
-	let size = [cell.width, cell.height];
+	let [x, y, layer_width, layer_height] = piece.layer.rect();
+	let layer = [[x, y], [x + layer_width, y + layer_height]];
 	for axis in 0..2 {
 		let (least, most) = corners
 			.iter()
 			.fold((f32::MAX, f32::MIN), |(least, most), corner| (least.min(corner[axis]), most.max(corner[axis])));
-		low[axis] = low[axis].max(cells[0][axis] * size[axis]).max(least.floor().max(0.0) as u32);
-		high[axis] = high[axis].min(cells[1][axis] * size[axis]).min(most.ceil().max(0.0) as u32);
+		low[axis] = low[axis].max(layer[0][axis]).max(least.floor().max(0.0) as u32);
+		high[axis] = high[axis].min(layer[1][axis]).min(most.ceil().max(0.0) as u32);
 	}
 	[low[0], low[1], high[0].saturating_sub(low[0]), high[1].saturating_sub(low[1])]
 }
@@ -381,25 +379,18 @@ pub(crate) enum PieceKind {
 }
 
 /// The pieces to draw `layers` at `now`, in order, on a `surface` of width × height pixels
-fn pieces<'a>(
-	layers: &'a [Layer],
-	scrolls: &ScrollAnimations,
-	cell: CellSize,
-	surface: (u32, u32),
-	now: Instant,
-) -> Vec<Piece<'a>> {
-	// Cells to pixels, cut to the surface: a scissor rectangle can't reach outside it
-	let clip = |col: u32, row: u32, width: u32, height: u32| {
-		let (left, top) = ((col * cell.width).min(surface.0), (row * cell.height).min(surface.1));
-		let (right, bottom) =
-			(((col + width) * cell.width).min(surface.0), ((row + height) * cell.height).min(surface.1));
+fn pieces<'a>(layers: &'a [Layer], scrolls: &ScrollAnimations, surface: (u32, u32), now: Instant) -> Vec<Piece<'a>> {
+	// A rectangle in pixels (left, top, width, height), cut to the surface: a scissor rectangle can't reach outside it
+	let clip = |[x, y, width, height]: [u32; 4]| {
+		let (left, top) = (x.min(surface.0), y.min(surface.1));
+		let (right, bottom) = ((x + width).min(surface.0), (y + height).min(surface.1));
 		[left, top, right - left, bottom - top]
 	};
 
 	let mut pieces = Vec::with_capacity(layers.len() + 1);
 	let mut cursor_piece = None;
 	for Layer::Cells(layer) in layers {
-		let whole = clip(layer.col, layer.row, layer.width, layer.height);
+		let whole = clip(layer.rect());
 		let region = scrolls.region(layer, now);
 		// The sliding text is drawn over the layer: where what's under shows through, the layer's own text would too.
 		let see_through = layer.cells.iter().any(|cell| cell.blend > 0);
@@ -410,9 +401,10 @@ fn pieces<'a>(
 		pieces.push(Piece { layer: base, kind: PieceKind::Layer, offset: 0.0, clip: whole });
 
 		if let Some(region) = region {
-			let clip = clip(region.layer.col, region.layer.row, region.layer.width, region.height);
+			let [x, y, width, _] = region.layer.rect();
+			let clip = clip([x, y, width, region.height * layer.cell.height]);
 			// Whole pixels keep the text sharp.
-			let offset = (region.offset * cell.height as f32).round();
+			let offset = (region.offset * layer.cell.height as f32).round();
 			pieces.push(Piece { layer: Cow::Owned(region.layer), kind: PieceKind::Region, offset, clip });
 		}
 
@@ -428,7 +420,7 @@ fn pieces<'a>(
 
 /// `layer` without the text and backgrounds of its `region` that slides, which is drawn over it
 fn without(layer: &CellLayer, region: &SlidingRegion) -> CellLayer {
-	let (top, left) = (region.layer.row - layer.row, region.layer.col - layer.col);
+	let (top, left) = (region.top, region.left);
 	let Some(&first) = layer.cells.first() else { return layer.clone() };
 	let text = ArrayString::from(" ").unwrap_or_default();
 	let blank = RenderCell { text, blend: 100, decoration: Decoration::default(), ..first };
@@ -443,20 +435,11 @@ fn without(layer: &CellLayer, region: &SlidingRegion) -> CellLayer {
 /// The cursor of `layer` as a layer of its own. A block is the cells under it, in the cursor's colors, so its
 /// character stays readable; a bar or an outline is drawn over nothing.
 fn cursor_layer(layer: &CellLayer, cursor: Cursor) -> CellLayer {
-	let (row, col) = (layer.row + cursor.row, layer.col + cursor.col);
-	let empty = CellLayer {
-		row,
-		col,
-		width: 0,
-		height: 0,
-		cells: Vec::new(),
-		cursor: None,
-		scroll: None,
-		shadow: None,
-		..*layer
-	};
+	let (x, y) = (layer.x + cursor.col * layer.cell.width, layer.y + cursor.row * layer.cell.height);
+	let empty =
+		CellLayer { x, y, width: 0, height: 0, cells: Vec::new(), cursor: None, scroll: None, shadow: None, ..*layer };
 	if cursor.shape != CursorShape::Block {
-		return CellLayer { row: layer.row, col: layer.col, cursor: Some(cursor), ..empty };
+		return CellLayer { x: layer.x, y: layer.y, cursor: Some(cursor), ..empty };
 	}
 
 	let start = (cursor.row * layer.width + cursor.col) as usize;
@@ -493,7 +476,6 @@ fn layer_quads(
 	frame: &mut FrameQuads,
 	piece: &Piece,
 	text: &TextPipeline,
-	cell: CellSize,
 	lines: LineMetrics,
 	srgb: bool,
 	moving: bool,
@@ -501,18 +483,18 @@ fn layer_quads(
 	let layer = &piece.layer;
 	let shadow = frame.quads.len();
 	if let Some(layer_shadow) = layer.shadow.as_ref().filter(|_| piece.kind == PieceKind::Layer) {
-		area_shadow(frame, layer_shadow, cell, srgb);
+		area_shadow(frame, layer_shadow, srgb);
 	}
 	let quads = &mut frame.quads;
 	let start = quads.len();
 	// The shape of a cursor on its way stands in for its background or bar.
 	if !moving {
-		cell_backgrounds(quads, layer, cell, srgb);
+		cell_backgrounds(quads, layer, srgb);
 	}
 	let middle = quads.len();
-	cell_decorations(quads, layer, cell, lines, srgb, |row| text.ink(piece, row));
+	cell_decorations(quads, layer, lines, srgb, |row| text.ink(piece, row));
 	if piece.kind == PieceKind::Cursor && !moving {
-		cursor_quad(quads, layer, cell, lines.thickness, srgb);
+		cursor_quad(quads, layer, lines.thickness, srgb);
 	}
 	for quad in &mut quads[start..] {
 		quad.rect[1] += piece.offset;
@@ -566,7 +548,10 @@ mod tests {
 	use crate::scroll::ScrollAnimations;
 	use crate::shape::ShapePipeline;
 	use crate::text::TextPipeline;
-	use crate::{CellLayer, Decoration, Fonts, Layer, RenderCell, RendererConfig, TextSize, TextStyle};
+	use crate::{CellLayer, CellSize, Decoration, Fonts, Layer, RenderCell, RendererConfig, TextSize, TextStyle};
+
+	/// Cells of the bundled font at 14 pixels, which the tests draw with
+	const CELL: CellSize = CellSize { width: 8, height: 19 };
 
 	/// A one-cell layer at the top-left corner showing `text` in white on `background`
 	fn cell(id: u64, text: &str, background: u32) -> Layer {
@@ -580,8 +565,9 @@ mod tests {
 		};
 		Layer::Cells(CellLayer {
 			id,
-			row: 0,
-			col: 0,
+			x: 0,
+			y: 0,
+			cell: CELL,
 			width: 1,
 			height: 1,
 			cells: vec![cell],
@@ -629,16 +615,17 @@ mod tests {
 			let mut fonts = Fonts::new();
 			let size = TextSize::new(14.0);
 			let (cell, lines) = (fonts.cell_size(size), fonts.line_metrics(size));
+			assert_eq!(cell, CELL, "the layers' cells are the font's");
 			let mut text = TextPipeline::new(device, queue, format);
 			let scrolls = ScrollAnimations::new(RendererConfig::default().scroll);
-			let pieces = pieces(layers, &scrolls, cell, (width, height), Instant::now());
+			let pieces = pieces(layers, &scrolls, (width, height), Instant::now());
 			let resolution = glyphon::Resolution { width, height };
 			text.prepare(device, queue, resolution, &mut fonts, &pieces, size).unwrap();
 
 			let mut frame = FrameQuads::default();
 			let ranges: Vec<_> = pieces
 				.iter()
-				.map(|piece| layer_quads(&mut frame, piece, &text, cell, lines, false, false))
+				.map(|piece| layer_quads(&mut frame, piece, &text, lines, false, false))
 				.chain(shape.map(|_| super::LayerQuads {
 					shadow: 0..0,
 					under_text: 0..0,
@@ -730,22 +717,21 @@ mod tests {
 	#[test]
 	fn the_cursor_is_a_piece_over_its_layer() {
 		let layer = with_cursor(cell(1, "a", 0x000000), crate::CursorShape::Block);
-		let cell_size = crate::CellSize { width: 8, height: 19 };
 		let scrolls = ScrollAnimations::new(RendererConfig::default().scroll);
-		let pieces = pieces(std::slice::from_ref(&layer), &scrolls, cell_size, (64, 19), Instant::now());
+		let pieces = pieces(std::slice::from_ref(&layer), &scrolls, (64, 19), Instant::now());
 
 		let kinds: Vec<_> = pieces.iter().map(|piece| piece.kind).collect();
 		assert_eq!(kinds, [PieceKind::Layer, PieceKind::Cursor]);
 		// A block: the cell under it, in the cursor's colors, where Neovim put it
 		let cursor = &pieces[1].layer;
-		assert_eq!((cursor.row, cursor.col, cursor.width, cursor.height, pieces[1].offset), (0, 0, 1, 1, 0.0));
+		assert_eq!((cursor.x, cursor.y, cursor.width, cursor.height, pieces[1].offset), (0, 0, 1, 1, 0.0));
 		assert_eq!((cursor.cells[0].text.as_str(), cursor.cells[0].background), ("a", 0xFF0000));
 		assert_eq!(cursor.cells[0].style.foreground, 0xFFFFFF);
 
 		// A bar: drawn as a quad, over no cells
 		let bar = crate::CursorShape::Bar { orientation: crate::BarOrientation::Vertical, percentage: 25 };
 		let layer = with_cursor(cell(1, "a", 0x000000), bar);
-		let drawn = super::pieces(std::slice::from_ref(&layer), &scrolls, cell_size, (64, 19), Instant::now());
+		let drawn = super::pieces(std::slice::from_ref(&layer), &scrolls, (64, 19), Instant::now());
 		assert_eq!((drawn[1].layer.cells.len(), drawn[1].layer.cursor.is_some()), (0, true));
 	}
 
@@ -791,8 +777,9 @@ mod tests {
 		let shadow = crate::Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
 		let Layer::Cells(mut clear) = cell(1, " ", 0xFFFFFF);
 		clear.cells[0].blend = 100;
-		let shadow = crate::LayerShadow { shadow, area: vec![[3, 0, 1, 1]] };
-		let layer = Layer::Cells(CellLayer { col: 3, shadow: Some(shadow), ..clear });
+		let area = vec![[3 * CELL.width, 0, CELL.width, CELL.height]];
+		let shadow = crate::LayerShadow { shadow, area };
+		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, shadow: Some(shadow), ..clear });
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");
 			return;
@@ -809,8 +796,9 @@ mod tests {
 		// A white cell at column 3, with a red shadow, on black
 		let shadow = crate::Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
 		let Layer::Cells(white) = cell(1, " ", 0xFFFFFF);
-		let shadow = crate::LayerShadow { shadow, area: vec![[3, 0, 1, 1]] };
-		let layer = Layer::Cells(CellLayer { col: 3, shadow: Some(shadow), ..white });
+		let area = vec![[3 * CELL.width, 0, CELL.width, CELL.height]];
+		let shadow = crate::LayerShadow { shadow, area };
+		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, shadow: Some(shadow), ..white });
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");
 			return;
@@ -832,10 +820,9 @@ mod tests {
 	#[test]
 	fn the_cursor_is_drawn_over_every_layer() {
 		let lower = with_cursor(cell(1, "a", 0x000000), crate::CursorShape::Block);
-		let cell_size = crate::CellSize { width: 8, height: 19 };
 		let scrolls = ScrollAnimations::new(RendererConfig::default().scroll);
 		let layers = [lower, cell(2, "b", 0x000000)];
-		let pieces = pieces(&layers, &scrolls, cell_size, (64, 19), Instant::now());
+		let pieces = pieces(&layers, &scrolls, (64, 19), Instant::now());
 		let kinds: Vec<_> = pieces.iter().map(|piece| (piece.layer.id, piece.kind)).collect();
 		assert_eq!(kinds, [(1, PieceKind::Layer), (2, PieceKind::Layer), (1, PieceKind::Cursor)]);
 	}
@@ -843,17 +830,16 @@ mod tests {
 	#[test]
 	fn a_moving_block_shows_its_character_where_its_shape_covers_it() {
 		let layer = with_cursor(cell(1, "a", 0x000000), crate::CursorShape::Block);
-		let cell_size = crate::CellSize { width: 8, height: 19 };
 		let scrolls = ScrollAnimations::new(RendererConfig::default().scroll);
-		let pieces = pieces(std::slice::from_ref(&layer), &scrolls, cell_size, (64, 19), Instant::now());
+		let pieces = pieces(std::slice::from_ref(&layer), &scrolls, (64, 19), Instant::now());
 		let cursor = &pieces[1];
 
 		// The shape reaches halfway into the cell from the right: the right half shows.
 		let arriving = [[4.0, 0.0], [30.0, 0.0], [30.0, 19.0], [4.0, 19.0]];
-		assert_eq!(super::covered(cursor, arriving, cell_size), [4, 0, 4, 19]);
+		assert_eq!(super::covered(cursor, arriving), [4, 0, 4, 19]);
 		// Not there yet: nothing shows.
 		let away = [[20.0, 0.0], [30.0, 0.0], [30.0, 19.0], [20.0, 19.0]];
-		assert_eq!(super::covered(cursor, away, cell_size)[2], 0);
+		assert_eq!(super::covered(cursor, away)[2], 0);
 	}
 
 	#[test]
@@ -908,15 +894,14 @@ mod tests {
 		let now = Instant::now();
 		scrolls.update(std::slice::from_ref(&shown), std::slice::from_ref(&scrolled), now);
 
-		let cell_size = crate::CellSize { width: 8, height: 19 };
 		let later = now + std::time::Duration::from_millis(50);
-		let drawn = pieces(std::slice::from_ref(&scrolled), &scrolls, cell_size, (8, 57), later);
+		let drawn = pieces(std::slice::from_ref(&scrolled), &scrolls, (8, 57), later);
 		let kinds: Vec<_> = drawn.iter().map(|piece| piece.kind).collect();
 		assert_eq!(kinds, [PieceKind::Layer, PieceKind::Region, PieceKind::Cursor]);
 		// The text is still sliding, but the cursor is on the last row, on "d", where Neovim put it.
 		assert!(drawn[1].offset != 0.0, "{}", drawn[1].offset);
 		assert_eq!(drawn[2].offset, 0.0);
-		assert_eq!((drawn[2].layer.row, drawn[2].layer.cells[0].text.as_str()), (2, "d"));
+		assert_eq!((drawn[2].layer.y, drawn[2].layer.cells[0].text.as_str()), (2 * CELL.height, "d"));
 	}
 
 	#[test]
@@ -929,13 +914,12 @@ mod tests {
 			let scroll = scroll.then_some(crate::Scroll { rows: 1, top: 1, bottom: 3, left: 0, right: 1 });
 			Layer::Cells(CellLayer { height: 3, cells: cells.collect(), scroll, ..top })
 		};
-		let cell_size = crate::CellSize { width: 8, height: 19 };
 		let layer_text = |blend: u8| {
 			let (shown, scrolled) = (column(["x", "b", "c"], false, blend), column(["x", "c", "d"], true, blend));
 			let (mut scrolls, now) = (ScrollAnimations::new(RendererConfig::default().scroll), Instant::now());
 			scrolls.update(std::slice::from_ref(&shown), std::slice::from_ref(&scrolled), now);
 			let later = now + std::time::Duration::from_millis(50);
-			let drawn = pieces(std::slice::from_ref(&scrolled), &scrolls, cell_size, (8, 57), later);
+			let drawn = pieces(std::slice::from_ref(&scrolled), &scrolls, (8, 57), later);
 			assert_eq!(drawn[1].kind, PieceKind::Region);
 			drawn[0]
 				.layer

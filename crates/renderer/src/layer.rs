@@ -1,21 +1,27 @@
 use arrayvec::ArrayString;
 
+use crate::CellSize;
+
 /// Something to draw in a window. Layers are drawn in order, so later ones cover earlier ones.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Layer {
 	Cells(CellLayer),
 }
 
-/// A block of cells at a cell position, e.g. one of Neovim's grids
+/// A block of cells at a position in the window, e.g. one of Neovim's grids, each cell `cell` large
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellLayer {
 	/// Identifies the layer across frames, so unchanged rows aren't laid out again
 	pub id: u64,
 
-	/// Position of the top-left cell, in cells from the window's top-left corner
-	pub row: u32,
-	pub col: u32,
+	/// Position of the top-left cell, in pixels from the window's top-left corner
+	pub x: u32,
+	pub y: u32,
 
+	/// Size of each cell, in pixels: a layer's text is laid out in cells of this size
+	pub cell: CellSize,
+
+	/// Size in cells
 	pub width: u32,
 	pub height: u32,
 
@@ -33,12 +39,19 @@ pub struct CellLayer {
 	pub shadow: Option<LayerShadow>,
 }
 
+impl CellLayer {
+	/// The layer's rectangle, in pixels from the window's top-left corner: left, top, width, height
+	pub fn rect(&self) -> [u32; 4] {
+		[self.x, self.y, self.width * self.cell.width, self.height * self.cell.height]
+	}
+}
+
 /// A shadow under an area of the window, made of rectangles that may overlap
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayerShadow {
 	pub shadow: Shadow,
 
-	/// Rectangles in cells from the window's top-left corner: column, row, width, height
+	/// Rectangles in pixels from the window's top-left corner: left, top, width, height
 	pub area: Vec<[u32; 4]>,
 }
 

@@ -255,12 +255,13 @@ fn instance_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
 
 /// Adds a quad for each run of cells in `layer` with the same background. Default backgrounds are drawn too, so a
 /// layer covers whatever is below it.
-pub(crate) fn cell_backgrounds(quads: &mut Vec<Quad>, layer: &CellLayer, cell: CellSize, srgb_surface: bool) {
-	let (width, height) = (cell.width as f32, cell.height as f32);
+pub(crate) fn cell_backgrounds(quads: &mut Vec<Quad>, layer: &CellLayer, srgb_surface: bool) {
+	let (width, height) = (layer.cell.width as f32, layer.cell.height as f32);
+	let (left, top) = (layer.x as f32, layer.y as f32);
 
-	for (row, cells) in (layer.row..).zip(layer.cells.chunks_exact((layer.width as usize).max(1))) {
+	for (row, cells) in (0..).zip(layer.cells.chunks_exact((layer.width as usize).max(1))) {
 		for (col, len, color, blend) in background_runs(cells) {
-			let rect = [(layer.col + col) as f32 * width, row as f32 * height, len as f32 * width, height];
+			let rect = [left + col as f32 * width, top + row as f32 * height, len as f32 * width, height];
 			let [r, g, b, _] = rgba(color, srgb_surface);
 			// What's under it shows through by `blend`, like in Neovim's own compositor, where the cell is blank.
 			let opacity = 1.0 - f32::from(blend.min(100)) / 100.0;
@@ -277,20 +278,20 @@ pub(crate) fn cell_backgrounds(quads: &mut Vec<Quad>, layer: &CellLayer, cell: C
 pub(crate) fn cell_decorations<'a>(
 	quads: &mut Vec<Quad>,
 	layer: &CellLayer,
-	cell: CellSize,
 	lines: LineMetrics,
 	srgb_surface: bool,
 	ink: impl Fn(usize) -> &'a [Range<f32>],
 ) {
+	let cell = layer.cell;
 	let rows = layer.cells.chunks_exact((layer.width as usize).max(1));
-	for (index, (row, cells)) in (layer.row..).zip(rows).enumerate() {
+	for (row, cells) in (0..).zip(rows) {
 		// In surface pixels, like the quads
-		let left = (layer.col * cell.width) as f32;
-		let gaps: Vec<Range<f32>> = ink(index).iter().map(|gap| gap.start + left..gap.end + left).collect();
+		let (left, top) = (layer.x as f32, (layer.y + row * cell.height) as f32);
+		let gaps: Vec<Range<f32>> = ink(row as usize).iter().map(|gap| gap.start + left..gap.end + left).collect();
 
-		let mut col = layer.col;
+		let mut col = 0;
 		for run in cells.chunk_by(|a, b| (a.decoration, a.style.foreground) == (b.decoration, b.style.foreground)) {
-			let rect = [(col * cell.width) as f32, (row * cell.height) as f32, (run.len() as u32 * cell.width) as f32];
+			let rect = [left + (col * cell.width) as f32, top, (run.len() as u32 * cell.width) as f32];
 			decoration_quads(quads, &run[0], rect, cell, lines, &gaps, srgb_surface);
 			col += run.len() as u32;
 		}
@@ -392,15 +393,10 @@ fn cut(quads: &mut Vec<Quad>, start: usize, gaps: &[Range<f32>]) {
 
 /// Adds a quad for the cursor of `layer`, if it's a bar or an outline, `thickness` pixels thick for an outline. A block
 /// cursor is drawn as the cells under it (see `cursor_layer` in the renderer).
-pub(crate) fn cursor_quad(
-	quads: &mut Vec<Quad>,
-	layer: &CellLayer,
-	cell: CellSize,
-	thickness: f32,
-	srgb_surface: bool,
-) {
+pub(crate) fn cursor_quad(quads: &mut Vec<Quad>, layer: &CellLayer, thickness: f32, srgb_surface: bool) {
 	let Some(cursor) = layer.cursor else { return };
-	let (left, top) = ((layer.col + cursor.col) * cell.width, (layer.row + cursor.row) * cell.height);
+	let cell = layer.cell;
+	let (left, top) = (layer.x + cursor.col * cell.width, layer.y + cursor.row * cell.height);
 	let (orientation, percentage) = match cursor.shape {
 		CursorShape::Block => return,
 		CursorShape::Bar { orientation, percentage } => (orientation, percentage),
@@ -424,18 +420,15 @@ pub(crate) fn cursor_quad(
 	quads.push(Quad::fill(rect.map(|value| value as f32), rgba(cursor.color, srgb_surface)));
 }
 
-/// Adds the quads of `shadow`, with cells of `cell`. Its area is first cut into rectangles that don't overlap: a blur
+/// Adds the quads of `shadow`. Its area is first cut into rectangles that don't overlap: a blur
 /// is linear, so the shadow of their union is the sum of theirs, and where the area's rectangles overlap (a window and
 /// its border, say) the shadow isn't drawn twice. Blending the pieces instead of summing them differs by well under 1%.
 ///
 /// Like CSS's `box-shadow`, the shadow is only drawn outside the area: under a see-through window, it would darken it.
 /// The area's pieces are added to the frame's holes, which the shadow's quads leave out.
-pub(crate) fn area_shadow(frame: &mut FrameQuads, shadow: &LayerShadow, cell: CellSize, srgb_surface: bool) {
+pub(crate) fn area_shadow(frame: &mut FrameQuads, shadow: &LayerShadow, srgb_surface: bool) {
 	let pieces: Vec<[f32; 4]> = disjoint(&shadow.area)
 		.into_iter()
-		.map(|[col, row, width, height]| {
-			[col * cell.width, row * cell.height, width * cell.width, height * cell.height]
-		})
 		.map(|rect| rect.map(|value| value as f32))
 		.collect();
 	let range = [frame.holes.len() as u32, pieces.len() as u32];
@@ -543,14 +536,15 @@ mod tests {
 		assert_eq!(background_runs(&row).collect::<Vec<_>>(), [(0, 1, 1, 0), (1, 2, 2, 0), (3, 1, 1, 0)]);
 	}
 
-	/// Rectangles of a bar cursor at (row 2, col 3) of a layer placed at (row 1, col 1), with 8×19 px cells
+	/// Rectangles of a bar cursor at (row 2, col 3) of a layer placed at (row 1, col 1) of 8×19 px cells
 	fn bar_rect(orientation: BarOrientation, width: u32, percentage: u32) -> [f32; 4] {
 		let shape = CursorShape::Bar { orientation, percentage };
 		let cursor = Cursor { row: 2, col: 3, width, shape, color: 0xFFFFFF, text_color: 0, animate: true };
 		let layer = CellLayer {
 			id: 1,
-			row: 1,
-			col: 1,
+			x: 8,
+			y: 19,
+			cell: CellSize { width: 8, height: 19 },
 			width: 10,
 			height: 5,
 			cells: Vec::new(),
@@ -559,7 +553,7 @@ mod tests {
 			shadow: None,
 		};
 		let mut quads = Vec::new();
-		cursor_quad(&mut quads, &layer, CellSize { width: 8, height: 19 }, 1.0, false);
+		cursor_quad(&mut quads, &layer, 1.0, false);
 		quads[0].rect
 	}
 
@@ -578,8 +572,19 @@ mod tests {
 		for cell in &mut cells[2..5] {
 			cell.decoration = decoration;
 		}
-		let layer =
-			CellLayer { id: 1, row: 1, col: 0, width: 6, height: 1, cells, cursor: None, scroll: None, shadow: None };
+		let cell = CellSize { width: 8, height: 19 };
+		let layer = CellLayer {
+			id: 1,
+			x: 0,
+			y: 19,
+			cell,
+			width: 6,
+			height: 1,
+			cells,
+			cursor: None,
+			scroll: None,
+			shadow: None,
+		};
 		let lines = LineMetrics {
 			underline_top: 17.0,
 			thickness: 1.0,
@@ -589,7 +594,7 @@ mod tests {
 			strikeout_thickness: 1.0,
 		};
 		let mut quads = Vec::new();
-		cell_decorations(&mut quads, &layer, CellSize { width: 8, height: 19 }, lines, false, |_| &[]);
+		cell_decorations(&mut quads, &layer, lines, false, |_| &[]);
 		quads
 	}
 

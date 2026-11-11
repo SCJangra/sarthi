@@ -144,6 +144,7 @@ impl App {
 		blur.set(self.settings.window.blur);
 		self.window = Some(WindowState { clipboard, blur, window: window.clone(), renderer });
 		self.update_shadow();
+		self.update_cell_size();
 		Ok(window)
 	}
 
@@ -178,6 +179,15 @@ impl App {
 	/// Number of grid cells that fit in `window`
 	fn grid_size(&self, window: &Window) -> GridSize {
 		GridSize::fit(window.inner_size(), self.cell_size(window))
+	}
+
+	/// Tells the editor the size of the window's cells, which places its layers: after the fonts, line space or scale
+	/// changed
+	fn update_cell_size(&mut self) {
+		if let Some(state) = &self.window {
+			let cell = self.cell_size(&state.window);
+			self.editor.set_cell_size(cell);
+		}
 	}
 
 	fn attach_ui(&mut self, window: &Window) -> Result<(), Error> {
@@ -267,13 +277,16 @@ impl App {
 		if fonts_changed {
 			self.apply_guifont();
 		}
-		// Either can change the cell size, so how many cells fit in the window.
+		// Either can change the cell size, so how many cells fit in the window, and where the layers go.
+		let mut redraw = redraw;
 		if fonts_changed || self.editor.linespace() != self.linespace {
 			self.linespace = self.editor.linespace();
 			let window = self.window.as_ref().map(|state| state.window.clone());
 			if let Some(Err(error)) = window.map(|window| self.resize_nvim_ui(&window)) {
 				tracing::warn!("Couldn't resize Neovim's grid to the new cell size: {error}");
 			}
+			self.update_cell_size();
+			redraw = self.editor.refresh().unwrap_or(redraw);
 		}
 
 		self.show(redraw);
@@ -483,6 +496,7 @@ impl ApplicationHandler<AppEvent> for App {
 			WindowEvent::ScaleFactorChanged { .. } => {
 				self.resize_renderer();
 				self.update_shadow();
+				self.update_cell_size();
 				self.refresh();
 				if let Err(error) = self.resize_nvim_ui(&window) {
 					self.exit_with_error(event_loop, error);

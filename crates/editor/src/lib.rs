@@ -7,7 +7,7 @@ pub mod highlight;
 
 use std::collections::{HashMap, HashSet};
 
-use renderer::{CellLayer, Decoration, Layer, LayerShadow, RenderCell, Scroll, Shadow};
+use renderer::{CellLayer, CellSize, Decoration, Layer, LayerShadow, RenderCell, Scroll, Shadow};
 use rpc::neovim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification, Window};
 
 use crate::compositor::cell_layer;
@@ -58,6 +58,9 @@ pub struct Editor {
 
 	/// Whether Neovim wants mouse moves without a button held (the `mousemoveevent` option)
 	mouse_move_events: bool,
+
+	/// Size of the screen's cells, in pixels, which places the layers in the window
+	cell: CellSize,
 
 	/// Whether anything changed since the last `flush`, so it's drawn on the next one
 	stale: bool,
@@ -165,8 +168,16 @@ impl Editor {
 			linespace: 0,
 			mouse: false,
 			mouse_move_events: false,
+			// Until set, a cell is a pixel.
+			cell: CellSize { width: 1, height: 1 },
 			stale: false,
 		}
+	}
+
+	/// Sets the size of the screen's cells, in pixels: what the text is drawn with
+	pub fn set_cell_size(&mut self, cell: CellSize) {
+		self.stale |= self.cell != cell;
+		self.cell = cell;
 	}
 
 	/// Neovim's default background, as `0xRRGGBB`
@@ -556,12 +567,12 @@ impl Editor {
 
 		let mut layers = Vec::with_capacity(placed.len() + 2);
 		if self.grids.contains_key(&1) {
-			layers.push(self.see_through_cells(self.layer(1, 0, 0), &under_windows));
+			layers.push(self.see_through_cells(self.layer(1, 0, 0), (0, 0), &under_windows));
 		}
 		for (id, placement) in placed {
 			match placement {
 				Placement::Tiled { row, col } => {
-					layers.push(self.see_through_cells(self.layer(id, *row, *col), &messages))
+					layers.push(self.see_through_cells(self.layer(id, *row, *col), (*row, *col), &messages))
 				},
 				Placement::Float { row, col, .. } => {
 					let mut layer = self.layer(id, *row, *col);
@@ -576,7 +587,7 @@ impl Editor {
 					let mut layer = self.layer(id, *row, 0);
 					// The message grid is as tall as the screen; only its rows from `row` down show.
 					clip_rows(&mut layer, screen_height.saturating_sub(*row));
-					layers.push(self.see_through_cells(layer, &[]));
+					layers.push(self.see_through_cells(layer, (*row, 0), &[]));
 				},
 				Placement::Hidden => (),
 			}
@@ -590,8 +601,9 @@ impl Editor {
 	///
 	/// Its cells under `covered` (column, row, width, height in cells of the screen), what other grids show over it, are
 	/// left blank then: like in Neovim's own compositor, a screen cell shows only its top grid. Neovim leaves old
-	/// separators and status lines in grid 1 under the windows, which opaque windows hide.
-	fn see_through_cells(&self, mut layer: Layer, covered: &[[u32; 4]]) -> Layer {
+	/// separators and status lines in grid 1 under the windows, which opaque windows hide. The layer is at `origin`, a
+	/// row and column of the screen.
+	fn see_through_cells(&self, mut layer: Layer, origin: (u32, u32), covered: &[[u32; 4]]) -> Layer {
 		if !self.see_through {
 			return layer;
 		}
@@ -601,12 +613,12 @@ impl Editor {
 		}
 
 		let blank = CellText::from(" ").expect("a space fits in a cell");
-		let (width, height) = (cells.width, cells.height);
+		let (width, height, (origin_row, origin_col)) = (cells.width, cells.height, origin);
 		for &[col, row, cover_width, cover_height] in covered {
 			// In the layer's cells
-			let (left, top) = (col.saturating_sub(cells.col).min(width), row.saturating_sub(cells.row));
-			let right = (col + cover_width).saturating_sub(cells.col).clamp(left, width);
-			let bottom = (row + cover_height).saturating_sub(cells.row).min(height);
+			let (left, top) = (col.saturating_sub(origin_col).min(width), row.saturating_sub(origin_row));
+			let right = (col + cover_width).saturating_sub(origin_col).clamp(left, width);
+			let bottom = (row + cover_height).saturating_sub(origin_row).min(height);
 			for layer_row in top..bottom {
 				let start = layer_row * width;
 				for cell in &mut cells.cells[(start + left) as usize..(start + right) as usize] {
@@ -651,18 +663,19 @@ impl Editor {
 				.entry(level(win))
 				.or_insert_with(|| (id, LayerShadow { shadow, area: Vec::new() }));
 			if self.floats.get(&win).is_none_or(|float| float.casts) {
-				let grid = &self.grids[&id];
-				group.area.push([col, row, grid.width as u32, grid.height as u32]);
+				let (grid, cell) = (&self.grids[&id], self.cell);
+				let [width, height] = [grid.width as u32 * cell.width, grid.height as u32 * cell.height];
+				group.area.push([col * cell.width, row * cell.height, width, height]);
 			}
 		}
 		groups.into_values().filter(|(_, group)| !group.area.is_empty()).collect()
 	}
 
-	/// Grid `id` as a layer at `row`, `col`, with the cursor if it's in this grid
+	/// Grid `id` as a layer at `row`, `col` of the screen, with the cursor if it's in this grid
 	fn layer(&self, id: u32, row: u32, col: u32) -> Layer {
 		let cursor = (id == self.cursor_grid).then(|| self.cursor.style()).flatten();
-		let mut layer = cell_layer(id, &self.grids[&id], &self.highlights, cursor);
-		(layer.row, layer.col) = (row, col);
+		let mut layer = cell_layer(id, &self.grids[&id], &self.highlights, cursor, self.cell);
+		(layer.x, layer.y) = (col * self.cell.width, row * self.cell.height);
 		layer.scroll = self.scroll(id, layer.width, layer.height);
 		Layer::Cells(layer)
 	}
@@ -692,9 +705,9 @@ impl Editor {
 		let hl_id = Some(self.highlights.group("MsgSeparator"));
 		line.set_line(0, 0, &[NvimGridCell { text: separator, hl_id, repeat: Some(width as u32) }]);
 
-		let mut layer = cell_layer(0, &line, &self.highlights, None);
+		let mut layer = cell_layer(0, &line, &self.highlights, None, self.cell);
 		// An id no grid has: Neovim's grid ids are 32-bit.
-		(layer.id, layer.row) = (u64::from(u32::MAX) + 1, row);
+		(layer.id, layer.y) = (u64::from(u32::MAX) + 1, row * self.cell.height);
 		Layer::Cells(layer)
 	}
 }
@@ -714,7 +727,7 @@ fn clip_rows(layer: &mut Layer, height: u32) {
 
 #[cfg(test)]
 mod tests {
-	use renderer::{CellLayer, Cursor, CursorShape, Layer, Shadow};
+	use renderer::{CellLayer, CellSize, Cursor, CursorShape, Layer, Shadow};
 	use rpc::neovim::{
 		CellText, DefaultColorsSetEvent, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
 		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, OptionSetEvent, OptionValue,
@@ -727,6 +740,7 @@ mod tests {
 
 	const FG: u32 = 0xC7C7C7;
 	const BG: u32 = 0x1C1C1C;
+	const CELL: CellSize = CellSize { width: 8, height: 16 };
 
 	fn resize(grid: u32, width: u32, height: u32) -> RedrawNotification {
 		RedrawNotification::GridResize(vec![GridResizeEvent { grid, width, height }])
@@ -842,12 +856,12 @@ mod tests {
 		RedrawNotification::MsgSetPos(vec![MsgSetPosEvent { grid: 3, row, scrolled, sep_char, zindex: 200, compindex }])
 	}
 
-	/// Where each layer of `redraw` is: (id, row, col, height)
+	/// Where each layer of `redraw` is, in cells of the screen: (id, row, col, height)
 	fn placement(redraw: &Redraw) -> Vec<(u64, u32, u32, u32)> {
 		redraw
 			.layers
 			.iter()
-			.map(|Layer::Cells(layer)| (layer.id, layer.row, layer.col, layer.height))
+			.map(|Layer::Cells(layer)| (layer.id, layer.y / CELL.height, layer.x / CELL.width, layer.height))
 			.collect()
 	}
 
@@ -856,9 +870,10 @@ mod tests {
 		editor.apply(events).expect("something changed")
 	}
 
-	/// An editor with a 10×5 screen (grid 1) and a 4×3 window grid 2 that isn't placed yet
+	/// An editor with a 10×5 screen (grid 1) of [`CELL`]s and a 4×3 window grid 2 that isn't placed yet
 	fn screen() -> Editor {
 		let mut editor = Editor::new();
+		editor.set_cell_size(CELL);
 		editor.apply(vec![colors(), resize(1, 10, 5), resize(2, 4, 3)]);
 		editor
 	}
@@ -1084,6 +1099,22 @@ mod tests {
 	}
 
 	#[test]
+	fn layers_are_placed_in_pixels() {
+		let mut editor = screen();
+		let redraw = flush(&mut editor, vec![win_pos(2, 1, 6)]);
+		let Layer::Cells(window) = &redraw.layers[1];
+		assert_eq!((window.x, window.y, window.cell), (6 * 8, 16, CELL));
+
+		// A new cell size moves and resizes them.
+		let cell = CellSize { width: 10, height: 20 };
+		editor.set_cell_size(cell);
+		let redraw = editor.refresh().expect("the cell size changed");
+		let Layer::Cells(window) = &redraw.layers[1];
+		assert_eq!((window.x, window.y, window.cell), (60, 20, cell));
+		assert_eq!(editor.refresh(), None, "nothing changed since");
+	}
+
+	#[test]
 	fn floating_windows_have_the_shadow() {
 		let shadow = Shadow { blur: 8.0, offset: [0.0, 2.0], color: 0, opacity: 0.5 };
 		let mut editor = screen();
@@ -1141,10 +1172,16 @@ mod tests {
 		assert_eq!(shadow_of(&redraw, 6), Some(vec![[2, 0, 2, 1]]));
 	}
 
-	/// The area of the shadow drawn with grid `id`'s layer in `redraw`
+	/// The area of the shadow drawn with grid `id`'s layer in `redraw`, in cells of the screen
 	fn shadow_of(redraw: &Redraw, id: u64) -> Option<Vec<[u32; 4]>> {
 		let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
-		layer.shadow.as_ref().map(|shadow| shadow.area.clone())
+		let cells = |[x, y, width, height]: [u32; 4]| {
+			[x / CELL.width, y / CELL.height, width / CELL.width, height / CELL.height]
+		};
+		layer
+			.shadow
+			.as_ref()
+			.map(|shadow| shadow.area.iter().copied().map(cells).collect())
 	}
 
 	#[test]

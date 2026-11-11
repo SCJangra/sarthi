@@ -26,6 +26,10 @@ pub(crate) struct SlidingRegion {
 
 	/// The region's height in rows. What's drawn of `layer` outside it is cut off.
 	pub height: u32,
+
+	/// Where the region starts in its layer, in cells
+	pub top: u32,
+	pub left: u32,
 }
 
 /// Text of a layer sliding to its place
@@ -170,8 +174,9 @@ impl Animation {
 		// The cursor doesn't slide: it's drawn where Neovim put it, over the region.
 		let region_layer = CellLayer {
 			id: layer.id,
-			row: layer.row + region.top,
-			col: layer.col + region.left,
+			x: layer.x + region.left * layer.cell.width,
+			y: layer.y + region.top * layer.cell.height,
+			cell: layer.cell,
 			width,
 			height: cells.len() as u32 / width,
 			cells,
@@ -179,7 +184,8 @@ impl Animation {
 			scroll: None,
 			shadow: None,
 		};
-		SlidingRegion { layer: region_layer, offset: first as f32 + offset, height: self.height() as u32 }
+		let (offset, height) = (first as f32 + offset, self.height() as u32);
+		SlidingRegion { layer: region_layer, offset, height, top: region.top, left: region.left }
 	}
 }
 
@@ -212,9 +218,12 @@ mod tests {
 
 	use super::ScrollAnimations;
 	use crate::animation::{Easing, Motion};
-	use crate::{BarOrientation, CellLayer, Cursor, CursorShape, Decoration, Layer, RenderCell, Scroll, TextStyle};
+	use crate::{
+		BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, Layer, RenderCell, Scroll, TextStyle,
+	};
 
 	const DURATION: Duration = Duration::from_millis(150);
+	const CELL: CellSize = CellSize { width: 8, height: 16 };
 
 	/// Animations that ease out over [`DURATION`]
 	fn animations() -> ScrollAnimations {
@@ -239,8 +248,9 @@ mod tests {
 		let scroll = (scroll != 0).then_some(Scroll { rows: scroll, top, bottom, left: 0, right: width });
 		Layer::Cells(CellLayer {
 			id: 1,
-			row: 0,
-			col: 0,
+			x: 0,
+			y: 0,
+			cell: CELL,
 			width,
 			height: rows.len() as u32,
 			cells,
@@ -350,7 +360,7 @@ mod tests {
 
 		let Layer::Cells(cells) = &scrolled;
 		let region = scrolls.region(cells, now).unwrap();
-		assert_eq!((region.layer.row, region.layer.height, region.height), (1, 4, 3));
+		assert_eq!((region.top, region.layer.y, region.layer.height, region.height), (1, 16, 4, 3));
 		// The cursor doesn't slide with the text: it's drawn where Neovim put it, over the region.
 		assert_eq!(region.layer.cursor, None);
 	}
