@@ -93,7 +93,9 @@ fn style(settings: &Settings, options: &WindowOptions, filetype: &str, winblend:
 	});
 	let corners = settings.corners.with(&options.corners);
 	let corners = shows(options.corners.enabled, corners.enabled, &corners.exclude_filetypes).then_some(corners.radius);
-	FloatStyle { shadow, outline, corners, parent: None }
+	let padding = settings.padding.with(&options.padding);
+	let padding = shows(options.padding.enabled, padding.enabled, &padding.exclude_filetypes).then_some(padding.size);
+	FloatStyle { shadow, outline, corners, padding, parent: None }
 }
 
 /// How the renderer draws underlines, in logical pixels
@@ -112,8 +114,8 @@ mod tests {
 	use renderer::Motion;
 	use rpc::neovim::Window;
 	use rpc::sarthi::{
-		Animation, CornerOptions, FloatWindow, OutlineOptions, ScrollOptions, ScrolledWindow, Settings, ShadowOptions,
-		WindowOptions, WindowVariable,
+		Animation, CornerOptions, FloatWindow, OutlineOptions, PaddingOptions, ScrollOptions, ScrolledWindow, Settings,
+		ShadowOptions, WindowOptions, WindowVariable,
 	};
 	use serde::de::IgnoredAny;
 
@@ -209,6 +211,25 @@ mod tests {
 		assert_eq!(super::float_style(&settings, &float("satellite"), &radius).corners, None);
 		let off = corners(CornerOptions { enabled: Some(false), ..Default::default() });
 		assert_eq!(super::float_style(&settings, &float("lua"), &off).corners, None);
+	}
+
+	#[test]
+	fn padding() {
+		let mut settings = Settings::default();
+		let padding = |options: PaddingOptions| WindowOptions { padding: options, ..Default::default() };
+		let none = WindowOptions::default();
+		// None by default, unless the window says so, at the settings' size or its own
+		assert_eq!(super::float_style(&settings, &float("lua"), &none).padding, None);
+		let on = padding(PaddingOptions { enabled: Some(true), ..Default::default() });
+		assert_eq!(super::float_style(&settings, &float("lua"), &on).padding, Some(4.0));
+
+		settings.padding.enabled = true;
+		settings.padding.exclude_filetypes = vec![String::from("satellite")];
+		let size = padding(PaddingOptions { size: Some(2.0), ..Default::default() });
+		assert_eq!(super::float_style(&settings, &float("lua"), &size).padding, Some(2.0));
+		assert_eq!(super::float_style(&settings, &float("satellite"), &size).padding, None);
+		let off = padding(PaddingOptions { enabled: Some(false), ..Default::default() });
+		assert_eq!(super::float_style(&settings, &float("lua"), &off).padding, None);
 	}
 
 	#[test]

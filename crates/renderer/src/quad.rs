@@ -432,11 +432,23 @@ pub(crate) fn cursor_quad(quads: &mut Vec<Quad>, layer: &CellLayer, thickness: f
 	quads.push(Quad::fill(rect.map(|value| value as f32), rgba(cursor.color, srgb_surface)));
 }
 
+/// A quad for `layer`'s padding, if it has any: its background around its cells, in the background of its first cell,
+/// which a floating window's usually has throughout, as see-through as that cell. Only the band around the cells: under a
+/// see-through window, the color would show twice.
+pub(crate) fn padding_quad(layer: &CellLayer, srgb_surface: bool) -> Option<Quad> {
+	let cell = layer.cells.first().filter(|_| layer.padding > 0)?;
+	let [r, g, b, _] = rgba(cell.background, srgb_surface);
+	let color = [r, g, b, 1.0 - f32::from(cell.blend.min(100)) / 100.0];
+	let band =
+		Quad { border_color: color, border_width: layer.padding as f32, ..Quad::fill(layer.outer_rect(), [0.0; 4]) };
+	Some(Quad { corner_radius: layer.corner_radius, ..band })
+}
+
 /// A quad for `outline` around a rectangle `rect` (left, top, width, height) with corners rounded by `radius`: a border
 /// just outside it, taking none of its pixels
-pub(crate) fn outline_quad(rect: [u32; 4], outline: Outline, radius: f32, srgb_surface: bool) -> Quad {
+pub(crate) fn outline_quad(rect: [f32; 4], outline: Outline, radius: f32, srgb_surface: bool) -> Quad {
 	let width = outline.width.max(0.0);
-	let [left, top, rect_width, rect_height] = rect.map(|value| value as f32);
+	let [left, top, rect_width, rect_height] = rect;
 	let rect = [left - width, top - width, rect_width + 2.0 * width, rect_height + 2.0 * width];
 	// Around rounded corners, rounded by as much more as it's wide, so it keeps its width
 	let corner_radius = if radius > 0.0 { radius + width } else { 0.0 };
@@ -577,6 +589,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
+			padding: 0,
 			corner_radius: 0.0,
 		};
 		let mut quads = Vec::new();
@@ -613,6 +626,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
+			padding: 0,
 			corner_radius: 0.0,
 		};
 		let lines = LineMetrics {

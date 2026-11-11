@@ -483,6 +483,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
+			padding: 0,
 			corner_radius: 0.0,
 		}
 	}

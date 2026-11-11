@@ -8,7 +8,7 @@ use crate::color::{rgba, wgpu_color};
 use crate::cursor::{CursorAnimation, cursor_rect};
 use crate::font::LineMetrics;
 use crate::quad::{
-	FrameQuads, QuadPipeline, area_shadow, cell_backgrounds, cell_decorations, cursor_quad, outline_quad,
+	FrameQuads, QuadPipeline, area_shadow, cell_backgrounds, cell_decorations, cursor_quad, outline_quad, padding_quad,
 };
 use crate::scroll::{ScrollAnimations, SlidingRegion};
 use crate::shape::ShapePipeline;
@@ -393,7 +393,7 @@ fn pieces<'a>(layers: &'a [Layer], scrolls: &ScrollAnimations, surface: (u32, u3
 	let mut cursor_piece = None;
 	for Layer::Cells(layer) in layers {
 		let whole = clip(layer.rect());
-		let round = (layer.corner_radius > 0.0).then(|| (layer.rect().map(|value| value as f32), layer.corner_radius));
+		let round = (layer.corner_radius > 0.0).then(|| (layer.outer_rect(), layer.corner_radius));
 		let region = scrolls.region(layer, now);
 		// The sliding text is drawn over the layer: where what's under shows through, the layer's own text would too.
 		let see_through = layer.cells.iter().any(|cell| cell.blend > 0);
@@ -489,8 +489,13 @@ fn layer_quads(
 		if let Some(layer_shadow) = &layer.shadow {
 			area_shadow(frame, layer_shadow, srgb);
 		}
+		if let Some(padding) = padding_quad(layer, srgb) {
+			frame.quads.push(padding);
+		}
 		if let Some(outline) = layer.outline {
-			frame.quads.push(outline_quad(layer.rect(), outline, layer.corner_radius, srgb));
+			frame
+				.quads
+				.push(outline_quad(layer.outer_rect(), outline, layer.corner_radius, srgb));
 		}
 	}
 	let quads = &mut frame.quads;
@@ -588,6 +593,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
+			padding: 0,
 			corner_radius: 0.0,
 		})
 	}
@@ -863,6 +869,25 @@ mod tests {
 		assert_eq!(at(left, 0), [0, 0, 0, 255]);
 		assert_eq!(at(left + cell.width - 1, 18), [0, 0, 0, 255]);
 		assert_eq!((at(left + 4, 0), at(left, 9)), ([255, 255, 255, 255], [255, 255, 255, 255]));
+	}
+
+	#[test]
+	fn gpu_padding_goes_around_its_layer() {
+		// A white cell at column 3 with 2 px of padding, and a red outline around that, on black
+		let Layer::Cells(white) = cell(1, " ", 0xFFFFFF);
+		let outline = Some(crate::Outline { width: 1.0, color: 0xFF0000 });
+		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, padding: 2, outline, ..white });
+		let Some((pixels, cell)) = drawn(&[layer], None) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		let at = |x: u32| pixels[(9 * WIDTH + x) as usize];
+		let left = 3 * cell.width;
+		// The cell, its padding in its background, then the outline around the padding, then nothing
+		let white = [255, 255, 255, 255];
+		assert_eq!((at(left), at(left - 1), at(left - 2)), (white, white, white));
+		assert_eq!((at(left - 3), at(left - 4)), ([255, 0, 0, 255], [0, 0, 0, 255]));
+		assert_eq!(at(left + cell.width + 1), white);
 	}
 
 	#[test]

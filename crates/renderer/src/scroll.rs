@@ -185,6 +185,7 @@ impl Animation {
 			scroll: None,
 			shadow: None,
 			outline: None,
+			padding: 0,
 			corner_radius: 0.0,
 		};
 		let (offset, height) = (first as f32 + offset, self.height() as u32);
@@ -262,6 +263,7 @@ mod tests {
 			scroll,
 			shadow: None,
 			outline: None,
+			padding: 0,
 			corner_radius: 0.0,
 		})
 	}

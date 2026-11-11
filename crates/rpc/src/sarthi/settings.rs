@@ -16,6 +16,7 @@ pub struct Settings {
 	pub shadow: ShadowSettings,
 	pub outline: OutlineSettings,
 	pub corners: CornerSettings,
+	pub padding: PaddingSettings,
 	pub underline: UnderlineSettings,
 	pub touchpad: TouchpadSettings,
 	pub window: WindowSettings,
@@ -201,6 +202,24 @@ impl Default for CornerSettings {
 	}
 }
 
+/// Space around floating windows' cells, in their background, in logical pixels
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PaddingSettings {
+	pub enabled: bool,
+
+	pub size: f32,
+
+	/// Floating windows showing these filetypes have no padding, unless their `w:sarthi` gives `padding.enabled`
+	pub exclude_filetypes: Vec<String>,
+}
+
+impl Default for PaddingSettings {
+	fn default() -> Self {
+		Self { enabled: false, size: 4.0, exclude_filetypes: Vec::new() }
+	}
+}
+
 /// The OS window: how see-through its background is, and whether the desktop behind it is blurred
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -302,6 +321,11 @@ window_options! {
 	CornerOptions for CornerSettings { enabled: bool, radius: f32 }
 }
 
+window_options! {
+	/// A window's own [`PaddingSettings`]
+	PaddingOptions for PaddingSettings { enabled: bool, size: f32 }
+}
+
 /// What a window's `w:sarthi` sets for it: the sections of the settings about a window, with the same keys. Each value
 /// given replaces the setting's for this window. `exclude_filetypes` is only in the settings: the window gives
 /// `enabled` itself.
@@ -312,6 +336,7 @@ pub struct WindowOptions {
 	pub shadow: ShadowOptions,
 	pub outline: OutlineOptions,
 	pub corners: CornerOptions,
+	pub padding: PaddingOptions,
 }
 
 impl Settings {
@@ -322,6 +347,7 @@ impl Settings {
 			shadow: self.shadow.with(&options.shadow),
 			outline: self.outline.with(&options.outline),
 			corners: self.corners.with(&options.corners),
+			padding: self.padding.with(&options.padding),
 			..self.clone()
 		}
 	}
@@ -336,6 +362,7 @@ impl Settings {
 		check((0.0..=1.0).contains(&self.shadow.opacity), "shadow.opacity must be from 0 to 1")?;
 		check(self.outline.width > 0.0, "outline.width must be more than 0")?;
 		check(self.corners.radius >= 0.0, "corners.radius can't be negative")?;
+		check(self.padding.size >= 0.0, "padding.size can't be negative")?;
 
 		let underline = &self.underline;
 		check(underline.thickness.is_none_or(|thickness| thickness > 0.0), "underline.thickness must be more than 0")?;
@@ -521,6 +548,18 @@ mod tests {
 		assert!(!Settings::default().corners.enabled);
 		let error = corners(vec![("radius", Value::from(-1))]).unwrap_err();
 		assert_eq!(error, "corners.radius can't be negative");
+	}
+
+	#[test]
+	fn padding() {
+		let padding = |pairs| parse(table(vec![("padding", table(pairs))]));
+		let settings = padding(vec![("enabled", Value::from(true)), ("size", Value::from(6))])
+			.unwrap()
+			.padding;
+		assert_eq!((settings.enabled, settings.size), (true, 6.0));
+		assert!(!Settings::default().padding.enabled);
+		let error = padding(vec![("size", Value::from(-1))]).unwrap_err();
+		assert_eq!(error, "padding.size can't be negative");
 	}
 
 	#[test]
