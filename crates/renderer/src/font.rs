@@ -101,14 +101,34 @@ pub enum FontError {
 
 	#[error("at most {MAX_FAMILIES} fonts")]
 	TooMany,
+
+	#[error("too many sets of fonts")]
+	TooManySets,
 }
 
-/// The fonts text is drawn with: the chosen ones (the bundled font unless chosen otherwise), and the system's fonts as
-/// fallback for characters they don't have (e.g. CJK and emoji)
+/// Identifies a set of fonts in [`Fonts`]: the fonts a layer's text is drawn with, at their size
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct FontId(u16);
+
+impl FontId {
+	/// The fonts `guifont` chooses, which Neovim's grids are drawn with
+	pub const MAIN: Self = Self(0);
+}
+
+/// The fonts text is drawn with, in sets: the main set (the bundled font unless chosen otherwise) and any others, each
+/// with its own size. The system's fonts are the fallback for characters a set doesn't have (e.g. CJK and emoji).
 pub struct Fonts {
 	pub(crate) system: FontSystem,
 
-	/// The chosen fonts, in order: the main font first
+	/// By [`FontId`], the main set first
+	sets: Vec<FontSet>,
+}
+
+/// Fonts chosen to draw text with, at a size, and what's known about them
+struct FontSet {
+	choice: FontChoice,
+
+	/// The chosen fonts, in order: the set's main font first
 	faces: Vec<Face>,
 
 	/// Which of `faces` have each character seen so far, as a bit per face
@@ -123,11 +143,10 @@ pub struct Fonts {
 	/// Metrics of the main font at a font size of 1 pixel
 	em: EmMetrics,
 
-	pub(crate) bold: bool,
-	pub(crate) italic: bool,
+	size: TextSize,
 
-	/// Changes whenever the fonts do, so text laid out with the old ones is laid out again
-	pub(crate) generation: u32,
+	/// Changes whenever the fonts or their size do, so text laid out with the old ones is laid out again
+	generation: u32,
 }
 
 /// A chosen font: the regular face of a family
@@ -154,67 +173,154 @@ impl Face {
 }
 
 impl Fonts {
-	/// Loads the bundled font and finds the system's fonts, which takes a few milliseconds.
+	/// Loads the bundled font and finds the system's fonts, which takes a few milliseconds. The main set is the bundled
+	/// font at 14 pixels until chosen and sized otherwise.
 	pub fn new() -> Self {
 		let mut system = FontSystem::new();
 		for face in FACES {
 			system.db_mut().load_font_source(Source::Binary(Arc::new(face)));
 		}
+		let (faces, em) = resolve(&mut system, &FontChoice::default()).expect("the bundled font is loaded");
+		let main = FontSet::new(FontChoice::default(), faces, em, TextSize::new(14.0));
+		let mut fonts = Self { system, sets: vec![main] };
+		fonts.name_monospace();
+		fonts
+	}
 
-		let bundled = find(&mut system, BUNDLED).expect("the bundled font is loaded");
-		let em = bundled.metrics().expect("the bundled font has metrics");
-		let mut fonts = Self {
-			system,
-			faces: Vec::new(),
+	/// Draws the main set's text with the fonts of `choice`. Families that aren't installed are skipped, like in a list
+	/// of alternatives; `monospace` is the bundled font. If none is installed, or the main font can't be used, nothing
+	/// changes.
+	pub fn choose(&mut self, choice: &FontChoice) -> Result<(), FontError> {
+		let (faces, em) = resolve(&mut self.system, choice)?;
+		let main = &mut self.sets[0];
+		let generation = main.generation.wrapping_add(1);
+		*main = FontSet { generation, ..FontSet::new(choice.clone(), faces, em, main.size) };
+		self.name_monospace();
+		Ok(())
+	}
+
+	/// A set of the fonts of `choice` at `size`, chosen like [`Fonts::choose`] does: an equal set if there's one already
+	pub fn add(&mut self, choice: &FontChoice, size: TextSize) -> Result<FontId, FontError> {
+		if let Some(index) = self.sets.iter().position(|set| set.choice == *choice && set.size == size) {
+			return Ok(FontId(index as u16));
+		}
+		let id = u16::try_from(self.sets.len()).map_err(|_| FontError::TooManySets)?;
+		let (faces, em) = resolve(&mut self.system, choice)?;
+		self.sets.push(FontSet::new(choice.clone(), faces, em, size));
+		Ok(FontId(id))
+	}
+
+	/// Draws text of set `font` at `size` from now on
+	pub fn set_size(&mut self, font: FontId, size: TextSize) {
+		let set = self.set_mut(font);
+		if set.size != size {
+			set.size = size;
+			set.generation = set.generation.wrapping_add(1);
+		}
+	}
+
+	/// How large set `font`'s text is drawn
+	pub fn text_size(&self, font: FontId) -> TextSize {
+		self.set(font).size
+	}
+
+	/// Size of a grid cell of set `font`'s text. The width is the advance of `M`, and the height fits the font's ascent,
+	/// descent and line gap, plus the line space. Both are whole pixels, so cells line up with the pixel grid: the width is
+	/// rounded, and the font's height rounded up so descenders aren't cut off.
+	pub fn cell_size(&self, font: FontId) -> CellSize {
+		self.set(font).cell_size()
+	}
+
+	/// Where underlines and strikethroughs go in a cell of set `font`'s text
+	pub(crate) fn line_metrics(&self, font: FontId) -> LineMetrics {
+		self.set(font).line_metrics()
+	}
+
+	/// Changes whenever set `font`'s fonts or size do, so text laid out with the old ones is laid out again
+	pub(crate) fn generation(&self, font: FontId) -> u32 {
+		self.set(font).generation
+	}
+
+	/// Whether set `font` draws all text bold, and all italic, not only text highlighted so
+	pub(crate) fn styles(&self, font: FontId) -> (bool, bool) {
+		let choice = &self.set(font).choice;
+		(choice.bold, choice.italic)
+	}
+
+	/// Where `text`, one cell's characters, goes when a row of set `font`'s text is laid out (see [`FontSet::run_of`])
+	pub(crate) fn run_of(&mut self, font: FontId, text: &str) -> Run {
+		self.set_mut(font).run_of(text)
+	}
+
+	/// The weight and style to lay out `bold` or `italic` text in, in chosen font `face` of set `font` (see
+	/// [`FontSet::face_of`]): those of the face its family has closest to them, found like CSS and fontconfig do, e.g.
+	/// Heavy for bold in a family without Bold, or Oblique for italic. cosmic-text only takes a face of a family at the
+	/// exact weight asked for, and otherwise draws the text in another family. A variable font has every weight, so it
+	/// keeps the one asked.
+	pub(crate) fn variant(&mut self, font: FontId, face: Option<u8>, bold: bool, italic: bool) -> (Weight, Style) {
+		let asked =
+			(if bold { Weight::BOLD } else { Weight::NORMAL }, if italic { Style::Italic } else { Style::Normal });
+		if let Some(&variant) = self.set(font).variants.get(&(face, bold, italic)) {
+			return variant;
+		}
+
+		let family = self.family(font, face).to_owned();
+		let query = Query { families: &[Family::Name(&family)], weight: asked.0, style: asked.1, ..Query::default() };
+		let closest = self.system.db().query(&query).and_then(|id| {
+			let info = self.system.db().face(id)?;
+			let (index, weight, style) = (info.index, info.weight, info.style);
+			let font = self.system.get_font(id, asked.0)?;
+			let variable = FontRef::from_index(font.data(), index)
+				.is_ok_and(|font| font.axes().iter().any(|axis| axis.tag() == Tag::new(b"wght")));
+			Some((if variable { asked.0 } else { weight }, style))
+		});
+
+		let variant = closest.unwrap_or(asked);
+		self.set_mut(font).variants.insert((face, bold, italic), variant);
+		variant
+	}
+
+	/// The family of chosen font `face` of set `font` (see [`FontSet::face_of`]), or of its main font for `None`, which
+	/// the system's fonts stand in for where it lacks characters
+	pub(crate) fn family(&self, font: FontId, face: Option<u8>) -> &str {
+		let faces = &self.set(font).faces;
+		&faces[usize::from(face.unwrap_or(0)).min(faces.len() - 1)].family
+	}
+
+	/// Set `font`, or the main set if there's no such set
+	fn set(&self, font: FontId) -> &FontSet {
+		self.sets.get(usize::from(font.0)).unwrap_or(&self.sets[0])
+	}
+
+	fn set_mut(&mut self, font: FontId) -> &mut FontSet {
+		let index = if usize::from(font.0) < self.sets.len() { usize::from(font.0) } else { 0 };
+		&mut self.sets[index]
+	}
+
+	/// Makes text in the monospace family the main font's.
+	fn name_monospace(&mut self) {
+		let family = self.sets[0].faces[0].family.clone();
+		self.system.db_mut().set_monospace_family(family);
+	}
+}
+
+impl FontSet {
+	fn new(choice: FontChoice, faces: Vec<Face>, em: EmMetrics, size: TextSize) -> Self {
+		Self {
+			choice,
+			faces,
 			coverage: FxHashMap::default(),
 			one_cell: FxHashMap::default(),
 			variants: FxHashMap::default(),
 			em,
-			bold: false,
-			italic: false,
+			size,
 			generation: 0,
-		};
-		fonts.use_faces(vec![bundled], em, &FontChoice::default());
-		fonts
-	}
-
-	/// Draws text with the fonts of `choice`. Families that aren't installed are skipped, like in a list of
-	/// alternatives; `monospace` is the bundled font. If none is installed, or the main font can't be used, nothing
-	/// changes.
-	pub fn choose(&mut self, choice: &FontChoice) -> Result<(), FontError> {
-		if choice.families.len() > MAX_FAMILIES {
-			return Err(FontError::TooMany);
 		}
-		let families: Vec<&str> = match choice.families.as_slice() {
-			[] => vec![BUNDLED],
-			families => families.iter().map(String::as_str).collect(),
-		};
-		let faces: Vec<Face> = families
-			.iter()
-			.map(|family| if family.eq_ignore_ascii_case("monospace") { BUNDLED } else { family })
-			.filter_map(|family| find(&mut self.system, family))
-			.collect();
-		let Some(main) = faces.first() else { return Err(FontError::NotFound(families.join(", "))) };
-		let em = main.metrics().ok_or_else(|| FontError::NoMetrics(main.family.clone()))?;
-
-		self.use_faces(faces, em, choice);
-		Ok(())
 	}
 
-	fn use_faces(&mut self, faces: Vec<Face>, em: EmMetrics, choice: &FontChoice) {
-		// Text in the monospace family is the main font's.
-		self.system.db_mut().set_monospace_family(faces[0].family.clone());
-		(self.faces, self.em, self.bold, self.italic) = (faces, em, choice.bold, choice.italic);
-		self.coverage.clear();
-		self.one_cell.clear();
-		self.variants.clear();
-		self.generation = self.generation.wrapping_add(1);
-	}
-
-	/// Size of a grid cell for text of `size`. The width is the advance of `M`, and the height fits the font's ascent,
-	/// descent and line gap, plus the line space. Both are whole pixels, so cells line up with the pixel grid: the
-	/// width is rounded, and the font's height rounded up so descenders aren't cut off.
-	pub fn cell_size(&self, size: TextSize) -> CellSize {
+	/// See [`Fonts::cell_size`]
+	fn cell_size(&self) -> CellSize {
+		let size = self.size;
 		let font_height = (self.em.cell_height * size.font_size).ceil() as i64;
 		CellSize {
 			width: ((self.em.cell_width * size.font_size).round() as u32).max(1),
@@ -222,25 +328,25 @@ impl Fonts {
 		}
 	}
 
-	/// Distance of the baseline from the top of a cell, like cosmic-text places it: the font's ascent and descent
-	/// are centered in the line, so line space goes half above the text and half below.
-	fn baseline(&self, size: TextSize) -> f32 {
-		let (cell_height, font_size) = (self.cell_size(size).height as f32, size.font_size);
+	/// Distance of the baseline from the top of a cell, like cosmic-text places it: the font's ascent and descent are
+	/// centered in the line, so line space goes half above the text and half below.
+	fn baseline(&self) -> f32 {
+		let (cell_height, font_size) = (self.cell_size().height as f32, self.size.font_size);
 		(cell_height - (self.em.ascent + self.em.descent) * font_size) / 2.0 + self.em.ascent * font_size
 	}
 
-	/// Where underlines and strikethroughs go in a cell, for text of `size`
-	pub(crate) fn line_metrics(&self, size: TextSize) -> LineMetrics {
+	/// See [`Fonts::line_metrics`]
+	fn line_metrics(&self) -> LineMetrics {
 		let em = &self.em;
-		let (cell_height, font_size) = (self.cell_size(size).height as f32, size.font_size);
-		let baseline = self.baseline(size);
+		let (cell_height, font_size) = (self.cell_size().height as f32, self.size.font_size);
+		let baseline = self.baseline();
 
 		// Whole pixels, so lines are sharp, and inside the cell
 		let line = |top: f32, thickness: f32| {
 			let thickness = thickness.round().clamp(1.0, cell_height);
 			(top.round().clamp(0.0, cell_height - thickness), thickness)
 		};
-		let underlines = size.underlines;
+		let underlines = self.size.underlines;
 		let (offset, thickness) = em.underline;
 		let (underline_top, thickness) = line(
 			baseline - offset * font_size + underlines.offset,
@@ -261,9 +367,9 @@ impl Fonts {
 	}
 
 	/// Which chosen font draws `text`, one cell's characters: the index of the first that has them all, or `None` if
-	/// none has, for the system's fonts. The main font's glyphs are exactly one cell wide, while other fonts' glyphs
-	/// can have any width.
-	pub(crate) fn face_of(&mut self, text: &str) -> Option<u8> {
+	/// none has, for the system's fonts. The main font's glyphs are exactly one cell wide, while other fonts' glyphs can
+	/// have any width.
+	fn face_of(&mut self, text: &str) -> Option<u8> {
 		let faces = &self.faces;
 		let coverage = text.chars().fold(u32::MAX, |coverage, c| {
 			coverage
@@ -281,7 +387,7 @@ impl Fonts {
 	/// font draws it exactly one cell wide, otherwise into a run of its own, at its own cell. Some glyphs of a monospace
 	/// font are wider, like Iosevka's ➜ (two cells), while Neovim gives the character one cell: in a run, everything after
 	/// it would move.
-	pub(crate) fn run_of(&mut self, text: &str) -> Run {
+	fn run_of(&mut self, text: &str) -> Run {
 		match self.face_of(text) {
 			Some(0) if self.one_cell(text) => Run::Main,
 			face => Run::Alone(face),
@@ -297,39 +403,25 @@ impl Fonts {
 			.entry(c)
 			.or_insert_with(|| main.advance(c).is_some_and(|advance| (advance - cell_width).abs() < 1e-4))
 	}
+}
 
-	/// The weight and style to lay out `bold` or `italic` text in, in chosen font `face` (see [`Fonts::face_of`]):
-	/// those of the face its family has closest to them, found like CSS and fontconfig do, e.g. Heavy for bold in a
-	/// family without Bold, or Oblique for italic. cosmic-text only takes a face of a family at the exact weight asked
-	/// for, and otherwise draws the text in another family. A variable font has every weight, so it keeps the one asked.
-	pub(crate) fn variant(&mut self, face: Option<u8>, bold: bool, italic: bool) -> (Weight, Style) {
-		let asked =
-			(if bold { Weight::BOLD } else { Weight::NORMAL }, if italic { Style::Italic } else { Style::Normal });
-		if let Some(&variant) = self.variants.get(&(face, bold, italic)) {
-			return variant;
-		}
-
-		let family = self.family(face).to_owned();
-		let query = Query { families: &[Family::Name(&family)], weight: asked.0, style: asked.1, ..Query::default() };
-		let closest = self.system.db().query(&query).and_then(|id| {
-			let info = self.system.db().face(id)?;
-			let (index, weight, style) = (info.index, info.weight, info.style);
-			let font = self.system.get_font(id, asked.0)?;
-			let variable = FontRef::from_index(font.data(), index)
-				.is_ok_and(|font| font.axes().iter().any(|axis| axis.tag() == Tag::new(b"wght")));
-			Some((if variable { asked.0 } else { weight }, style))
-		});
-
-		let variant = closest.unwrap_or(asked);
-		self.variants.insert((face, bold, italic), variant);
-		variant
+/// The fonts of `choice`, and the metrics of the first, which draws text: see [`Fonts::choose`]
+fn resolve(system: &mut FontSystem, choice: &FontChoice) -> Result<(Vec<Face>, EmMetrics), FontError> {
+	if choice.families.len() > MAX_FAMILIES {
+		return Err(FontError::TooMany);
 	}
-
-	/// The family of chosen font `face` (see [`Fonts::face_of`]), or of the main font for `None`, which the
-	/// system's fonts stand in for where it lacks characters
-	pub(crate) fn family(&self, face: Option<u8>) -> &str {
-		&self.faces[usize::from(face.unwrap_or(0)).min(self.faces.len() - 1)].family
-	}
+	let families: Vec<&str> = match choice.families.as_slice() {
+		[] => vec![BUNDLED],
+		families => families.iter().map(String::as_str).collect(),
+	};
+	let faces: Vec<Face> = families
+		.iter()
+		.map(|family| if family.eq_ignore_ascii_case("monospace") { BUNDLED } else { family })
+		.filter_map(|family| find(system, family))
+		.collect();
+	let Some(main) = faces.first() else { return Err(FontError::NotFound(families.join(", "))) };
+	let em = main.metrics().ok_or_else(|| FontError::NoMetrics(main.family.clone()))?;
+	Ok((faces, em))
 }
 
 impl Face {
@@ -339,7 +431,7 @@ impl Face {
 	}
 }
 
-/// Where a cell's text goes when a row is laid out (see [`Fonts::run_of`])
+/// Where a cell's text goes when a row is laid out (see [`FontSet::run_of`])
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Run {
 	/// Into a run of the main font's text
@@ -436,23 +528,40 @@ mod tests {
 	use glyphon::fontdb::{Family, Query, Style, Weight};
 	use glyphon::{Attrs, Buffer, Metrics, Shaping};
 
-	use super::{BUNDLED, CellSize, FontChoice, FontError, Fonts, LineMetrics, Run, TextSize, UnderlineSize};
+	use super::{
+		BUNDLED, CellSize, FontChoice, FontError, FontId, FontSet, Fonts, LineMetrics, Run, TextSize, UnderlineSize,
+	};
+
+	const MAIN: FontId = FontId::MAIN;
+
+	/// The main set
+	fn main(fonts: &mut Fonts) -> &mut FontSet {
+		fonts.set_mut(MAIN)
+	}
+
+	/// Fonts whose main set is at `size`
+	fn sized(size: TextSize) -> Fonts {
+		let mut fonts = Fonts::new();
+		fonts.set_size(MAIN, size);
+		fonts
+	}
 
 	#[test]
 	fn cell_size() {
-		let fonts = Fonts::new();
+		let mut fonts = Fonts::new();
 		// JetBrains Mono: 600 units wide, ascent 1020, descent 300, no line gap, 1000 units per em.
-		assert_eq!((fonts.em.cell_width, fonts.em.cell_height), (0.6, 1.32));
-		assert_eq!(fonts.cell_size(TextSize::new(14.0)), CellSize { width: 8, height: 19 });
-		assert_eq!(fonts.cell_size(TextSize::new(28.0)), CellSize { width: 17, height: 37 });
-		assert_eq!(fonts.cell_size(TextSize::new(0.0)), CellSize { width: 1, height: 1 });
+		assert_eq!((main(&mut fonts).em.cell_width, main(&mut fonts).em.cell_height), (0.6, 1.32));
+		assert_eq!(fonts.cell_size(MAIN), CellSize { width: 8, height: 19 }, "14 px until sized");
+		assert_eq!(sized(TextSize::new(28.0)).cell_size(MAIN), CellSize { width: 17, height: 37 });
+		assert_eq!(sized(TextSize::new(0.0)).cell_size(MAIN), CellSize { width: 1, height: 1 });
 	}
 
 	#[test]
 	fn line_metrics() {
-		let fonts = Fonts::new();
+		let mut fonts = Fonts::new();
 		// JetBrains Mono: underline 155 units below the baseline, strikeout 320 above, both 50 thick
-		assert_eq!((fonts.em.underline, fonts.em.strikeout), ((-0.155, 0.05), (0.32, 0.05)));
+		let em = main(&mut fonts).em;
+		assert_eq!((em.underline, em.strikeout), ((-0.155, 0.05), (0.32, 0.05)));
 
 		// At 14 px the baseline is 14.54 px from the top of a 19 px cell.
 		let expected = LineMetrics {
@@ -463,57 +572,57 @@ mod tests {
 			strikeout_top: 10.0,
 			strikeout_thickness: 1.0,
 		};
-		assert_eq!(fonts.line_metrics(TextSize::new(14.0)), expected);
+		assert_eq!(fonts.line_metrics(MAIN), expected);
 
 		// Lines stay inside the cell, at least 1 px thick.
-		let tiny = fonts.line_metrics(TextSize::new(1.0));
+		let tiny = sized(TextSize::new(1.0)).line_metrics(MAIN);
 		assert!(tiny.thickness >= 1.0 && tiny.underline_top + tiny.thickness <= 2.0);
 	}
 
 	#[test]
 	fn baseline_matches_cosmic_text() {
-		let mut fonts = Fonts::new();
 		for (font_size, line_space) in [(14.0, 0), (28.0, 0), (14.0, 5), (14.0, -3)] {
 			let size = TextSize { line_space, ..TextSize::new(font_size) };
-			let cell = fonts.cell_size(size);
+			let mut fonts = sized(size);
+			let cell = fonts.cell_size(MAIN);
 			let mut buffer = Buffer::new(&mut fonts.system, Metrics::new(font_size, cell.height as f32));
 			buffer.set_text("x", &Attrs::new().family(glyphon::Family::Monospace), Shaping::Advanced, None);
 			buffer.shape_until_scroll(&mut fonts.system, false);
 
 			let line_y = buffer.layout_runs().next().unwrap().line_y;
-			assert!((line_y - fonts.baseline(size)).abs() < 0.01, "{line_y} at {size:?}");
+			assert!((line_y - main(&mut fonts).baseline()).abs() < 0.01, "{line_y} at {size:?}");
 		}
 	}
 
 	#[test]
 	fn line_space() {
-		let fonts = Fonts::new();
-		let size = |line_space| TextSize { line_space, ..TextSize::new(14.0) };
-		assert_eq!(fonts.cell_size(size(4)), CellSize { width: 8, height: 23 });
-		assert_eq!(fonts.cell_size(size(-5)), CellSize { width: 8, height: 14 });
+		let spaced = |line_space| sized(TextSize { line_space, ..TextSize::new(14.0) });
+		assert_eq!(spaced(4).cell_size(MAIN), CellSize { width: 8, height: 23 });
+		assert_eq!(spaced(-5).cell_size(MAIN), CellSize { width: 8, height: 14 });
 		// A cell is at least a pixel tall.
-		assert_eq!(fonts.cell_size(size(-100)).height, 1);
+		assert_eq!(spaced(-100).cell_size(MAIN).height, 1);
 
 		// The space goes half above the text and half below, and the underline moves with the text.
-		let (plain, spaced) = (fonts.line_metrics(size(0)), fonts.line_metrics(size(4)));
+		let (plain, spaced) = (spaced(0).line_metrics(MAIN), spaced(4).line_metrics(MAIN));
 		assert_eq!(spaced.underline_top - plain.underline_top, 2.0);
 	}
 
 	#[test]
 	fn face_of() {
 		let mut fonts = Fonts::new();
-		assert_eq!(fonts.face_of("a"), Some(0));
-		assert_eq!(fonts.face_of("│─é→λ"), Some(0));
-		assert_eq!(fonts.face_of("漢"), None);
-		assert_eq!(fonts.face_of("😀"), None);
-		assert_eq!(fonts.face_of("a漢"), None);
+		let set = main(&mut fonts);
+		assert_eq!(set.face_of("a"), Some(0));
+		assert_eq!(set.face_of("│─é→λ"), Some(0));
+		assert_eq!(set.face_of("漢"), None);
+		assert_eq!(set.face_of("😀"), None);
+		assert_eq!(set.face_of("a漢"), None);
 	}
 
 	#[test]
 	fn glyphs_wider_than_a_cell_are_runs_of_their_own() {
 		let mut fonts = Fonts::new();
-		assert_eq!((fonts.run_of("a"), fonts.run_of("─")), (Run::Main, Run::Main));
-		assert_eq!(fonts.run_of("漢"), Run::Alone(None));
+		assert_eq!((fonts.run_of(MAIN, "a"), fonts.run_of(MAIN, "─")), (Run::Main, Run::Main));
+		assert_eq!(fonts.run_of(MAIN, "漢"), Run::Alone(None));
 
 		// Iosevka draws ➜ two cells wide.
 		let choice = FontChoice { families: vec![String::from("Iosevka")], ..FontChoice::default() };
@@ -521,20 +630,20 @@ mod tests {
 			eprintln!("skipped: Iosevka isn't installed");
 			return;
 		}
-		assert_eq!((fonts.run_of("a"), fonts.run_of("➜")), (Run::Main, Run::Alone(Some(0))));
+		assert_eq!((fonts.run_of(MAIN, "a"), fonts.run_of(MAIN, "➜")), (Run::Main, Run::Alone(Some(0))));
 	}
 
 	#[test]
 	fn choose_by_name_in_any_case() {
 		let mut fonts = Fonts::new();
-		let generation = fonts.generation;
+		let generation = fonts.generation(MAIN);
 		let choice = FontChoice { families: vec![String::from("jetbrains MONO")], bold: true, italic: false };
 		fonts.choose(&choice).unwrap();
 
 		// The font's own spelling is used, and text laid out before is laid out again.
-		assert_eq!(fonts.family(Some(0)), BUNDLED);
-		assert!(fonts.bold && !fonts.italic);
-		assert_ne!(fonts.generation, generation);
+		assert_eq!(fonts.family(MAIN, Some(0)), BUNDLED);
+		assert_eq!(fonts.styles(MAIN), (true, false));
+		assert_ne!(fonts.generation(MAIN), generation);
 	}
 
 	#[test]
@@ -543,17 +652,17 @@ mod tests {
 		let families = vec![String::from("No Such Font"), String::from("monospace"), String::from("Nor This")];
 		fonts.choose(&FontChoice { families, ..FontChoice::default() }).unwrap();
 		// Only `monospace`, the bundled font, is left.
-		assert_eq!(fonts.faces.len(), 1);
-		assert_eq!(fonts.family(Some(0)), BUNDLED);
+		assert_eq!(main(&mut fonts).faces.len(), 1);
+		assert_eq!(fonts.family(MAIN, Some(0)), BUNDLED);
 	}
 
 	#[test]
 	fn no_installed_font_changes_nothing() {
 		let mut fonts = Fonts::new();
-		let generation = fonts.generation;
+		let generation = fonts.generation(MAIN);
 		let choice = FontChoice { families: vec!["No Such Font".into(), "Nor This".into()], ..FontChoice::default() };
 		assert!(matches!(fonts.choose(&choice), Err(FontError::NotFound(names)) if names == "No Such Font, Nor This"));
-		assert_eq!((fonts.generation, fonts.family(None)), (generation, BUNDLED));
+		assert_eq!((fonts.generation(MAIN), fonts.family(MAIN, None)), (generation, BUNDLED));
 	}
 
 	#[test]
@@ -566,12 +675,12 @@ mod tests {
 		}
 
 		// Measured from DejaVu Sans Mono: 1233 of 2048 units wide
-		assert_eq!(fonts.cell_size(TextSize::new(14.0)).width, 8);
-		assert!((fonts.em.cell_width - 1233.0 / 2048.0).abs() < 1e-6);
-		assert_eq!(fonts.family(Some(0)), "DejaVu Sans Mono");
-		assert_eq!(fonts.face_of("a"), Some(0));
+		assert_eq!(fonts.cell_size(MAIN).width, 8);
+		assert!((main(&mut fonts).em.cell_width - 1233.0 / 2048.0).abs() < 1e-6);
+		assert_eq!(fonts.family(MAIN, Some(0)), "DejaVu Sans Mono");
+		assert_eq!(main(&mut fonts).face_of("a"), Some(0));
 		// Neither has it: the system's fonts draw it.
-		assert_eq!(fonts.face_of("漢"), None);
+		assert_eq!(main(&mut fonts).face_of("漢"), None);
 	}
 
 	#[test]
@@ -598,9 +707,9 @@ mod tests {
 	#[test]
 	fn a_variable_font_keeps_the_weight_asked() {
 		let mut fonts = Fonts::new();
-		assert_eq!(fonts.variant(Some(0), true, false), (Weight::BOLD, Style::Normal));
-		assert_eq!(fonts.variant(Some(0), true, true), (Weight::BOLD, Style::Italic));
-		assert_eq!(fonts.variant(None, false, false), (Weight::NORMAL, Style::Normal));
+		assert_eq!(fonts.variant(MAIN, Some(0), true, false), (Weight::BOLD, Style::Normal));
+		assert_eq!(fonts.variant(MAIN, Some(0), true, true), (Weight::BOLD, Style::Italic));
+		assert_eq!(fonts.variant(MAIN, None, false, false), (Weight::NORMAL, Style::Normal));
 	}
 
 	#[test]
@@ -623,17 +732,16 @@ mod tests {
 			eprintln!("skipped: this Iosevka has a Bold face");
 			return;
 		}
-		assert_eq!(fonts.variant(Some(0), true, false), (Weight::BLACK, Style::Normal));
-		assert_eq!(fonts.variant(Some(0), true, true), (Weight::BLACK, Style::Italic));
-		assert_eq!(fonts.variant(Some(0), false, true), (Weight::NORMAL, Style::Italic));
+		assert_eq!(fonts.variant(MAIN, Some(0), true, false), (Weight::BLACK, Style::Normal));
+		assert_eq!(fonts.variant(MAIN, Some(0), true, true), (Weight::BLACK, Style::Italic));
+		assert_eq!(fonts.variant(MAIN, Some(0), false, true), (Weight::NORMAL, Style::Italic));
 	}
 
 	#[test]
 	fn underline_adjustments() {
-		let fonts = Fonts::new();
-		let font = fonts.line_metrics(TextSize::new(28.0));
+		let font = sized(TextSize::new(28.0)).line_metrics(MAIN);
 		let underlines = UnderlineSize { offset: -2.0, thickness: Some(3.0), wave_height: 2.0, ink_gaps: Some(1.5) };
-		let adjusted = fonts.line_metrics(TextSize { underlines, ..TextSize::new(28.0) });
+		let adjusted = sized(TextSize { underlines, ..TextSize::new(28.0) }).line_metrics(MAIN);
 
 		// The thickness is every line's; the offset moves only underlines.
 		assert_eq!((adjusted.thickness, adjusted.strikeout_thickness), (3.0, 3.0));
@@ -641,5 +749,40 @@ mod tests {
 		assert_eq!(adjusted.strikeout_top, font.strikeout_top);
 		// The wave height is in thicknesses.
 		assert_eq!((adjusted.wave_height, adjusted.ink_gaps), (6.0, Some(1.5)));
+	}
+
+	#[test]
+	fn sets_have_their_own_fonts_and_size() {
+		let mut fonts = Fonts::new();
+		let large = TextSize::new(28.0);
+		let bold = FontChoice { bold: true, ..FontChoice::default() };
+		let other = fonts.add(&bold, large).unwrap();
+		assert_ne!(other, MAIN);
+
+		// Its own size and styles; the main set's stay.
+		assert_eq!((fonts.cell_size(other), fonts.text_size(other)), (CellSize { width: 17, height: 37 }, large));
+		assert_eq!((fonts.styles(other), fonts.styles(MAIN)), ((true, false), (false, false)));
+		assert_eq!(fonts.cell_size(MAIN), CellSize { width: 8, height: 19 });
+
+		// The same fonts at the same size are the same set; at another size, another.
+		assert_eq!(fonts.add(&bold, large).unwrap(), other);
+		assert_ne!(fonts.add(&bold, TextSize::new(20.0)).unwrap(), other);
+
+		// Choosing the main fonts leaves the others as they are.
+		fonts.choose(&FontChoice { italic: true, ..FontChoice::default() }).unwrap();
+		assert_eq!(fonts.styles(other), (true, false));
+
+		// A set that isn't there is the main one.
+		assert_eq!(fonts.cell_size(FontId(99)), fonts.cell_size(MAIN));
+	}
+
+	#[test]
+	fn a_new_size_lays_text_out_again() {
+		let mut fonts = Fonts::new();
+		let generation = fonts.generation(MAIN);
+		fonts.set_size(MAIN, TextSize::new(14.0));
+		assert_eq!(fonts.generation(MAIN), generation, "the same size");
+		fonts.set_size(MAIN, TextSize::new(20.0));
+		assert_ne!(fonts.generation(MAIN), generation);
 	}
 }

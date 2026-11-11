@@ -13,7 +13,7 @@ use crate::shape::ShapePipeline;
 use crate::text::TextPipeline;
 use crate::{
 	CellLayer, Cursor, CursorMotion, CursorShape, Decoration, Fonts, Layer, Motion, RenderCell, RendererConfig,
-	RendererError, TextSize, TextStyle,
+	RendererError, TextStyle,
 };
 
 pub struct Renderer {
@@ -206,17 +206,12 @@ impl Renderer {
 		self.scrolls.is_animating(now) || self.cursor.is_animating(now)
 	}
 
-	/// Draws the layers on the clear color, with text of `size`. Laying out text needs `fonts`, which all renderers
-	/// share.
+	/// Draws the layers on the clear color, each layer's text in its fonts. Laying out text needs `fonts`, which all
+	/// renderers share.
 	///
 	/// `pre_present` runs right before the frame is handed to the window system, and only if it is, e.g. for
 	/// winit's `Window::pre_present_notify`.
-	pub fn render(
-		&mut self,
-		fonts: &mut Fonts,
-		size: TextSize,
-		pre_present: impl FnOnce(),
-	) -> Result<Frame, RendererError> {
+	pub fn render(&mut self, fonts: &mut Fonts, pre_present: impl FnOnce()) -> Result<Frame, RendererError> {
 		let (frame, suboptimal) = match self.surface.get_current_texture() {
 			wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
 			wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
@@ -231,7 +226,7 @@ impl Renderer {
 			wgpu::CurrentSurfaceTexture::Validation => return Err(RendererError::SurfaceValidation),
 		};
 
-		let (lines, srgb) = (fonts.line_metrics(size), self.config.format.is_srgb());
+		let srgb = self.config.format.is_srgb();
 		let (surface, now) = ((self.config.width, self.config.height), Instant::now());
 		// On its way, the cursor is drawn as its shape, with a block's character only where the shape covers its cell.
 		let moving = self.move_cursor(now);
@@ -245,12 +240,13 @@ impl Renderer {
 		}
 
 		let resolution = glyphon::Resolution { width: self.config.width, height: self.config.height };
-		self.text.prepare(&self.device, &self.queue, resolution, fonts, &pieces, size)?;
+		self.text.prepare(&self.device, &self.queue, resolution, fonts, &pieces)?;
 
 		self.frame_quads.clear();
 		self.layer_quads.clear();
 		for piece in &pieces {
 			let moving = moving.is_some() && piece.kind == PieceKind::Cursor;
+			let lines = fonts.line_metrics(piece.layer.font);
 			self.layer_quads
 				.push(layer_quads(&mut self.frame_quads, piece, &self.text, lines, srgb, moving));
 		}
@@ -548,7 +544,7 @@ mod tests {
 	use crate::scroll::ScrollAnimations;
 	use crate::shape::ShapePipeline;
 	use crate::text::TextPipeline;
-	use crate::{CellLayer, CellSize, Decoration, Fonts, Layer, RenderCell, RendererConfig, TextSize, TextStyle};
+	use crate::{CellLayer, CellSize, Decoration, FontId, Fonts, Layer, RenderCell, RendererConfig, TextStyle};
 
 	/// Cells of the bundled font at 14 pixels, which the tests draw with
 	const CELL: CellSize = CellSize { width: 8, height: 19 };
@@ -568,6 +564,7 @@ mod tests {
 			x: 0,
 			y: 0,
 			cell: CELL,
+			font: crate::FontId::MAIN,
 			width: 1,
 			height: 1,
 			cells: vec![cell],
@@ -613,14 +610,13 @@ mod tests {
 			});
 
 			let mut fonts = Fonts::new();
-			let size = TextSize::new(14.0);
-			let (cell, lines) = (fonts.cell_size(size), fonts.line_metrics(size));
+			let (cell, lines) = (fonts.cell_size(FontId::MAIN), fonts.line_metrics(FontId::MAIN));
 			assert_eq!(cell, CELL, "the layers' cells are the font's");
 			let mut text = TextPipeline::new(device, queue, format);
 			let scrolls = ScrollAnimations::new(RendererConfig::default().scroll);
 			let pieces = pieces(layers, &scrolls, (width, height), Instant::now());
 			let resolution = glyphon::Resolution { width, height };
-			text.prepare(device, queue, resolution, &mut fonts, &pieces, size).unwrap();
+			text.prepare(device, queue, resolution, &mut fonts, &pieces).unwrap();
 
 			let mut frame = FrameQuads::default();
 			let ranges: Vec<_> = pieces

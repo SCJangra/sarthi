@@ -1,6 +1,6 @@
 use arrayvec::ArrayString;
 
-use crate::CellSize;
+use crate::{CellSize, FontId};
 
 /// Something to draw in a window. Layers are drawn in order, so later ones cover earlier ones.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,6 +17,9 @@ pub struct CellLayer {
 	/// Position of the top-left cell, in pixels from the window's top-left corner
 	pub x: u32,
 	pub y: u32,
+
+	/// The fonts its text is drawn with, which also give its cells' size
+	pub font: FontId,
 
 	/// Size of each cell, in pixels: a layer's text is laid out in cells of this size
 	pub cell: CellSize,

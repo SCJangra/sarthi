@@ -278,6 +278,7 @@ mod tests {
 			x: 20,
 			y: 20,
 			cell: CELL,
+			font: crate::FontId::MAIN,
 			width: 10,
 			height: 5,
 			cells: Vec::new(),

@@ -10,7 +10,7 @@ use winit::keyboard::ModifiersState;
 use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
 use editor::{Editor, FloatShadow, Pointer, Redraw};
-use renderer::{CellSize, FontChoice, Fonts, Frame, Renderer, RendererConfig, RendererError, TextSize};
+use renderer::{CellSize, FontChoice, FontId, Fonts, Frame, Renderer, RendererConfig, RendererError, TextSize};
 use rpc::client::{IncomingRequest, Message, Nvim};
 use rpc::neovim::{
 	ClientInfo, ClientVersion, InputMouseParams, Notification, RedrawNotification, UiAttachParams, UiOptions,
@@ -144,7 +144,7 @@ impl App {
 		blur.set(self.settings.window.blur);
 		self.window = Some(WindowState { clipboard, blur, window: window.clone(), renderer });
 		self.update_shadow();
-		self.update_cell_size();
+		self.update_text_size();
 		Ok(window)
 	}
 
@@ -171,22 +171,23 @@ impl App {
 		TextSize { font_size: self.font_size * scale as f32, line_space: line_space as i32, underlines }
 	}
 
-	/// Size of a grid cell in `window`, in physical pixels
-	fn cell_size(&self, window: &Window) -> CellSize {
-		self.fonts.cell_size(self.text_size(window))
+	/// Size of a grid cell, in physical pixels: of the main fonts, as last sized (see [`App::update_text_size`])
+	fn cell_size(&self) -> CellSize {
+		self.fonts.cell_size(FontId::MAIN)
 	}
 
 	/// Number of grid cells that fit in `window`
 	fn grid_size(&self, window: &Window) -> GridSize {
-		GridSize::fit(window.inner_size(), self.cell_size(window))
+		GridSize::fit(window.inner_size(), self.cell_size())
 	}
 
-	/// Tells the editor the size of the window's cells, which places its layers: after the fonts, line space or scale
-	/// changed
-	fn update_cell_size(&mut self) {
+	/// Sizes the main fonts' text for the window, and tells the editor the size of its cells, which places its layers:
+	/// after the font size, line space, underlines or scale changed
+	fn update_text_size(&mut self) {
 		if let Some(state) = &self.window {
-			let cell = self.cell_size(&state.window);
-			self.editor.set_cell_size(cell);
+			let size = self.text_size(&state.window);
+			self.fonts.set_size(FontId::MAIN, size);
+			self.editor.set_cell_size(self.cell_size());
 		}
 	}
 
@@ -251,7 +252,7 @@ impl App {
 
 	/// Shows the pointer's look for what's under it in `window`, if it changed
 	fn update_pointer(&mut self, window: &Window) {
-		let Some(pointer) = self.mouse.pointer(&self.editor, self.cell_size(window)) else { return };
+		let Some(pointer) = self.mouse.pointer(&self.editor, self.cell_size()) else { return };
 		if pointer != self.pointer {
 			self.pointer = pointer;
 			window.set_cursor(match pointer {
@@ -281,11 +282,11 @@ impl App {
 		let mut redraw = redraw;
 		if fonts_changed || self.editor.linespace() != self.linespace {
 			self.linespace = self.editor.linespace();
+			self.update_text_size();
 			let window = self.window.as_ref().map(|state| state.window.clone());
 			if let Some(Err(error)) = window.map(|window| self.resize_nvim_ui(&window)) {
 				tracing::warn!("Couldn't resize Neovim's grid to the new cell size: {error}");
 			}
-			self.update_cell_size();
 			redraw = self.editor.refresh().unwrap_or(redraw);
 		}
 
@@ -382,6 +383,8 @@ impl App {
 		}
 		self.settings = settings;
 		self.update_shadow();
+		// The underlines' sizes are the text's.
+		self.update_text_size();
 		self.refresh();
 		Ok(())
 	}
@@ -395,13 +398,12 @@ impl App {
 
 	fn redraw(&mut self) -> Result<(), Error> {
 		let background = self.editor.background();
-		let Some(size) = self.window.as_ref().map(|state| self.text_size(&state.window)) else { return Ok(()) };
 		let Some(state) = &mut self.window else { return Ok(()) };
 
 		// Lets winit pace redraws to the display on Wayland (frame callbacks), so frames aren't drawn faster than
 		// they can be shown: with FIFO presentation, the extra frames queued up and made resizing lag.
 		let window = &state.window;
-		let frame = state.renderer.render(&mut self.fonts, size, || window.pre_present_notify());
+		let frame = state.renderer.render(&mut self.fonts, || window.pre_present_notify());
 
 		match frame {
 			// Text that slides after scrolling moves on in the next frame.
@@ -496,7 +498,7 @@ impl ApplicationHandler<AppEvent> for App {
 			WindowEvent::ScaleFactorChanged { .. } => {
 				self.resize_renderer();
 				self.update_shadow();
-				self.update_cell_size();
+				self.update_text_size();
 				self.refresh();
 				if let Err(error) = self.resize_nvim_ui(&window) {
 					self.exit_with_error(event_loop, error);
@@ -507,22 +509,20 @@ impl ApplicationHandler<AppEvent> for App {
 			},
 			WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
 			WindowEvent::CursorMoved { position, .. } => {
-				let event = self
-					.mouse
-					.moved(position, &self.editor, self.cell_size(&window), self.modifiers);
+				let event = self.mouse.moved(position, &self.editor, self.cell_size(), self.modifiers);
 				self.send_mouse(event);
 				self.update_pointer(&window);
 			},
 			WindowEvent::CursorLeft { .. } => self.mouse.left(),
 			WindowEvent::MouseInput { state, button, .. } => {
-				let cell = self.cell_size(&window);
+				let cell = self.cell_size();
 				let event = self.mouse.button(button, state, &self.editor, cell, self.modifiers);
 				self.send_mouse(event);
 				// A drag may end over something else.
 				self.update_pointer(&window);
 			},
 			WindowEvent::MouseWheel { delta, .. } => {
-				let events = self.mouse.wheel(delta, &self.editor, self.cell_size(&window), self.modifiers);
+				let events = self.mouse.wheel(delta, &self.editor, self.cell_size(), self.modifiers);
 				self.send_mouse(events);
 			},
 			// Synthetic presses are keys already held when the window gained focus.

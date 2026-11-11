@@ -13,7 +13,7 @@ use crate::font::LineMetrics;
 use crate::font::Run;
 use crate::quad::underline_band;
 use crate::renderer::{Piece, PieceKind};
-use crate::{CellLayer, CellSize, Fonts, RenderCell, RendererError, TextSize, TextStyle};
+use crate::{CellLayer, CellSize, FontId, Fonts, RenderCell, RendererError, TextStyle};
 
 /// Draws the text of cell layers with glyphon
 pub(crate) struct TextPipeline {
@@ -26,15 +26,19 @@ pub(crate) struct TextPipeline {
 	viewport: Viewport,
 	swash_cache: SwashCache,
 
-	/// Text size and fonts (their generation) the rows were laid out with
-	size: TextSize,
-	fonts: u32,
-
 	/// Laid-out rows of each piece, by layer id and which part of the layer it is
-	layers: HashMap<(u64, PieceKind), Vec<Row>>,
+	layers: HashMap<(u64, PieceKind), LaidOut>,
 
 	/// Text areas need a buffer; this empty one carries a row's custom glyphs.
 	empty: Buffer,
+}
+
+/// The rows of a piece, and the fonts they were laid out with: the set and its generation, so they're laid out again when
+/// the piece's fonts or their size change
+#[derive(Default)]
+struct LaidOut {
+	fonts: (FontId, u32),
+	rows: Vec<Row>,
 }
 
 /// One row of a cell layer: its cells as last drawn, and how they're drawn
@@ -67,15 +71,12 @@ impl TextPipeline {
 			renderers: Vec::new(),
 			viewport: Viewport::new(device, &cache),
 			swash_cache: SwashCache::new(),
-			size: TextSize::new(0.0),
-			fonts: 0,
 			layers: HashMap::new(),
 			empty: Buffer::new_empty(Metrics::new(1.0, 1.0)),
 		}
 	}
 
-	/// Lays out the rows of `pieces` that changed since the last frame, with text of `size`, and uploads their
-	/// glyphs.
+	/// Lays out the rows of `pieces` that changed since the last frame, each in its layer's fonts, and uploads their glyphs.
 	pub(crate) fn prepare(
 		&mut self,
 		device: &wgpu::Device,
@@ -83,31 +84,29 @@ impl TextPipeline {
 		resolution: Resolution,
 		fonts: &mut Fonts,
 		pieces: &[Piece],
-		size: TextSize,
 	) -> Result<(), RendererError> {
-		if (size, fonts.generation) != (self.size, self.fonts) {
-			(self.size, self.fonts) = (size, fonts.generation);
-			self.layers.clear();
-		}
-
 		// Forget pieces that are gone, e.g. closed floating windows.
 		self.layers.retain(|key, _| pieces.iter().any(|piece| key_of(piece) == *key));
 		for piece in pieces {
-			let rows = self.layers.entry(key_of(piece)).or_default();
-			update_rows(rows, &piece.layer, fonts, size, &mut self.swash_cache);
+			let laid_out = self.layers.entry(key_of(piece)).or_default();
+			let font = piece.layer.font;
+			if laid_out.fonts != (font, fonts.generation(font)) {
+				*laid_out = LaidOut { fonts: (font, fonts.generation(font)), rows: Vec::new() };
+			}
+			update_rows(&mut laid_out.rows, &piece.layer, fonts, &mut self.swash_cache);
 		}
 
 		self.viewport.update(queue, resolution);
 
-		// Custom glyphs are the cells sarthi draws itself, rasterized once per size.
-		let thickness = fonts.line_metrics(size).thickness;
 		for (index, piece) in pieces.iter().enumerate() {
+			// Custom glyphs are the cells sarthi draws itself, rasterized once per size.
+			let thickness = fonts.line_metrics(piece.layer.font).thickness;
 			if index == self.renderers.len() {
 				let renderer = TextRenderer::new(&mut self.atlas, device, wgpu::MultisampleState::default(), None);
 				self.renderers.push(renderer);
 			}
 
-			let text_areas = text_areas(&self.layers[&key_of(piece)], piece, &self.empty);
+			let text_areas = text_areas(&self.layers[&key_of(piece)].rows, piece, &self.empty);
 			self.renderers[index].prepare_with_custom(
 				device,
 				queue,
@@ -129,7 +128,8 @@ impl TextPipeline {
 	/// Where underlines in row `row` of `piece` break around the text's ink, as of the last prepare (see [`ink`])
 	pub(crate) fn ink(&self, piece: &Piece, row: usize) -> &[Range<f32>] {
 		let rows = self.layers.get(&key_of(piece));
-		rows.and_then(|rows| rows.get(row)).map_or(&[], |row| &row.layout.ink)
+		rows.and_then(|laid_out| laid_out.rows.get(row))
+			.map_or(&[], |row| &row.layout.ink)
 	}
 
 	/// Draws the text of the piece at `index` in the frame last prepared.
@@ -184,17 +184,12 @@ fn text_areas<'a>(rows: &'a [Row], piece: &Piece, empty: &'a Buffer) -> impl Ite
 	})
 }
 
-/// Lays out the rows of `layer` whose cells changed since `rows` were laid out. A changed row takes over the
-/// layout of another changed row that had the same cells, so content that only moved, e.g. after scrolling, isn't
-/// laid out again.
-fn update_rows(
-	rows: &mut Vec<Row>,
-	layer: &CellLayer,
-	fonts: &mut Fonts,
-	size: TextSize,
-	swash_cache: &mut SwashCache,
-) {
-	let (cell, lines) = (fonts.cell_size(size), fonts.line_metrics(size));
+/// Lays out the rows of `layer` whose cells changed since `rows` were laid out, in the layer's fonts. A changed row takes
+/// over the layout of another changed row that had the same cells, so content that only moved, e.g. after scrolling,
+/// isn't laid out again.
+fn update_rows(rows: &mut Vec<Row>, layer: &CellLayer, fonts: &mut Fonts, swash_cache: &mut SwashCache) {
+	let font = layer.font;
+	let (cell, lines) = (fonts.cell_size(font), fonts.line_metrics(font));
 	rows.resize_with(layer.height as usize, Row::default);
 	let width = (layer.width as usize).max(1);
 	let changed: Vec<usize> = (0..rows.len())
@@ -214,9 +209,9 @@ fn update_rows(
 	for index in changed {
 		let cells = &layer.cells[index * width..(index + 1) * width];
 		let layout = moved.get_mut(cells).and_then(Vec::pop).unwrap_or_else(|| {
-			let buffers: Vec<(u32, Buffer)> = segments(cells, |text| fonts.run_of(text))
+			let buffers: Vec<(u32, Buffer)> = segments(cells, |text| fonts.run_of(font, text))
 				.iter()
-				.map(|segment| (segment.col, layout(fonts, size.font_size, cell, segment)))
+				.map(|segment| (segment.col, layout(fonts, font, segment)))
 				.collect();
 			let ink = ink(cells, &buffers, cell, lines, fonts, swash_cache);
 			RowLayout { buffers, glyphs: builtin_glyphs(cells, cell), ink }
@@ -403,18 +398,19 @@ fn segments(cells: &[RenderCell], mut run_of: impl FnMut(&str) -> Run) -> Vec<Se
 	segments
 }
 
-/// Lays out `segment` in its font, in lines a cell high, with all text bold or italic if the fonts were chosen so. A
-/// glyph wider than its cells keeps its size, and draws over the cells after it.
-fn layout(fonts: &mut Fonts, font_size: f32, cell: CellSize, segment: &Segment) -> Buffer {
-	let family = fonts.family(segment.face).to_owned();
-	let (bold, italic) = (fonts.bold, fonts.italic);
+/// Lays out `segment` in its font of set `font`, in lines a cell high, with all text bold or italic if the fonts were
+/// chosen so. A glyph wider than its cells keeps its size, and draws over the cells after it.
+fn layout(fonts: &mut Fonts, font: FontId, segment: &Segment) -> Buffer {
+	let family = fonts.family(font, segment.face).to_owned();
+	let (bold, italic) = fonts.styles(font);
 	// The face of the segment's font each span is drawn with
 	let variants: Vec<(Weight, Style)> = segment
 		.spans
 		.iter()
-		.map(|(_, style)| fonts.variant(segment.face, style.bold || bold, style.italic || italic))
+		.map(|(_, style)| fonts.variant(font, segment.face, style.bold || bold, style.italic || italic))
 		.collect();
 
+	let (font_size, cell) = (fonts.text_size(font).font_size, fonts.cell_size(font));
 	let mut buffer = Buffer::new(&mut fonts.system, Metrics::new(font_size, cell.height as f32));
 	buffer.set_wrap(Wrap::None);
 	// Rounds advances to whole pixels, like the cell width, so the main font's glyphs line up with cells.
@@ -439,8 +435,8 @@ fn layout(fonts: &mut Fonts, font_size: f32, cell: CellSize, segment: &Segment) 
 mod tests {
 	use arrayvec::ArrayString;
 
-	use super::{CellLayer, Fonts, RenderCell, Run, Segment, TextSize, TextStyle, segments, update_rows};
-	use crate::{CellSize, Decoration};
+	use super::{CellLayer, Fonts, RenderCell, Run, Segment, TextStyle, segments, update_rows};
+	use crate::{CellSize, Decoration, FontId, TextSize};
 
 	const PLAIN: TextStyle = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
 	const BOLD: TextStyle = TextStyle { bold: true, ..PLAIN };
@@ -479,6 +475,7 @@ mod tests {
 			x: 0,
 			y: 0,
 			cell: CellSize { width: 8, height: 19 },
+			font: crate::FontId::MAIN,
 			width: 1,
 			height: rows.len() as u32,
 			cells: cells(rows, PLAIN),
@@ -596,13 +593,13 @@ mod tests {
 	#[test]
 	fn moved_rows_keep_their_layout() {
 		let mut fonts = Fonts::new();
-		let (size, mut swash) = (TextSize::new(14.0), glyphon::SwashCache::new());
+		let mut swash = glyphon::SwashCache::new();
 		let mut rows = Vec::new();
-		update_rows(&mut rows, &column(&["a", "b", "c"]), &mut fonts, size, &mut swash);
+		update_rows(&mut rows, &column(&["a", "b", "c"]), &mut fonts, &mut swash);
 		let laid_out: Vec<_> = rows.iter().map(|row| row.layout.buffers.as_ptr()).collect();
 
 		// Scrolled by one row: "b" and "c" moved up and keep their buffers, "d" is new.
-		update_rows(&mut rows, &column(&["b", "c", "d"]), &mut fonts, size, &mut swash);
+		update_rows(&mut rows, &column(&["b", "c", "d"]), &mut fonts, &mut swash);
 		let texts: Vec<_> = rows.iter().map(|row| row.cells[0].text.as_str()).collect();
 		assert_eq!(texts, ["b", "c", "d"]);
 		assert_eq!(rows[0].layout.buffers.as_ptr(), laid_out[1]);
@@ -613,12 +610,12 @@ mod tests {
 	#[test]
 	fn repeated_rows_each_keep_a_layout() {
 		let mut fonts = Fonts::new();
-		let (size, mut swash) = (TextSize::new(14.0), glyphon::SwashCache::new());
+		let mut swash = glyphon::SwashCache::new();
 		let mut rows = Vec::new();
-		update_rows(&mut rows, &column(&["a", "}", "}"]), &mut fonts, size, &mut swash);
+		update_rows(&mut rows, &column(&["a", "}", "}"]), &mut fonts, &mut swash);
 		let mut braces = vec![rows[1].layout.buffers.as_ptr(), rows[2].layout.buffers.as_ptr()];
 
-		update_rows(&mut rows, &column(&["}", "}", "b"]), &mut fonts, size, &mut swash);
+		update_rows(&mut rows, &column(&["}", "}", "b"]), &mut fonts, &mut swash);
 		let mut moved = vec![rows[0].layout.buffers.as_ptr(), rows[1].layout.buffers.as_ptr()];
 		braces.sort();
 		moved.sort();
@@ -633,14 +630,14 @@ mod tests {
 			eprintln!("skipped: Iosevka isn't installed");
 			return;
 		}
-		let cell = fonts.cell_size(TextSize::new(16.0));
+		fonts.set_size(FontId::MAIN, TextSize::new(16.0));
 
 		// Iosevka is often installed without a Bold (700) face, only Regular and Heavy. Bold text must still be
 		// drawn in Iosevka, not in another family that has a Bold face.
 		for (bold, italic) in [(true, false), (false, true), (true, true)] {
 			let style = TextStyle { bold, italic, ..PLAIN };
 			let segment = Segment { col: 0, face: Some(0), text: String::from("af"), spans: vec![(0..2, style)] };
-			let buffer = super::layout(&mut fonts, 16.0, cell, &segment);
+			let buffer = super::layout(&mut fonts, FontId::MAIN, &segment);
 			for glyph in buffer.layout_runs().flat_map(|run| run.glyphs) {
 				let face = fonts.system.db().face(glyph.font_id).unwrap();
 				assert_eq!(face.families[0].0, "Iosevka", "bold {bold}, italic {italic}: {}", face.post_script_name);
@@ -665,16 +662,16 @@ mod tests {
 		let mut swash = glyphon::SwashCache::new();
 		// Ink gaps are off unless turned on.
 		let underlines = crate::UnderlineSize { ink_gaps: Some(1.0), ..crate::UnderlineSize::default() };
-		let size = TextSize { underlines, ..TextSize::new(14.0) };
-		let cell = fonts.cell_size(size);
+		fonts.set_size(FontId::MAIN, TextSize { underlines, ..TextSize::new(14.0) });
+		let cell = fonts.cell_size(FontId::MAIN);
 		let width = cell.width as f32;
 
 		// "g" and "y" reach below the baseline; "a" and "e" don't. Each case gives the gaps' cells.
 		let gaps = |fonts: &mut Fonts, swash: &mut glyphon::SwashCache, text: &str, underline, lines| {
 			let layer = underlined(text, underline);
-			let buffers: Vec<_> = segments(&layer.cells, |text| fonts.run_of(text))
+			let buffers: Vec<_> = segments(&layer.cells, |text| fonts.run_of(FontId::MAIN, text))
 				.iter()
-				.map(|segment| (segment.col, super::layout(fonts, size.font_size, cell, segment)))
+				.map(|segment| (segment.col, super::layout(fonts, FontId::MAIN, segment)))
 				.collect();
 			let ink = super::ink(&layer.cells, &buffers, cell, lines, fonts, swash);
 			ink.iter()
@@ -684,33 +681,28 @@ mod tests {
 
 		// An underline across the descenders, like some fonts place it: it breaks at g and y only.
 		let lines = crate::font::LineMetrics {
-			underline_top: fonts.line_metrics(size).underline_top - 2.0,
-			..fonts.line_metrics(size)
+			underline_top: fonts.line_metrics(FontId::MAIN).underline_top - 2.0,
+			..fonts.line_metrics(FontId::MAIN)
 		};
 		assert_eq!(gaps(&mut fonts, &mut swash, "agey", crate::Underline::Single, lines), [(1, 1), (3, 3)]);
 		assert_eq!(gaps(&mut fonts, &mut swash, "ae", crate::Underline::Single, lines), []);
 
 		// The bundled font's own underline stays just below its descenders at 14 px, but an undercurl's taller wave
 		// crosses them.
-		let lines = fonts.line_metrics(size);
+		let lines = fonts.line_metrics(FontId::MAIN);
 		assert_eq!(gaps(&mut fonts, &mut swash, "agey", crate::Underline::Single, lines), []);
 		assert_eq!(gaps(&mut fonts, &mut swash, "agey", crate::Underline::Curly, lines), [(1, 1), (3, 3)]);
 
 		// Laid-out rows keep their gaps; without underlines, nothing is looked at.
 		let mut rows = Vec::new();
-		update_rows(&mut rows, &underlined("agey", crate::Underline::Curly), &mut fonts, size, &mut swash);
+		update_rows(&mut rows, &underlined("agey", crate::Underline::Curly), &mut fonts, &mut swash);
 		assert_eq!(rows[0].layout.ink.len(), 2);
-		update_rows(&mut rows, &column(&["g"]), &mut fonts, size, &mut swash);
+		update_rows(&mut rows, &column(&["g"]), &mut fonts, &mut swash);
 		assert_eq!(rows[0].layout.ink, []);
 
 		// Off by default
-		update_rows(
-			&mut rows,
-			&underlined("agey", crate::Underline::Curly),
-			&mut fonts,
-			TextSize::new(14.0),
-			&mut swash,
-		);
+		fonts.set_size(FontId::MAIN, TextSize::new(14.0));
+		update_rows(&mut rows, &underlined("agey", crate::Underline::Curly), &mut fonts, &mut swash);
 		assert_eq!(rows[0].layout.ink, []);
 	}
 }

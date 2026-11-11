@@ -1,12 +1,12 @@
-use renderer::{BarOrientation, CellLayer, CellSize, Cursor, Decoration, RenderCell, TextStyle};
+use renderer::{BarOrientation, CellLayer, CellSize, Cursor, Decoration, FontId, RenderCell, TextStyle};
 use rpc::neovim::CursorShape;
 
 use crate::cursor::CursorStyle;
 use crate::grid::Grid;
 use crate::highlight::HighlightState;
 
-/// A snapshot of grid `id` for the renderer, in cells of `cell`, with every cell's highlight resolved and, unless
-/// `cursor` is `None`, the cursor at the grid's cursor position. It's at the window's top-left corner, until placed.
+/// A snapshot of grid `id` for the renderer, in the main fonts' cells of `cell`, with every cell's highlight resolved and,
+/// unless `cursor` is `None`, the cursor at the grid's cursor position. It's at the window's top-left corner, until placed.
 pub fn cell_layer(
 	id: u32,
 	grid: &Grid,
@@ -38,6 +38,7 @@ pub fn cell_layer(
 		id: u64::from(id),
 		x: 0,
 		y: 0,
+		font: FontId::MAIN,
 		cell,
 		width: grid.width as u32,
 		height: grid.height as u32,
