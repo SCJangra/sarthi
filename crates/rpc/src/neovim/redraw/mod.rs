@@ -49,6 +49,8 @@ pub enum RedrawNotification {
 
 	WinFloatPos(#[tagged_enum(flatten)] Vec<WinFloatPosEvent>),
 
+	WinExternalPos(#[tagged_enum(flatten)] Vec<WinExternalPosEvent>),
+
 	WinHide(#[tagged_enum(flatten)] Vec<WinHideEvent>),
 
 	WinClose(#[tagged_enum(flatten)] Vec<WinCloseEvent>),

@@ -7,7 +7,8 @@ use serde::de::DeserializeOwned;
 
 use crate::{
 	ClientInfo, Error, ExecLua, GetChanInfo, Input, InputMouse, InputMouseParams, Message, RpcClient, SetClientInfo,
-	SetVar, UiAttach, UiAttachParams, UiSetFocus, UiTryResize, UiTryResizeParams,
+	SetVar, UiAttach, UiAttachParams, UiSetFocus, UiTryResize, UiTryResizeGrid, UiTryResizeGridParams,
+	UiTryResizeParams,
 };
 
 /// How long to wait for Neovim to exit on its own before killing it. Generous, since killing it
@@ -86,6 +87,11 @@ impl Nvim {
 	/// Asks Neovim to resize the UI, without waiting for it: the new size arrives with the redraws
 	pub fn ui_try_resize(&self, params: UiTryResizeParams) -> Result<(), Error> {
 		self.rpc.notify::<UiTryResize>(params).map_err(Error::Rpc)
+	}
+
+	/// Asks Neovim to resize the window of a grid, without waiting for it: the new size arrives with the redraws
+	pub fn ui_try_resize_grid(&self, params: UiTryResizeGridParams) -> Result<(), Error> {
+		self.rpc.notify::<UiTryResizeGrid>(params).map_err(Error::Rpc)
 	}
 
 	/// Types `keys`, in `:help key-notation`, without waiting for Neovim to process them

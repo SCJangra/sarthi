@@ -47,6 +47,15 @@ pub struct WinFloatPosEvent {
 	pub screen_col: u32,
 }
 
+/// Shows `grid` as an external window (`nvim_open_win` with `external`), which the UI places and sizes itself; its size
+/// comes with `grid_resize`. Sent again on resizes and tab switches: external windows show on every tab.
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct WinExternalPosEvent {
+	pub grid: u32,
+	pub win: Window,
+}
+
 /// Hides the window of `grid`, e.g. when switching tabs; it can be shown again later
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -91,7 +100,7 @@ mod tests {
 	use rmpv::Value;
 	use serde::de::IgnoredAny;
 
-	use super::{MsgSetPosEvent, WinCloseEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent};
+	use super::{MsgSetPosEvent, WinCloseEvent, WinExternalPosEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent};
 	use crate::{RedrawNotification, Window};
 
 	/// Decodes `[name, args...]` the way Neovim sends it
@@ -154,6 +163,14 @@ mod tests {
 		);
 		let RedrawNotification::WinFloatPos(events) = old else { panic!("{old:?}") };
 		assert_eq!((events[0].anchor_row, events[0].compindex, events[0].screen_row), (2.5, 0, 0));
+	}
+
+	#[test]
+	fn de_win_external_pos() {
+		// From Neovim 0.12, after `nvim_open_win(buf, false, { external = true, width = 20, height = 5 })`
+		let event = decode("win_external_pos", vec![vec![4.into(), win(0xE9)]]);
+		let expected = WinExternalPosEvent { grid: 4, win: Window(0x3E9) };
+		assert_eq!(event, RedrawNotification::WinExternalPos(vec![expected]));
 	}
 
 	#[test]

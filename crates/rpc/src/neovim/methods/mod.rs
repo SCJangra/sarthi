@@ -8,6 +8,7 @@ mod set_var;
 mod ui_attach;
 mod ui_set_focus;
 mod ui_try_resize;
+mod ui_try_resize_grid;
 
 pub use eval::*;
 pub use exec_lua::*;
@@ -19,3 +20,4 @@ pub use set_var::*;
 pub use ui_attach::*;
 pub use ui_set_focus::*;
 pub use ui_try_resize::*;
+pub use ui_try_resize_grid::*;
