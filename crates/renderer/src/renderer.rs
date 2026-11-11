@@ -360,6 +360,10 @@ pub(crate) struct Piece<'a> {
 
 	/// What's drawn outside this rectangle of the window is cut off: left, top, width, height in pixels
 	pub clip: [u32; 4],
+
+	/// Its layer's rectangle (left, top, width, height in pixels) and corner radius, if the corners are rounded: its
+	/// quads are cut to them, whichever part of the layer it draws
+	pub round: Option<([f32; 4], f32)>,
 }
 
 /// Which part of a layer a [`Piece`] draws
@@ -389,6 +393,7 @@ fn pieces<'a>(layers: &'a [Layer], scrolls: &ScrollAnimations, surface: (u32, u3
 	let mut cursor_piece = None;
 	for Layer::Cells(layer) in layers {
 		let whole = clip(layer.rect());
+		let round = (layer.corner_radius > 0.0).then(|| (layer.rect().map(|value| value as f32), layer.corner_radius));
 		let region = scrolls.region(layer, now);
 		// The sliding text is drawn over the layer: where what's under shows through, the layer's own text would too.
 		let see_through = layer.cells.iter().any(|cell| cell.blend > 0);
@@ -396,19 +401,19 @@ fn pieces<'a>(layers: &'a [Layer], scrolls: &ScrollAnimations, surface: (u32, u3
 			Some(region) if see_through => Cow::Owned(without(layer, region)),
 			_ => Cow::Borrowed(layer),
 		};
-		pieces.push(Piece { layer: base, kind: PieceKind::Layer, offset: 0.0, clip: whole });
+		pieces.push(Piece { layer: base, kind: PieceKind::Layer, offset: 0.0, clip: whole, round });
 
 		if let Some(region) = region {
 			let [x, y, width, _] = region.layer.rect();
 			let clip = clip([x, y, width, region.height * layer.cell.height]);
 			// Whole pixels keep the text sharp.
 			let offset = (region.offset * layer.cell.height as f32).round();
-			pieces.push(Piece { layer: Cow::Owned(region.layer), kind: PieceKind::Region, offset, clip });
+			pieces.push(Piece { layer: Cow::Owned(region.layer), kind: PieceKind::Region, offset, clip, round });
 		}
 
 		if let Some(cursor) = layer.cursor {
 			let layer = Cow::Owned(cursor_layer(layer, cursor));
-			cursor_piece = Some(Piece { layer, kind: PieceKind::Cursor, offset: 0.0, clip: whole });
+			cursor_piece = Some(Piece { layer, kind: PieceKind::Cursor, offset: 0.0, clip: whole, round });
 		}
 	}
 	// Over everything, like in the TUI
@@ -485,7 +490,7 @@ fn layer_quads(
 			area_shadow(frame, layer_shadow, srgb);
 		}
 		if let Some(outline) = layer.outline {
-			frame.quads.push(outline_quad(layer.rect(), outline, srgb));
+			frame.quads.push(outline_quad(layer.rect(), outline, layer.corner_radius, srgb));
 		}
 	}
 	let quads = &mut frame.quads;
@@ -501,6 +506,10 @@ fn layer_quads(
 	}
 	for quad in &mut quads[start..] {
 		quad.rect[1] += piece.offset;
+		// Cut to the layer's rounded corners, which don't move with sliding text
+		if let Some((clip, radius)) = piece.round {
+			(quad.clip, quad.clip_radius) = (clip, [radius, 0.0]);
+		}
 	}
 	LayerQuads {
 		around: around as u32..start as u32,
@@ -579,6 +588,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
+			corner_radius: 0.0,
 		})
 	}
 
@@ -782,7 +792,7 @@ mod tests {
 		let Layer::Cells(mut clear) = cell(1, " ", 0xFFFFFF);
 		clear.cells[0].blend = 100;
 		let area = vec![[3 * CELL.width, 0, CELL.width, CELL.height]];
-		let shadow = crate::LayerShadow { shadow, area };
+		let shadow = crate::LayerShadow { shadow, area, radius: 0.0 };
 		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, shadow: Some(shadow), ..clear });
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");
@@ -801,7 +811,7 @@ mod tests {
 		let shadow = crate::Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
 		let Layer::Cells(white) = cell(1, " ", 0xFFFFFF);
 		let area = vec![[3 * CELL.width, 0, CELL.width, CELL.height]];
-		let shadow = crate::LayerShadow { shadow, area };
+		let shadow = crate::LayerShadow { shadow, area, radius: 0.0 };
 		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, shadow: Some(shadow), ..white });
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");
@@ -836,6 +846,23 @@ mod tests {
 		// Just outside the cell, the line; further out, nothing; the cell itself keeps its own pixels.
 		assert_eq!((at(left - 1), at(left - 2), at(left)), ([255, 0, 0, 255], [0, 0, 0, 255], [255, 255, 255, 255]));
 		assert_eq!(at(left + cell.width), [255, 0, 0, 255]);
+	}
+
+	#[test]
+	fn gpu_rounded_corners_cut_the_layer() {
+		// A white cell at column 3 with corners rounded by 3 px, on black
+		let Layer::Cells(white) = cell(1, " ", 0xFFFFFF);
+		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, corner_radius: 3.0, ..white });
+		let Some((pixels, cell)) = drawn(&[layer], None) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		let at = |x: u32, y: u32| pixels[(y * WIDTH + x) as usize];
+		let left = 3 * cell.width;
+		// The corner pixel is outside the curve; along the edges and in the middle, the cell.
+		assert_eq!(at(left, 0), [0, 0, 0, 255]);
+		assert_eq!(at(left + cell.width - 1, 18), [0, 0, 0, 255]);
+		assert_eq!((at(left + 4, 0), at(left, 9)), ([255, 255, 255, 255], [255, 255, 255, 255]));
 	}
 
 	#[test]

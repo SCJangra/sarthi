@@ -185,6 +185,7 @@ impl Animation {
 			scroll: None,
 			shadow: None,
 			outline: None,
+			corner_radius: 0.0,
 		};
 		let (offset, height) = (first as f32 + offset, self.height() as u32);
 		SlidingRegion { layer: region_layer, offset, height, top: region.top, left: region.left }
@@ -261,6 +262,7 @@ mod tests {
 			scroll,
 			shadow: None,
 			outline: None,
+			corner_radius: 0.0,
 		})
 	}
 

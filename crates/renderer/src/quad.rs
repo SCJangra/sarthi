@@ -29,6 +29,13 @@ pub(crate) struct Quad {
 	/// For a shadow: where it isn't drawn, under what casts it, as rectangles of the frame's holes (see
 	/// [`QuadPipeline::prepare`]): the first, and how many
 	pub holes: [u32; 2],
+
+	/// A rounded rectangle what's drawn is cut to, like a window with rounded corners: left, top, width, height in pixels;
+	/// unused without a radius
+	pub clip: [f32; 4],
+
+	/// The clip's corner radius, and unused; 0 for no clip
+	pub clip_radius: [f32; 2],
 }
 
 const WAVE: f32 = 1.0;
@@ -47,12 +54,14 @@ impl Quad {
 			border_width: 0.0,
 			pattern: [0.0; 4],
 			holes: [0; 2],
+			clip: [0.0; 4],
+			clip_radius: [0.0; 2],
 		}
 	}
 
 	/// `shadow` under a rectangle `rect` (left, top, width, height), for a surface of the given kind: the quad reaches as
-	/// far as the shadow does.
-	pub fn shadow(rect: [f32; 4], shadow: Shadow, srgb_surface: bool) -> Self {
+	/// far as the shadow does. Its holes (see [`Quad::holes`]) have corners rounded by `hole_radius`.
+	pub fn shadow(rect: [f32; 4], shadow: Shadow, hole_radius: f32, srgb_surface: bool) -> Self {
 		// Three standard deviations of the blur, past which the shadow is gone
 		let reach = 1.5 * shadow.blur.max(0.0);
 		let [left, top, width, height] = rect;
@@ -60,7 +69,7 @@ impl Quad {
 		let rect = [left + x - reach, top + y - reach, width + 2.0 * reach, height + 2.0 * reach];
 		let [r, g, b, _] = rgba(shadow.color, srgb_surface);
 		let color = [r, g, b, shadow.opacity.clamp(0.0, 1.0)];
-		Self { pattern: [SHADOW, shadow.blur.max(0.0), 0.0, 0.0], ..Self::fill(rect, color) }
+		Self { pattern: [SHADOW, shadow.blur.max(0.0), hole_radius.max(0.0), 0.0], ..Self::fill(rect, color) }
 	}
 
 	/// A line of `kind` across `rect`, `thickness` pixels thick, repeating every `period` pixels
@@ -153,7 +162,8 @@ impl QuadPipeline {
 					array_stride: size_of::<Quad>() as u64,
 					step_mode: wgpu::VertexStepMode::Instance,
 					attributes: &wgpu::vertex_attr_array![
-						0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x2, 4 => Float32x4, 5 => Uint32x2
+						0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x2, 4 => Float32x4, 5 => Uint32x2,
+						6 => Float32x4, 7 => Float32x2
 					],
 				})],
 				compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -422,13 +432,16 @@ pub(crate) fn cursor_quad(quads: &mut Vec<Quad>, layer: &CellLayer, thickness: f
 	quads.push(Quad::fill(rect.map(|value| value as f32), rgba(cursor.color, srgb_surface)));
 }
 
-/// A quad for `outline` around a rectangle `rect` (left, top, width, height): a border just outside it, taking none of
-/// its pixels
-pub(crate) fn outline_quad(rect: [u32; 4], outline: Outline, srgb_surface: bool) -> Quad {
+/// A quad for `outline` around a rectangle `rect` (left, top, width, height) with corners rounded by `radius`: a border
+/// just outside it, taking none of its pixels
+pub(crate) fn outline_quad(rect: [u32; 4], outline: Outline, radius: f32, srgb_surface: bool) -> Quad {
 	let width = outline.width.max(0.0);
 	let [left, top, rect_width, rect_height] = rect.map(|value| value as f32);
 	let rect = [left - width, top - width, rect_width + 2.0 * width, rect_height + 2.0 * width];
-	Quad { border_color: rgba(outline.color, srgb_surface), border_width: width, ..Quad::fill(rect, [0.0; 4]) }
+	// Around rounded corners, rounded by as much more as it's wide, so it keeps its width
+	let corner_radius = if radius > 0.0 { radius + width } else { 0.0 };
+	let border_color = rgba(outline.color, srgb_surface);
+	Quad { border_color, border_width: width, corner_radius, ..Quad::fill(rect, [0.0; 4]) }
 }
 
 /// Adds the quads of `shadow`. Its area is first cut into rectangles that don't overlap: a blur
@@ -447,7 +460,7 @@ pub(crate) fn area_shadow(frame: &mut FrameQuads, shadow: &LayerShadow, srgb_sur
 	for rect in pieces {
 		frame
 			.quads
-			.push(Quad { holes: range, ..Quad::shadow(rect, shadow.shadow, srgb_surface) });
+			.push(Quad { holes: range, ..Quad::shadow(rect, shadow.shadow, shadow.radius, srgb_surface) });
 	}
 }
 
@@ -564,6 +577,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
+			corner_radius: 0.0,
 		};
 		let mut quads = Vec::new();
 		cursor_quad(&mut quads, &layer, 1.0, false);
@@ -599,6 +613,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
+			corner_radius: 0.0,
 		};
 		let lines = LineMetrics {
 			underline_top: 17.0,

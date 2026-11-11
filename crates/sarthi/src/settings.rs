@@ -91,7 +91,9 @@ fn style(settings: &Settings, options: &WindowOptions, filetype: &str, winblend:
 		highlight: outline.highlight,
 		color: None,
 	});
-	FloatStyle { shadow, outline, parent: None }
+	let corners = settings.corners.with(&options.corners);
+	let corners = shows(options.corners.enabled, corners.enabled, &corners.exclude_filetypes).then_some(corners.radius);
+	FloatStyle { shadow, outline, corners, parent: None }
 }
 
 /// How the renderer draws underlines, in logical pixels
@@ -110,8 +112,8 @@ mod tests {
 	use renderer::Motion;
 	use rpc::neovim::Window;
 	use rpc::sarthi::{
-		Animation, FloatWindow, OutlineOptions, ScrollOptions, ScrolledWindow, Settings, ShadowOptions, WindowOptions,
-		WindowVariable,
+		Animation, CornerOptions, FloatWindow, OutlineOptions, ScrollOptions, ScrolledWindow, Settings, ShadowOptions,
+		WindowOptions, WindowVariable,
 	};
 	use serde::de::IgnoredAny;
 
@@ -188,6 +190,25 @@ mod tests {
 		// In the color Neovim has for the group, if it has one
 		let colored = FloatWindow { outline_color: Some(0xFF0000), ..float("lua") };
 		assert_eq!(super::float_style(&settings, &colored, &none).outline.unwrap().color, Some(0xFF0000));
+	}
+
+	#[test]
+	fn corners() {
+		let mut settings = Settings::default();
+		let corners = |options: CornerOptions| WindowOptions { corners: options, ..Default::default() };
+		let none = WindowOptions::default();
+		// Square by default, unless the window says so, at the settings' radius or its own
+		assert_eq!(super::float_style(&settings, &float("lua"), &none).corners, None);
+		let on = corners(CornerOptions { enabled: Some(true), ..Default::default() });
+		assert_eq!(super::float_style(&settings, &float("lua"), &on).corners, Some(8.0));
+
+		settings.corners.enabled = true;
+		settings.corners.exclude_filetypes = vec![String::from("satellite")];
+		let radius = corners(CornerOptions { radius: Some(4.0), ..Default::default() });
+		assert_eq!(super::float_style(&settings, &float("lua"), &radius).corners, Some(4.0));
+		assert_eq!(super::float_style(&settings, &float("satellite"), &radius).corners, None);
+		let off = corners(CornerOptions { enabled: Some(false), ..Default::default() });
+		assert_eq!(super::float_style(&settings, &float("lua"), &off).corners, None);
 	}
 
 	#[test]

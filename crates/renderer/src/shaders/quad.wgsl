@@ -15,10 +15,14 @@ struct Quad {
 	// Corner radius, border width
 	@location(3) radius_border: vec2<f32>,
 	// Kind (0: none, 1: wave, 2: dots, 3: dashes), period and line thickness in pixels, unused; or for a shadow
-	// (kind 4), its blur radius in pixels
+	// (kind 4), its blur radius in pixels and its holes' corner radius
 	@location(4) pattern: vec4<f32>,
 	// For a shadow: the first of its holes, and how many
 	@location(5) holes: vec2<u32>,
+	// A rounded rectangle what's drawn is cut to: left, top, width, height in pixels
+	@location(6) clip: vec4<f32>,
+	// Its corner radius (0 for no clip), unused
+	@location(7) clip_radius: vec2<f32>,
 }
 
 struct VertexOutput {
@@ -31,6 +35,8 @@ struct VertexOutput {
 	@location(4) @interpolate(flat) radius_border: vec2<f32>,
 	@location(5) @interpolate(flat) pattern: vec4<f32>,
 	@location(6) @interpolate(flat) holes: vec2<u32>,
+	@location(7) @interpolate(flat) clip: vec4<f32>,
+	@location(8) @interpolate(flat) clip_radius: vec2<f32>,
 }
 
 @vertex
@@ -48,6 +54,8 @@ fn vs_main(@builtin(vertex_index) vertex: u32, quad: Quad) -> VertexOutput {
 	out.radius_border = quad.radius_border;
 	out.pattern = quad.pattern;
 	out.holes = quad.holes;
+	out.clip = quad.clip;
+	out.clip_radius = quad.clip_radius;
 	return out;
 }
 
@@ -56,6 +64,16 @@ fn vs_main(@builtin(vertex_index) vertex: u32, quad: Quad) -> VertexOutput {
 fn rounded_box(p: vec2<f32>, half_size: vec2<f32>, radius: f32) -> f32 {
 	let q = abs(p) - half_size + radius;
 	return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+// How much of this pixel the quad's clip leaves, a ramp across its rounded edge; all of it without a clip
+fn clip_coverage(in: VertexOutput) -> f32 {
+	if in.clip_radius.x <= 0.0 {
+		return 1.0;
+	}
+	let half = in.clip.zw * 0.5;
+	let radius = min(in.clip_radius.x, min(half.x, half.y));
+	return clamp(0.5 - rounded_box(in.position.xy - (in.clip.xy + half), half, radius), 0.0, 1.0);
 }
 
 // How much of this pixel a patterned line covers. The pattern follows the surface x, so it continues across
@@ -106,10 +124,12 @@ fn shadow_coverage(in: VertexOutput, sigma: f32) -> f32 {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	if u32(in.pattern.x + 0.5) == 4u {
-		// Only outside what casts it, like CSS's box-shadow
+		// Only outside what casts it, like CSS's box-shadow: its holes, with corners rounded like the window's
 		for (var i = in.holes.x; i < in.holes.x + in.holes.y; i++) {
 			let hole = holes[i];
-			if all(in.position.xy >= hole.xy) && all(in.position.xy < hole.xy + hole.zw) {
+			let half = hole.zw * 0.5;
+			let radius = min(in.pattern.z, min(half.x, half.y));
+			if rounded_box(in.position.xy - (hole.xy + half), half, radius) < 0.0 {
 				return vec4<f32>(0.0);
 			}
 		}
@@ -117,7 +137,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 		return vec4<f32>(in.color.rgb * in.color.a, in.color.a) * shadow_coverage(in, sigma);
 	}
 	if in.pattern.x > 0.5 {
-		return vec4<f32>(in.color.rgb * in.color.a, in.color.a) * pattern_coverage(in);
+		return vec4<f32>(in.color.rgb * in.color.a, in.color.a) * pattern_coverage(in) * clip_coverage(in);
 	}
 
 	let radius = min(in.radius_border.x, min(in.half_size.x, in.half_size.y));
@@ -134,5 +154,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	}
 
 	// Premultiplied alpha
-	return vec4<f32>(color.rgb * color.a, color.a) * coverage;
+	return vec4<f32>(color.rgb * color.a, color.a) * coverage * clip_coverage(in);
 }

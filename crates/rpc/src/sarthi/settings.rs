@@ -15,6 +15,7 @@ pub struct Settings {
 	pub cursor: CursorSettings,
 	pub shadow: ShadowSettings,
 	pub outline: OutlineSettings,
+	pub corners: CornerSettings,
 	pub underline: UnderlineSettings,
 	pub touchpad: TouchpadSettings,
 	pub window: WindowSettings,
@@ -181,6 +182,25 @@ impl Default for OutlineSettings {
 	}
 }
 
+/// Rounded corners of floating windows, in logical pixels
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CornerSettings {
+	/// Off by default: a window's text in its corner cells isn't cut to them
+	pub enabled: bool,
+
+	pub radius: f32,
+
+	/// Floating windows showing these filetypes keep square corners, unless their `w:sarthi` gives `corners.enabled`
+	pub exclude_filetypes: Vec<String>,
+}
+
+impl Default for CornerSettings {
+	fn default() -> Self {
+		Self { enabled: false, radius: 8.0, exclude_filetypes: Vec::new() }
+	}
+}
+
 /// The OS window: how see-through its background is, and whether the desktop behind it is blurred
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -277,6 +297,11 @@ window_options! {
 	OutlineOptions for OutlineSettings { enabled: bool, width: f32, highlight: String }
 }
 
+window_options! {
+	/// A window's own [`CornerSettings`]
+	CornerOptions for CornerSettings { enabled: bool, radius: f32 }
+}
+
 /// What a window's `w:sarthi` sets for it: the sections of the settings about a window, with the same keys. Each value
 /// given replaces the setting's for this window. `exclude_filetypes` is only in the settings: the window gives
 /// `enabled` itself.
@@ -286,6 +311,7 @@ pub struct WindowOptions {
 	pub scroll: ScrollOptions,
 	pub shadow: ShadowOptions,
 	pub outline: OutlineOptions,
+	pub corners: CornerOptions,
 }
 
 impl Settings {
@@ -295,6 +321,7 @@ impl Settings {
 			scroll: self.scroll.with(&options.scroll),
 			shadow: self.shadow.with(&options.shadow),
 			outline: self.outline.with(&options.outline),
+			corners: self.corners.with(&options.corners),
 			..self.clone()
 		}
 	}
@@ -308,6 +335,7 @@ impl Settings {
 		check(self.shadow.blur >= 0.0, "shadow.blur can't be negative")?;
 		check((0.0..=1.0).contains(&self.shadow.opacity), "shadow.opacity must be from 0 to 1")?;
 		check(self.outline.width > 0.0, "outline.width must be more than 0")?;
+		check(self.corners.radius >= 0.0, "corners.radius can't be negative")?;
 
 		let underline = &self.underline;
 		check(underline.thickness.is_none_or(|thickness| thickness > 0.0), "underline.thickness must be more than 0")?;
@@ -483,6 +511,16 @@ mod tests {
 		assert!(!Settings::default().outline.enabled);
 		let error = outline(vec![("width", Value::from(0))]).unwrap_err();
 		assert_eq!(error, "outline.width must be more than 0");
+	}
+
+	#[test]
+	fn corners() {
+		let corners = |pairs| parse(table(vec![("corners", table(pairs))]));
+		let settings = corners(vec![("enabled", Value::from(true))]).unwrap().corners;
+		assert_eq!((settings.enabled, settings.radius), (true, 8.0));
+		assert!(!Settings::default().corners.enabled);
+		let error = corners(vec![("radius", Value::from(-1))]).unwrap_err();
+		assert_eq!(error, "corners.radius can't be negative");
 	}
 
 	#[test]

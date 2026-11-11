@@ -43,6 +43,9 @@ pub struct CellLayer {
 
 	/// A line around the layer, just outside its cells, so it takes none of them
 	pub outline: Option<Outline>,
+
+	/// Radius of its rounded corners, in pixels; 0 for square ones. What's drawn in its cells is cut to them, except text.
+	pub corner_radius: f32,
 }
 
 impl CellLayer {
@@ -68,6 +71,10 @@ pub struct LayerShadow {
 
 	/// Rectangles in pixels from the window's top-left corner: left, top, width, height
 	pub area: Vec<[u32; 4]>,
+
+	/// Radius of the area's rounded corners, in pixels, under which the shadow is drawn too: a window's with rounded
+	/// corners
+	pub radius: f32,
 }
 
 /// A soft shadow under a rectangle, like CSS's `box-shadow`, in physical pixels

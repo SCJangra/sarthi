@@ -134,6 +134,9 @@ pub struct FloatStyle {
 	/// The line just outside its cells, if it has one
 	pub outline: Option<OutlineStyle>,
 
+	/// The radius of its rounded corners, if they are
+	pub corners: Option<f32>,
+
 	/// The floating window it's attached to, like a scrollbar to its menu: it shares that window's shadow.
 	pub parent: Option<Window>,
 }
@@ -342,11 +345,27 @@ impl Editor {
 		Some(Outline { width: outline.width * self.scale, color })
 	}
 
+	/// The radius of floating or external window `win`'s corners, in physical pixels: 0 for square ones
+	fn corners_of(&self, win: Window) -> f32 {
+		self.style_of(win).corners.map_or(0.0, |radius| radius * self.scale)
+	}
+
+	/// The width of floating or external window `win`'s outline in whole physical pixels, 0 without one
+	fn outline_width(&self, win: Window) -> u32 {
+		self.outline_of(win).map_or(0, |outline| outline.width.round().max(0.0) as u32)
+	}
+
 	/// What casts floating or external window `win`'s shadow, from its cells at `rect` (left, top, width, height in
 	/// pixels): its outer edge, its outline's
 	fn shadow_area(&self, win: Window, rect: [u32; 4]) -> [u32; 4] {
-		let outline = self.outline_of(win).map_or(0, |outline| outline.width.round().max(0.0) as u32);
-		outset(rect, outline)
+		outset(rect, self.outline_width(win))
+	}
+
+	/// The radius of the corners of what casts floating or external window `win`'s shadow (see
+	/// [`Editor::shadow_area`]): its outline goes around its rounded corners, so they're rounder by its width.
+	fn shadow_radius(&self, win: Window) -> f32 {
+		let radius = self.corners_of(win);
+		if radius > 0.0 { radius + self.outline_width(win) as f32 } else { 0.0 }
 	}
 
 	/// A `guifont` value the way [`Editor::guifont`] gives it: empty if it's Neovim's default
@@ -761,6 +780,7 @@ impl Editor {
 					let Layer::Cells(cells) = &mut layer;
 					cells.shadow = shadows.remove(&id);
 					cells.outline = self.outline_of(*win);
+					cells.corner_radius = self.corners_of(*win);
 					layers.push(layer);
 				},
 				Placement::Message { row, separator, .. } => {
@@ -855,10 +875,16 @@ impl Editor {
 				.iter_mut()
 				.find(|(group_level, _, group)| *group_level == level && group.shadow == shadow);
 			match same {
-				Some((_, _, group)) => group.area.push(rect),
+				// Rounded holes only under a lone window: a group's area is cut into bands, whose corners aren't the
+				// windows'.
+				Some((_, _, group)) => {
+					group.area.push(rect);
+					group.radius = 0.0;
+				},
 				None => {
 					let carrier = if groups.iter().any(|(group_level, ..)| *group_level == level) { id } else { first };
-					groups.push((level, carrier, LayerShadow { shadow, area: vec![rect] }));
+					let radius = self.shadow_radius(win);
+					groups.push((level, carrier, LayerShadow { shadow, area: vec![rect], radius }));
 				},
 			}
 		}
@@ -883,8 +909,10 @@ impl Editor {
 		let Layer::Cells(cells) = &mut layer;
 		[cells.x, cells.y, ..] = self.external_rect(id, win);
 		let area = vec![self.shadow_area(win, cells.rect())];
-		cells.shadow = self.shadow_of(win).map(|shadow| LayerShadow { shadow, area });
+		let radius = self.shadow_radius(win);
+		cells.shadow = self.shadow_of(win).map(|shadow| LayerShadow { shadow, area, radius });
 		cells.outline = self.outline_of(win);
+		cells.corner_radius = self.corners_of(win);
 		layer
 	}
 
@@ -1501,11 +1529,52 @@ mod tests {
 	}
 
 	#[test]
+	fn rounded_corners_of_floating_and_external_windows() {
+		let mut editor = screen();
+		let shadow = Some(Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 });
+		editor.set_default_float_style(FloatStyle { shadow, ..FloatStyle::default() });
+		let radius_of = |redraw: &Redraw, id: u64| {
+			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
+			(layer.corner_radius, layer.shadow.as_ref().map(|shadow| shadow.radius))
+		};
+		// A lone float, two floats side by side at another level, and an external window
+		let events = vec![
+			resize(3, 2, 1),
+			float_at_level(3, 0, 0, 1, 50),
+			resize(5, 2, 1),
+			float_at_level(5, 2, 0, 2, 60),
+			resize(6, 2, 1),
+			float_at_level(6, 2, 2, 3, 60),
+			resize(4, 2, 1),
+			external(4),
+		];
+		let redraw = flush(&mut editor, events);
+		assert_eq!(radius_of(&redraw, 3), (0.0, Some(0.0)), "square until a style rounds them");
+
+		editor.set_default_float_style(FloatStyle { shadow, corners: Some(3.0), ..FloatStyle::default() });
+		editor.set_scale(2.0);
+		let redraw = editor.refresh().expect("corners changed");
+		// In physical pixels. The lone float's shadow is rounded under it; the pair's, cut into bands, isn't.
+		assert_eq!(radius_of(&redraw, 3), (6.0, Some(6.0)));
+		assert_eq!((radius_of(&redraw, 5), radius_of(&redraw, 6)), ((6.0, Some(0.0)), (6.0, None)));
+		assert_eq!(radius_of(&redraw, 4), (6.0, Some(6.0)));
+		// Never the screen's or tiled windows'
+		assert_eq!(radius_of(&redraw, 1).0, 0.0);
+
+		// A window's own: square, or its own radius, with the shadow round its outline
+		editor.set_float_style(win_of(3), FloatStyle { shadow, ..FloatStyle::default() });
+		let outline = Some(OutlineStyle { width: 1.0, highlight: String::from("FloatBorder"), color: None });
+		editor.set_float_style(win_of(4), FloatStyle { shadow, outline, corners: Some(5.0), parent: None });
+		let redraw = editor.refresh().expect("their styles changed");
+		assert_eq!((radius_of(&redraw, 3), radius_of(&redraw, 4)), ((0.0, Some(0.0)), (10.0, Some(12.0))));
+	}
+
+	#[test]
 	fn the_shadow_is_cast_from_the_outline() {
 		let mut editor = screen();
 		let shadow = Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 };
 		let outline = Some(OutlineStyle { width: 2.0, highlight: String::from("FloatBorder"), color: None });
-		editor.set_default_float_style(FloatStyle { shadow: Some(shadow), outline, parent: None });
+		editor.set_default_float_style(FloatStyle { shadow: Some(shadow), outline, corners: None, parent: None });
 		let redraw = flush(&mut editor, vec![resize(3, 2, 1), float(3, 1, 1, 1)]);
 
 		// The float's cells and 2 pixels around them, which the outline covers: it doesn't hide the shadow's edge.
@@ -1524,20 +1593,23 @@ mod tests {
 		let redraw = flush(&mut editor, vec![line(3, 0, "a")]);
 		assert_eq!(shadow_of(&redraw, 3), None);
 
-		editor.set_default_float_style(FloatStyle { shadow: Some(shadow), outline: None, parent: None });
+		editor.set_default_float_style(FloatStyle { shadow: Some(shadow), outline: None, corners: None, parent: None });
 		let redraw = flush(&mut editor, vec![line(3, 0, "b")]);
 		// The float has it, under its own cells; the window doesn't.
 		assert_eq!((shadow_of(&redraw, 3), shadow_of(&redraw, 2)), (Some(vec![[1, 1, 2, 1]]), None));
 
 		// A float left out, until it isn't: either is a change to draw.
-		editor.set_float_style(win_of(3), FloatStyle { shadow: None, outline: None, parent: None });
+		editor.set_float_style(win_of(3), FloatStyle { shadow: None, outline: None, corners: None, parent: None });
 		assert_eq!(shadow_of(&flush(&mut editor, vec![]), 3), None);
-		editor.set_float_style(win_of(3), FloatStyle { shadow: Some(shadow), outline: None, parent: None });
+		editor.set_float_style(
+			win_of(3),
+			FloatStyle { shadow: Some(shadow), outline: None, corners: None, parent: None },
+		);
 		assert!(shadow_of(&flush(&mut editor, vec![]), 3).is_some());
 
 		// Changes on sarthi's side show without waiting for Neovim's next redraw, and only if there are any.
 		assert_eq!(editor.refresh(), None);
-		editor.set_float_style(win_of(3), FloatStyle { shadow: None, outline: None, parent: None });
+		editor.set_float_style(win_of(3), FloatStyle { shadow: None, outline: None, corners: None, parent: None });
 		let redraw = editor.refresh().expect("the shadow changed");
 		assert_eq!(shadow_of(&redraw, 3), None);
 
@@ -1550,7 +1622,7 @@ mod tests {
 	fn floats_at_one_level_share_a_shadow() {
 		let mut editor = screen();
 		let shadow = Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 };
-		editor.set_default_float_style(FloatStyle { shadow: Some(shadow), outline: None, parent: None });
+		editor.set_default_float_style(FloatStyle { shadow: Some(shadow), outline: None, corners: None, parent: None });
 		// 3 and 4 side by side at 50, like a picker's windows; 5 at 52 attached to 3, like a scrollbar; 6 at 100, a hover
 		// over them; 7 at 50, fully transparent
 		let mut events: Vec<_> = (3..=7).map(|id| resize(id, 2, 1)).collect();
@@ -1562,8 +1634,11 @@ mod tests {
 			float_at_level(7, 3, 0, 5, 50),
 		]);
 		flush(&mut editor, events);
-		editor.set_float_style(win_of(5), FloatStyle { shadow: Some(shadow), outline: None, parent: Some(win_of(3)) });
-		editor.set_float_style(win_of(7), FloatStyle { shadow: None, outline: None, parent: None });
+		editor.set_float_style(
+			win_of(5),
+			FloatStyle { shadow: Some(shadow), outline: None, corners: None, parent: Some(win_of(3)) },
+		);
+		editor.set_float_style(win_of(7), FloatStyle { shadow: None, outline: None, corners: None, parent: None });
 		let redraw = flush(&mut editor, vec![]);
 
 		// One shadow for 3, 4 and the attached 5, drawn with the first of them
@@ -1574,7 +1649,7 @@ mod tests {
 
 		// 4 with a shadow of its own: one for it, drawn with it, over 3's
 		let own = Shadow { opacity: 0.8, ..shadow };
-		editor.set_float_style(win_of(4), FloatStyle { shadow: Some(own), outline: None, parent: None });
+		editor.set_float_style(win_of(4), FloatStyle { shadow: Some(own), outline: None, corners: None, parent: None });
 		let redraw = flush(&mut editor, vec![]);
 		assert_eq!(shadow_of(&redraw, 3), Some(vec![[1, 1, 2, 1], [5, 1, 2, 1]]));
 		assert_eq!(shadow_of(&redraw, 4), Some(vec![[3, 1, 2, 1]]));

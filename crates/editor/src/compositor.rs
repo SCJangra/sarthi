@@ -47,6 +47,7 @@ pub fn cell_layer(
 		scroll: None,
 		shadow: None,
 		outline: None,
+		corner_radius: 0.0,
 	};
 	if let Some(style) = cursor {
 		draw_cursor(&mut layer, grid.cursor_row, grid.cursor_col, style, highlights);
