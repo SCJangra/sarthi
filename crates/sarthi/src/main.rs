@@ -5,6 +5,7 @@ mod error;
 mod guifont;
 mod input;
 mod mouse;
+mod place;
 mod settings;
 mod windows;
 

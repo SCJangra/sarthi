@@ -73,11 +73,11 @@ impl Default for WindowVariable {
 }
 
 /// Lua's window handles are plain numbers.
-fn window_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Window, D::Error> {
+pub(crate) fn window_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Window, D::Error> {
 	i64::deserialize(deserializer).map(Window)
 }
 
-fn optional_window_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Window>, D::Error> {
+pub(crate) fn optional_window_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Window>, D::Error> {
 	Option::<i64>::deserialize(deserializer).map(|handle| handle.map(Window))
 }
 

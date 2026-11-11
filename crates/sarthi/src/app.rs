@@ -18,8 +18,9 @@ use rpc::neovim::{
 	UiTryResizeParams,
 };
 use rpc::sarthi::{
-	ChangeFontSizeArgs, Copied, FloatsChangedArgs, GetClipboardArgs, MODULES, Request, ResetFontSizeArgs, STARTUP,
-	SetClipboardArgs, SetFontSizeArgs, Settings, SetupArgs, WinScrolledArgs, WindowOptions, WindowVariable,
+	ChangeFontSizeArgs, CheckWindowOptionsArgs, Copied, FloatsChangedArgs, GetClipboardArgs, MODULES, PlaceWindowArgs,
+	Request, ResetFontSizeArgs, STARTUP, SetClipboardArgs, SetFontSizeArgs, Settings, SetupArgs, WinScrolledArgs,
+	WindowOptions, WindowVariable,
 };
 
 use crate::blur::Blur;
@@ -28,6 +29,7 @@ use crate::error::Error;
 use crate::guifont::{self, FontSizes, GuiFont};
 use crate::input::neovim_keys;
 use crate::mouse::Mouse;
+use crate::place;
 use crate::settings;
 use crate::windows::{GridSize, WindowConfig};
 
@@ -385,6 +387,20 @@ impl App {
 			Request::ResetFontSize(ResetFontSizeArgs { guifont }) => {
 				let guifont = self.editor.strip_default_guifont(&guifont);
 				responder.respond(Ok::<_, String>(self.font_sizes.reset(guifont)));
+			},
+			// A mistake is raised in Lua, at the call that placed the window.
+			Request::PlaceWindow(PlaceWindowArgs { win, place }) => match place::place(place.as_deref()) {
+				Ok(place) => {
+					self.editor.set_external_place(win, place);
+					self.refresh();
+					responder.respond(Ok::<Option<String>, String>(None));
+				},
+				Err(mistake) => responder.respond(Ok::<_, String>(Some(mistake))),
+			},
+			// A mistake is raised in Lua, at the call that gave the window its options.
+			Request::CheckWindowOptions(CheckWindowOptionsArgs { options }) => {
+				let mistake = self.settings.for_window(&options).validate().err();
+				responder.respond(Ok::<_, String>(mistake));
 			},
 			Request::Other { method, .. } => responder.respond::<()>(Err(format!("sarthi doesn't know {method}"))),
 		}

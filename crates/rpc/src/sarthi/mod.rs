@@ -2,11 +2,13 @@
 
 mod clipboard;
 mod notifications;
+mod place;
 mod requests;
 mod settings;
 
 pub use clipboard::*;
 pub use notifications::*;
+pub use place::*;
 pub use requests::*;
 pub use settings::*;
 
@@ -14,8 +16,9 @@ pub use settings::*;
 pub const STARTUP: &str = include_str!("../../../../runtime/startup.lua");
 
 /// sarthi's Lua modules (`runtime/lua/`), by module name, preloaded at startup
-pub const MODULES: [(&str, &str); 5] = [
+pub const MODULES: [(&str, &str); 6] = [
 	("sarthi", include_str!("../../../../runtime/lua/sarthi/init.lua")),
+	("sarthi.api", include_str!("../../../../runtime/lua/sarthi/api.lua")),
 	("sarthi.rpc", include_str!("../../../../runtime/lua/sarthi/rpc.lua")),
 	("sarthi.clipboard", include_str!("../../../../runtime/lua/sarthi/clipboard.lua")),
 	("sarthi.scroll", include_str!("../../../../runtime/lua/sarthi/scroll.lua")),

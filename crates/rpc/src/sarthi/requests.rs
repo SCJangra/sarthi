@@ -5,7 +5,8 @@
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
-use crate::{DeserializeTaggedEnum, Register, Settings};
+use crate::sarthi::notifications::window_number;
+use crate::{DeserializeTaggedEnum, Register, Settings, Window, WindowOptions, WindowPlace};
 
 #[derive(Debug, DeserializeTaggedEnum)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -28,6 +29,14 @@ pub enum Request {
 	/// `require("sarthi").reset_font_size()`; answered with the `guifont` to set
 	ResetFontSize(ResetFontSizeArgs),
 
+	/// `require("sarthi").api` placing external window `win` (`sarthi.place`), or putting it back in the middle for no place;
+	/// answered with what's wrong with the place, if anything
+	PlaceWindow(PlaceWindowArgs),
+
+	/// `require("sarthi").api` checking a window's own values of the settings (`w:sarthi`) before setting them; answered
+	/// with what's wrong with their values, if anything. One sarthi can't decode fails the request.
+	CheckWindowOptions(CheckWindowOptionsArgs),
+
 	/// A method sarthi doesn't know
 	Other { method: String, value: IgnoredAny },
 }
@@ -37,6 +46,23 @@ pub enum Request {
 pub struct SetupArgs {
 	/// Boxed: the settings are large, and other messages shouldn't take their room.
 	pub settings: Box<Settings>,
+}
+
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct CheckWindowOptionsArgs {
+	/// Boxed like the settings
+	pub options: Box<WindowOptions>,
+}
+
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct PlaceWindowArgs {
+	#[serde(deserialize_with = "window_number")]
+	pub win: Window,
+
+	/// Boxed like the settings, so other messages don't take its room
+	pub place: Option<Box<WindowPlace>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,6 +150,14 @@ mod tests {
 		let settings = Value::Map(vec![(Value::from("scrol"), Value::Array(Vec::new()))]);
 		let error = decode("setup", vec![settings]).unwrap_err();
 		assert!(error.contains("unknown field `scrol`"), "{error}");
+
+		// A window's options: only what the settings have
+		let options =
+			Value::Map(vec![(Value::from("shadow"), Value::Map(vec![(Value::from("blur"), Value::from(4))]))]);
+		assert!(matches!(decode("check_window_options", vec![options]), Ok(Request::CheckWindowOptions(_))));
+		let options = Value::Map(vec![(Value::from("shadow"), Value::from(true))]);
+		let error = decode("check_window_options", vec![options]).unwrap_err();
+		assert!(error.contains("invalid type"), "{error}");
 
 		let request = decode("unknown", vec![]).unwrap();
 		assert!(matches!(&request, Request::Other { method, .. } if method == "unknown"), "{request:?}");

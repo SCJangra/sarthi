@@ -796,8 +796,8 @@ impl Editor {
 		Layer::Cells(layer)
 	}
 
-	/// External window `win`, grid `id`, as a layer where it's placed (see [`Editor::set_external_place`]), with a shadow
-	/// of its own if floats have one
+	/// External window `win`, grid `id`, as a layer where it's placed (see [`Editor::set_external_place`]), with the shadow
+	/// it casts, if any
 	fn external_layer(&self, id: u32, win: Window) -> Layer {
 		let mut layer = self.layer(id, 0, 0);
 		let Layer::Cells(cells) = &mut layer;

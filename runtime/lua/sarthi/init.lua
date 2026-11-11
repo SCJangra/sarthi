@@ -4,6 +4,9 @@ local rpc = require('sarthi.rpc')
 
 local M = {}
 
+--- Neovim's window functions that take a window config, with a `sarthi` table in it (see `sarthi.api`)
+M.api = require('sarthi.api')
+
 -- The settings given so far, merged
 local current = {}
 

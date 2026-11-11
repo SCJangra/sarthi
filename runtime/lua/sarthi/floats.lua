@@ -1,6 +1,7 @@
--- Tells sarthi about floating windows before Neovim draws them, so sarthi can decide how each looks, e.g. whether it
--- casts a shadow: it knows the settings, and Neovim knows each window's filetype, `w:sarthi` (its own values of the
--- settings), `winblend`, and the floating window it's attached to, if any. Sends a window again only when these change.
+-- Tells sarthi about floating windows, and external ones, before Neovim draws them, so sarthi can decide how each
+-- looks, e.g. whether it casts a shadow: it knows the settings, and Neovim knows each window's filetype, `w:sarthi` (its
+-- own values of the settings), `winblend`, and the floating window it's attached to, if any. Sends a window again only
+-- when these change.
 local rpc = require('sarthi.rpc')
 
 local M = {}
@@ -17,7 +18,7 @@ local function forward()
   local windows = {}
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     local config = vim.api.nvim_win_get_config(win)
-    if config.relative ~= '' then
+    if config.relative ~= '' or config.external then
       local window = {
         win = win,
         filetype = vim.bo[vim.api.nvim_win_get_buf(win)].filetype,
