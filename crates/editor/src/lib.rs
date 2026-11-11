@@ -62,6 +62,9 @@ pub struct Editor {
 	/// Size of the screen's cells, in pixels, which places the layers in the window
 	cell: CellSize,
 
+	/// The `order` of the next external window shown (see [`Placement::External`])
+	external_order: u64,
+
 	/// Whether anything changed since the last `flush`, so it's drawn on the next one
 	stale: bool,
 }
@@ -75,6 +78,10 @@ enum Placement {
 	/// Floating window `win` at a cell of the screen, in Neovim's drawing order of floats (`win_float_pos`). Without
 	/// `mouse`, clicks go to what's below it.
 	Float { win: Window, row: u32, col: u32, zindex: u32, compindex: u32, mouse: bool },
+
+	/// External window `win` (`win_external_pos`), which sarthi places itself: centered over the screen, over the floating
+	/// windows. Neovim ignores their `zindex`; they stack in the `order` they were first shown in.
+	External { win: Window, order: u64 },
 
 	/// The message grid, across the screen from `row` down (`msg_set_pos`). When messages scrolled over the windows,
 	/// a line of `separator` goes above them.
@@ -170,6 +177,7 @@ impl Editor {
 			mouse_move_events: false,
 			// Until set, a cell is a pixel.
 			cell: CellSize { width: 1, height: 1 },
+			external_order: 0,
 			stale: false,
 		}
 	}
@@ -271,7 +279,8 @@ impl Editor {
 				Placement::Float { row, col, mouse: true, .. } => (*row, *col, row + self.grids[&id].height as u32),
 				// Only its rows from `row` down show.
 				Placement::Message { row, .. } => (*row, 0, screen_height),
-				Placement::Float { .. } | Placement::Hidden => return None,
+				// An external window isn't on the screen's cells.
+				Placement::Float { .. } | Placement::External { .. } | Placement::Hidden => return None,
 			};
 			covers(id, top, left, bottom).then_some((id, top, left))
 		});
@@ -320,7 +329,7 @@ impl Editor {
 		match self.placements.get(&id)? {
 			Placement::Tiled { row, col } | Placement::Float { row, col, .. } => Some((*row, *col)),
 			Placement::Message { row, .. } => Some((*row, 0)),
-			Placement::Hidden => None,
+			Placement::External { .. } | Placement::Hidden => None,
 		}
 	}
 
@@ -394,6 +403,19 @@ impl Editor {
 					let (row, col, compindex) = (position.screen_row, position.screen_col, position.compindex);
 					let (win, zindex, mouse) = (position.win, position.zindex, position.mouse_enabled);
 					self.place(position.grid, Placement::Float { win, row, col, zindex, compindex, mouse });
+				}
+			},
+			RedrawNotification::WinExternalPos(positions) => {
+				for position in positions {
+					// Sent again on resizes and tab switches: the window keeps its place in the stack.
+					let order = match self.placements.get(&position.grid) {
+						Some(Placement::External { order, .. }) => *order,
+						_ => {
+							self.external_order += 1;
+							self.external_order
+						},
+					};
+					self.place(position.grid, Placement::External { win: position.win, order });
 				}
 			},
 			RedrawNotification::WinHide(hides) => {
@@ -523,16 +545,17 @@ impl Editor {
 	}
 
 	/// The grids shown over grid 1, in Neovim's drawing order, like its own compositor (`:help
-	/// ui-event-win_float_pos`): the windows, then floating windows and the message grid by `compindex`. Grids that
-	/// aren't placed aren't shown.
+	/// ui-event-win_float_pos`): the windows, then floating windows and the message grid by `compindex`; and over all of
+	/// them, the external windows in their order. Grids that aren't placed aren't shown.
 	fn stacked(&self) -> Vec<(u32, &Placement)> {
-		// Sort keys: tiled windows before floats and messages, then by Neovim's drawing order or grid id
+		// Sort keys: tiled windows, floats and messages, then external windows; within each, by drawing order or grid id
 		let mut placed: Vec<(u32, &Placement)> =
 			self.placements.iter().map(|(&id, placement)| (id, placement)).collect();
 		placed.retain(|(id, placement)| *placement != &Placement::Hidden && self.grids.contains_key(id));
 		placed.sort_by_key(|&(id, placement)| match placement {
-			Placement::Tiled { .. } | Placement::Hidden => (0, id),
-			Placement::Float { compindex, .. } | Placement::Message { compindex, .. } => (1 + compindex, id),
+			Placement::Tiled { .. } | Placement::Hidden => (0, 0, id),
+			Placement::Float { compindex, .. } | Placement::Message { compindex, .. } => (1, u64::from(*compindex), id),
+			Placement::External { order, .. } => (2, *order, id),
 		});
 		placed
 	}
@@ -589,6 +612,7 @@ impl Editor {
 					clip_rows(&mut layer, screen_height.saturating_sub(*row));
 					layers.push(self.see_through_cells(layer, (*row, 0), &[]));
 				},
+				Placement::External { .. } => layers.push(self.external_layer(id)),
 				Placement::Hidden => (),
 			}
 		}
@@ -680,6 +704,21 @@ impl Editor {
 		Layer::Cells(layer)
 	}
 
+	/// External window grid `id` as a layer centered over the screen, with a shadow of its own if floats have one
+	fn external_layer(&self, id: u32) -> Layer {
+		let mut layer = self.layer(id, 0, 0);
+		let Layer::Cells(cells) = &mut layer;
+		let [_, _, width, height] = cells.rect();
+		let (screen_width, screen_height) = self
+			.grids
+			.get(&1)
+			.map_or((0, 0), |grid| (grid.width as u32, grid.height as u32));
+		let (screen_width, screen_height) = (screen_width * self.cell.width, screen_height * self.cell.height);
+		(cells.x, cells.y) = (screen_width.saturating_sub(width) / 2, screen_height.saturating_sub(height) / 2);
+		cells.shadow = self.shadow.map(|shadow| LayerShadow { shadow, area: vec![cells.rect()] });
+		layer
+	}
+
 	/// How the text of grid `id`, `width` × `height` cells, scrolled since the last `flush`, if it did
 	fn scroll(&self, id: u32, width: u32, height: u32) -> Option<Scroll> {
 		let jumps = |viewport: &Viewport| viewport.win.is_some_and(|win| self.jumping.contains(&win));
@@ -731,8 +770,8 @@ mod tests {
 	use rpc::neovim::{
 		CellText, DefaultColorsSetEvent, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
 		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, OptionSetEvent, OptionValue,
-		RedrawNotification, WinCloseEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent, WinViewportEvent,
-		WinViewportMarginsEvent, Window,
+		RedrawNotification, WinCloseEvent, WinExternalPosEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent,
+		WinViewportEvent, WinViewportMarginsEvent, Window,
 	};
 	use serde::de::IgnoredAny;
 
@@ -828,6 +867,10 @@ mod tests {
 	fn win_pos(grid: u32, row: u32, col: u32) -> RedrawNotification {
 		let position = WinPosEvent { grid, win: IgnoredAny, start_row: row, start_col: col, width: 0, height: 0 };
 		RedrawNotification::WinPos(vec![position])
+	}
+
+	fn external(grid: u32) -> RedrawNotification {
+		RedrawNotification::WinExternalPos(vec![WinExternalPosEvent { grid, win: win_of(grid) }])
 	}
 
 	fn float(grid: u32, row: u32, col: u32, compindex: u32) -> RedrawNotification {
@@ -1096,6 +1139,42 @@ mod tests {
 		assert_eq!((at(3, 0), at(3, 3)), (Pointer::ResizeRows, Pointer::ResizeRows));
 		// Where they meet, and away from both
 		assert_eq!((at(3, 4), at(4, 8), at(1, 7)), (Pointer::ResizeRows, Pointer::Arrow, Pointer::Arrow));
+	}
+
+	#[test]
+	fn external_windows_are_centered_over_everything() {
+		let mut editor = screen();
+		editor.set_shadow(Some(Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 }));
+		// A float and a 4×2 external window: the screen is 80×80 pixels, the window 32×32.
+		let events = vec![resize(3, 2, 1), float(3, 0, 0, 5), resize(4, 4, 2), external(4)];
+		let redraw = flush(&mut editor, events);
+		let ids: Vec<u64> = redraw.layers.iter().map(|Layer::Cells(layer)| layer.id).collect();
+		assert_eq!(ids, [1, 3, 4]);
+		let Layer::Cells(window) = &redraw.layers[2];
+		assert_eq!((window.x, window.y), (24, 24));
+		// Its own shadow, under it
+		assert_eq!(shadow_of(&redraw, 4), Some(vec![[3, 1, 4, 2]]));
+
+		// A larger window is centered again.
+		let redraw = flush(&mut editor, vec![resize(4, 8, 4), external(4)]);
+		let Layer::Cells(window) = &redraw.layers[2];
+		assert_eq!((window.x, window.y), (8, 8));
+	}
+
+	#[test]
+	fn external_windows_keep_their_order() {
+		let mut editor = screen();
+		let events = vec![resize(4, 2, 1), resize(5, 2, 1), external(4), external(5)];
+		flush(&mut editor, events);
+		// Neovim sends the first again, e.g. after a tab switch: it stays under the second.
+		let redraw = flush(&mut editor, vec![external(4)]);
+		let ids: Vec<u64> = redraw.layers.iter().map(|Layer::Cells(layer)| layer.id).collect();
+		assert_eq!(ids, [1, 4, 5]);
+
+		// Closed, it's gone.
+		let closed = RedrawNotification::WinClose(vec![WinCloseEvent { grid: 4 }]);
+		let redraw = flush(&mut editor, vec![closed]);
+		assert_eq!(redraw.layers.len(), 2);
 	}
 
 	#[test]
