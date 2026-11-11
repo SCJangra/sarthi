@@ -2,6 +2,7 @@
 
 pub mod compositor;
 pub mod cursor;
+pub mod external;
 pub mod grid;
 pub mod highlight;
 
@@ -12,6 +13,8 @@ use rpc::neovim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotific
 
 use crate::compositor::cell_layer;
 use crate::cursor::CursorState;
+use crate::external::at_cursor;
+pub use crate::external::{Anchor, Place, Relative};
 use crate::grid::Grid;
 use crate::highlight::HighlightState;
 
@@ -64,6 +67,9 @@ pub struct Editor {
 
 	/// The `order` of the next external window shown (see [`Placement::External`])
 	external_order: u64,
+
+	/// Where external windows go, by window; centered unless placed (see [`Editor::set_external_place`])
+	places: HashMap<Window, Place>,
 
 	/// Whether anything changed since the last `flush`, so it's drawn on the next one
 	stale: bool,
@@ -178,6 +184,7 @@ impl Editor {
 			// Until set, a cell is a pixel.
 			cell: CellSize { width: 1, height: 1 },
 			external_order: 0,
+			places: HashMap::new(),
 			stale: false,
 		}
 	}
@@ -236,6 +243,17 @@ impl Editor {
 	pub fn set_shadow(&mut self, shadow: Option<Shadow>) {
 		self.shadow = shadow;
 		self.stale = true;
+	}
+
+	/// Where external window `win` goes, from now on until it closes. One placed by the cursor goes where the cursor is
+	/// now.
+	pub fn set_external_place(&mut self, win: Window, place: Place) {
+		let cursor = self.grids.get(&self.cursor_grid).and_then(|grid| {
+			let (row, col) = self.grid_origin(self.cursor_grid)?;
+			Some((row + grid.cursor_row as u32, col + grid.cursor_col as u32))
+		});
+		let place = at_cursor(place, cursor.unwrap_or((0, 0)));
+		self.stale |= self.places.insert(win, place) != Some(place);
 	}
 
 	/// Floating window `win`'s part in the shadow; until set, it casts one and isn't attached
@@ -359,8 +377,10 @@ impl Editor {
 					if let Some(win) = self.viewports.remove(&destroy.grid).and_then(|viewport| viewport.win) {
 						self.jumping.remove(&win);
 					}
-					if let Some(Placement::Float { win, .. }) = self.placements.remove(&destroy.grid) {
-						self.floats.remove(&win);
+					match self.placements.remove(&destroy.grid) {
+						Some(Placement::Float { win, .. }) => _ = self.floats.remove(&win),
+						Some(Placement::External { win, .. }) => _ = self.places.remove(&win),
+						_ => (),
 					}
 					self.stale = true;
 				}
@@ -612,7 +632,7 @@ impl Editor {
 					clip_rows(&mut layer, screen_height.saturating_sub(*row));
 					layers.push(self.see_through_cells(layer, (*row, 0), &[]));
 				},
-				Placement::External { .. } => layers.push(self.external_layer(id)),
+				Placement::External { win, .. } => layers.push(self.external_layer(id, *win)),
 				Placement::Hidden => (),
 			}
 		}
@@ -704,17 +724,23 @@ impl Editor {
 		Layer::Cells(layer)
 	}
 
-	/// External window grid `id` as a layer centered over the screen, with a shadow of its own if floats have one
-	fn external_layer(&self, id: u32) -> Layer {
+	/// External window `win`, grid `id`, as a layer where it's placed (see [`Editor::set_external_place`]), with a shadow
+	/// of its own if floats have one
+	fn external_layer(&self, id: u32, win: Window) -> Layer {
 		let mut layer = self.layer(id, 0, 0);
 		let Layer::Cells(cells) = &mut layer;
 		let [_, _, width, height] = cells.rect();
-		let (screen_width, screen_height) = self
+		let screen = self
 			.grids
 			.get(&1)
-			.map_or((0, 0), |grid| (grid.width as u32, grid.height as u32));
-		let (screen_width, screen_height) = (screen_width * self.cell.width, screen_height * self.cell.height);
-		(cells.x, cells.y) = (screen_width.saturating_sub(width) / 2, screen_height.saturating_sub(height) / 2);
+			.map_or([0, 0], |grid| [grid.width as u32 * self.cell.width, grid.height as u32 * self.cell.height]);
+		let place = self.places.get(&win).copied().unwrap_or(Place::Center);
+		// A window's grid, by the window: every window has a viewport.
+		let origin = |win: Window| {
+			let (&grid, _) = self.viewports.iter().find(|(_, viewport)| viewport.win == Some(win))?;
+			self.grid_origin(grid)
+		};
+		[cells.x, cells.y] = external::position(place, [width, height], screen, self.cell, origin);
 		cells.shadow = self.shadow.map(|shadow| LayerShadow { shadow, area: vec![cells.rect()] });
 		layer
 	}
@@ -775,7 +801,7 @@ mod tests {
 	};
 	use serde::de::IgnoredAny;
 
-	use super::{Editor, FloatShadow, GridPosition, Pointer, Redraw};
+	use super::{Anchor, Editor, FloatShadow, GridPosition, Place, Pointer, Redraw, Relative};
 
 	const FG: u32 = 0xC7C7C7;
 	const BG: u32 = 0x1C1C1C;
@@ -1159,6 +1185,31 @@ mod tests {
 		let redraw = flush(&mut editor, vec![resize(4, 8, 4), external(4)]);
 		let Layer::Cells(window) = &redraw.layers[2];
 		assert_eq!((window.x, window.y), (8, 8));
+	}
+
+	#[test]
+	fn external_windows_go_where_placed() {
+		let mut editor = screen();
+		let at = |redraw: &Redraw| {
+			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 4).unwrap();
+			(layer.x, layer.y)
+		};
+		// A 2×1 external window a row below window 2's top-left corner
+		flush(&mut editor, vec![win_pos(2, 1, 6), viewport(2, 10, 0), resize(4, 2, 1), external(4)]);
+		let below =
+			Place::Relative { relative: Relative::Win(win_of(2)), anchor: Anchor::NorthWest, row: 1.0, col: 0.0 };
+		editor.set_external_place(win_of(4), below);
+		assert_eq!(at(&editor.refresh().expect("placed")), (6 * 8, 2 * 16));
+
+		// It follows the window.
+		assert_eq!(at(&flush(&mut editor, vec![win_pos(2, 2, 0)])), (0, 3 * 16));
+
+		// Placed by the cursor, it goes where the cursor is, and stays there.
+		flush(&mut editor, vec![goto(1, 3, 4)]);
+		let cursor = Place::Relative { relative: Relative::Cursor, anchor: Anchor::NorthWest, row: 1.0, col: 0.0 };
+		editor.set_external_place(win_of(4), cursor);
+		assert_eq!(at(&editor.refresh().expect("placed")), (4 * 8, 4 * 16));
+		assert_eq!(at(&flush(&mut editor, vec![goto(1, 0, 0)])), (4 * 8, 4 * 16));
 	}
 
 	#[test]
