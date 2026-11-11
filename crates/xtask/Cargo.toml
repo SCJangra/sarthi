@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+version = { workspace = true }
+edition = { workspace = true }
+publish = false
+
+[dependencies]
+rpc = { workspace = true }
+rmpv = { workspace = true }
+rmp-serde = { workspace = true }
+serde = { workspace = true }

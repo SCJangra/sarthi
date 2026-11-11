@@ -4,277 +4,46 @@
 //! The sections about a window can be set for one window too, in its `w:sarthi` table ([`WindowOptions`]): the same
 //! sections with the same keys, each replacing the setting's value for that window, e.g.
 //! `vim.w[win].sarthi = { shadow = { opacity = 0.6 } }`.
+//!
+//! Each section is declared with [`section!`], which also keeps what the help file (`:help sarthi`) says about it: its
+//! doc comments, its keys' types, and which keys a window can have its own values of. The help file's defaults are what
+//! serde gives for an empty table.
 
-use serde::Deserialize;
-use serde::de::{self, Deserializer, Visitor};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Settings {
-	pub scroll: ScrollSettings,
-	pub cursor: CursorSettings,
-	pub shadow: ShadowSettings,
-	pub outline: OutlineSettings,
-	pub corners: CornerSettings,
-	pub padding: PaddingSettings,
-	pub underline: UnderlineSettings,
-	pub touchpad: TouchpadSettings,
-	pub window: WindowSettings,
+/// A key of a section of the settings, as declared, for the help file
+#[derive(Debug)]
+pub struct Key {
+	pub name: &'static str,
+
+	/// Its Rust type, as written
+	pub rust_type: &'static str,
+
+	/// Its Lua type where the Rust type doesn't say it, e.g. `number|false`; empty otherwise
+	pub lua_type: &'static str,
+
+	/// Its doc comment, line by line
+	pub doc: &'static [&'static str],
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct ScrollSettings {
-	/// Whether text that scrolled slides to its new place, or jumps there
-	pub enabled: bool,
+/// A section of the settings, as declared with [`section!`], for the help file
+pub trait Section {
+	/// Its doc comment, line by line
+	const DOC: &'static [&'static str];
 
-	/// How it moves to its new place
-	pub animation: Animation,
+	const KEYS: &'static [Key];
 
-	/// Windows showing these filetypes jump to their new place, e.g. menus whose selected line is highlighted text,
-	/// unless their `w:sarthi` gives `scroll.enabled`
-	pub exclude_filetypes: Vec<String>,
+	/// The keys a window can have its own values of, in `w:sarthi`
+	const WINDOW_KEYS: &'static [&'static str];
 }
 
-impl Default for ScrollSettings {
-	fn default() -> Self {
-		Self { enabled: true, animation: Animation::default(), exclude_filetypes: Vec::new() }
-	}
-}
-
-/// An animation's curve, e.g. `{ curve = "spring", stiffness = 400, damping = 32 }`. Durations are in milliseconds.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
-#[serde(tag = "curve", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Animation {
-	/// No animation: text jumps to its new place.
-	None,
-
-	/// Like a weight on a spring: pulled by `stiffness`, slowed by `damping`. With less damping than
-	/// 2 × √stiffness it overshoots and bounces back.
-	Spring {
-		#[serde(default = "default_stiffness")]
-		stiffness: f32,
-		#[serde(default = "default_damping")]
-		damping: f32,
-	},
-
-	Linear {
-		#[serde(default = "default_duration")]
-		duration: f32,
-	},
-
-	/// Fast at first, then slowing down
-	EaseOut {
-		#[serde(default = "default_duration")]
-		duration: f32,
-	},
-
-	/// Speeding up, then slowing down
-	EaseInOut {
-		#[serde(default = "default_duration")]
-		duration: f32,
-	},
-
-	/// Like CSS's `cubic-bezier()`: `points` are x1, y1, x2, y2, with the x values from 0 to 1
-	CubicBezier {
-		points: [f32; 4],
-		#[serde(default = "default_duration")]
-		duration: f32,
-	},
-}
-
-fn default_stiffness() -> f32 {
-	400.0
-}
-
-fn default_damping() -> f32 {
-	32.0
-}
-
-fn default_duration() -> f32 {
-	150.0
-}
-
-impl Default for Animation {
-	fn default() -> Self {
-		Self::Spring { stiffness: default_stiffness(), damping: default_damping() }
-	}
-}
-
-/// How the cursor moves to a new place: its corners each on their way, the leading ones faster, so it stretches towards
-/// where it goes and shrinks back as it arrives
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct CursorSettings {
-	/// For moves farther than a couple of cells along a row
-	pub animation: Animation,
-
-	/// For short moves along a row, like typing
-	pub short_animation: Animation,
-
-	/// How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1, where
-	/// its leading edge is there at once
-	pub trail: f32,
-
-	/// Whether moves in insert and replace mode animate, e.g. while typing
-	pub animate_insert_mode: bool,
-
-	/// Whether moves into and out of the command line animate
-	pub animate_cmdline: bool,
-}
-
-impl Default for CursorSettings {
-	fn default() -> Self {
-		Self {
-			animation: Animation::Spring { stiffness: 700.0, damping: 53.0 },
-			short_animation: Animation::EaseOut { duration: 40.0 },
-			trail: 0.7,
-			animate_insert_mode: true,
-			animate_cmdline: true,
-		}
-	}
-}
-
-/// The shadow under floating windows, in logical pixels
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct ShadowSettings {
-	pub enabled: bool,
-
-	/// How far the edge fades out, like CSS's blur radius
-	pub blur: f32,
-
-	/// How far the shadow is moved from the window: right and down, or left and up if negative
-	pub offset: [f32; 2],
-
-	/// From 0, invisible, to 1, black where fully shadowed
-	pub opacity: f32,
-
-	/// Floating windows showing these filetypes have no shadow, e.g. scrollbars, unless their `w:sarthi` gives
-	/// `shadow.enabled`
-	pub exclude_filetypes: Vec<String>,
-}
-
-impl Default for ShadowSettings {
-	fn default() -> Self {
-		Self { enabled: true, blur: 16.0, offset: [0.0, 4.0], opacity: 0.3, exclude_filetypes: Vec::new() }
-	}
-}
-
-/// A line around floating windows, just outside them, in logical pixels
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct OutlineSettings {
-	/// Off by default: a window with a border of its own (`nvim_open_win()`'s `border`) would have two
-	pub enabled: bool,
-
-	pub width: f32,
-
-	/// The highlight group whose text color the line has
-	pub highlight: String,
-
-	/// Floating windows showing these filetypes have no outline, unless their `w:sarthi` gives `outline.enabled`
-	pub exclude_filetypes: Vec<String>,
-}
-
-impl Default for OutlineSettings {
-	fn default() -> Self {
-		Self { enabled: false, width: 1.0, highlight: String::from("FloatBorder"), exclude_filetypes: Vec::new() }
-	}
-}
-
-/// Rounded corners of floating windows, in logical pixels
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct CornerSettings {
-	/// Off by default: a window's text in its corner cells isn't cut to them
-	pub enabled: bool,
-
-	pub radius: f32,
-
-	/// Floating windows showing these filetypes keep square corners, unless their `w:sarthi` gives `corners.enabled`
-	pub exclude_filetypes: Vec<String>,
-}
-
-impl Default for CornerSettings {
-	fn default() -> Self {
-		Self { enabled: false, radius: 8.0, exclude_filetypes: Vec::new() }
-	}
-}
-
-/// Space around floating windows' cells, in their background, in logical pixels
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct PaddingSettings {
-	pub enabled: bool,
-
-	pub size: f32,
-
-	/// Floating windows showing these filetypes have no padding, unless their `w:sarthi` gives `padding.enabled`
-	pub exclude_filetypes: Vec<String>,
-}
-
-impl Default for PaddingSettings {
-	fn default() -> Self {
-		Self { enabled: false, size: 4.0, exclude_filetypes: Vec::new() }
-	}
-}
-
-/// The OS window: how see-through its background is, and whether the desktop behind it is blurred
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct WindowSettings {
-	/// How opaque the editor's background is, from 0 to 1. Text, highlighted backgrounds and floating windows stay
-	/// opaque. Needs a compositor that shows windows' transparency.
-	pub opacity: f32,
-
-	/// Whether the desktop behind a see-through background is blurred. The compositor does it, where it can (e.g. KDE
-	/// Plasma, macOS); elsewhere the background is only see-through.
-	pub blur: bool,
-}
-
-impl Default for WindowSettings {
-	fn default() -> Self {
-		Self { opacity: 1.0, blur: false }
-	}
-}
-
-/// How underlines are drawn, as adjustments to the font's own, in logical pixels
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct UnderlineSettings {
-	/// Moves underlines down from the font's position, or up if negative
-	pub offset: f32,
-
-	/// Thickness of every line (underlines, overlines, strikethroughs), or `false` for the font's
-	#[serde(deserialize_with = "number_or_false")]
-	pub thickness: Option<f32>,
-
-	/// Height of an undercurl's wave, in line thicknesses
-	pub wave_height: f32,
-
-	/// Space kept between underlines and the text's ink where it crosses them, or `false` to draw through it
-	#[serde(deserialize_with = "number_or_false")]
-	pub ink_gaps: Option<f32>,
-}
-
-impl Default for UnderlineSettings {
-	fn default() -> Self {
-		Self { offset: 0.0, thickness: None, wave_height: 2.0, ink_gaps: None }
-	}
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct TouchpadSettings {
-	/// Lines scrolled per row of finger movement: 1 follows the fingers, more scrolls faster
-	pub scroll_speed: f64,
-}
-
-impl Default for TouchpadSettings {
-	fn default() -> Self {
-		Self { scroll_speed: 3.0 }
-	}
+/// A section of the settings, by its name in them (see [`SECTIONS`])
+#[derive(Debug)]
+pub struct SectionDoc {
+	pub name: &'static str,
+	pub doc: &'static [&'static str],
+	pub keys: &'static [Key],
+	pub window_keys: &'static [&'static str],
 }
 
 /// Declares `$options`, the values of settings section `$settings` that one window can have of its own: each optional,
@@ -301,29 +70,320 @@ macro_rules! window_options {
 	};
 }
 
-window_options! {
-	/// A window's own [`ScrollSettings`]
-	ScrollOptions for ScrollSettings { enabled: bool, animation: Animation }
+/// Declares a section of the settings: a struct with each key's doc comment, type, Lua type if its Rust type doesn't say
+/// it (`as "number|false"`), and default (`= …`), which serde gives for a key left out. `window $options { … }` names
+/// the keys a window can have its own values of (see [`window_options!`]).
+macro_rules! section {
+	(
+		$(#[doc = $doc:literal])*
+		$name:ident $(, window $options:ident { $($window:ident: $window_type:ty),* $(,)? })? {
+			$(
+				$(#[doc = $key_doc:literal])*
+				$(#[serde($($serde:tt)*)])?
+				$key:ident: $type:ty $(as $lua:literal)? = $default:expr
+			),* $(,)?
+		}
+	) => {
+		$(#[doc = $doc])*
+		#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+		#[serde(default, deny_unknown_fields)]
+		pub struct $name {
+			$(
+				$(#[doc = $key_doc])*
+				$(#[serde($($serde)*)])?
+				pub $key: $type,
+			)*
+		}
+
+		impl Default for $name {
+			fn default() -> Self {
+				Self { $($key: $default,)* }
+			}
+		}
+
+		impl Section for $name {
+			const DOC: &'static [&'static str] = &[$($doc),*];
+			const KEYS: &'static [Key] = &[$(Key {
+				name: stringify!($key),
+				rust_type: stringify!($type),
+				lua_type: concat!("" $(, $lua)?),
+				doc: &[$($key_doc),*],
+			}),*];
+			const WINDOW_KEYS: &'static [&'static str] = &[$($(stringify!($window)),*)?];
+		}
+
+		$(window_options! {
+			#[doc = concat!("A window's own [`", stringify!($name), "`]")]
+			$options for $name { $($window: $window_type),* }
+		})?
+	};
 }
 
-window_options! {
-	/// A window's own [`ShadowSettings`]
-	ShadowOptions for ShadowSettings { enabled: bool, blur: f32, offset: [f32; 2], opacity: f32 }
+/// Declares [`Settings`], with the sections in the order the help file lists them, and [`SECTIONS`]
+macro_rules! settings {
+	($($section:ident: $type:ident),* $(,)?) => {
+		#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+		#[serde(default, deny_unknown_fields)]
+		pub struct Settings {
+			$(pub $section: $type,)*
+		}
+
+		/// Every section of the settings, in order, for the help file
+		pub const SECTIONS: &[SectionDoc] = &[$(SectionDoc {
+			name: stringify!($section),
+			doc: <$type as Section>::DOC,
+			keys: <$type as Section>::KEYS,
+			window_keys: <$type as Section>::WINDOW_KEYS,
+		}),*];
+	};
 }
 
-window_options! {
-	/// A window's own [`OutlineSettings`]
-	OutlineOptions for OutlineSettings { enabled: bool, width: f32, highlight: String }
+settings! {
+	scroll: ScrollSettings,
+	cursor: CursorSettings,
+	shadow: ShadowSettings,
+	outline: OutlineSettings,
+	corners: CornerSettings,
+	padding: PaddingSettings,
+	underline: UnderlineSettings,
+	touchpad: TouchpadSettings,
+	window: WindowSettings,
 }
 
-window_options! {
-	/// A window's own [`CornerSettings`]
-	CornerOptions for CornerSettings { enabled: bool, radius: f32 }
+section! {
+	/// How text that scrolled moves to its new place
+	ScrollSettings, window ScrollOptions { enabled: bool, animation: Animation } {
+		/// Whether text that scrolled slides to its new place, or jumps there
+		enabled: bool = true,
+
+		/// How it moves to its new place
+		animation: Animation = Animation::default(),
+
+		/// Windows showing these filetypes jump to their new place, e.g. menus whose selected line is highlighted text,
+		/// unless their `w:sarthi` gives `scroll.enabled`
+		exclude_filetypes: Vec<String> = Vec::new(),
+	}
 }
 
-window_options! {
-	/// A window's own [`PaddingSettings`]
-	PaddingOptions for PaddingSettings { enabled: bool, size: f32 }
+/// An animation's curve, e.g. `{ curve = "spring", stiffness = 400, damping = 32 }`, one of [`Animation::CURVES`].
+/// Durations are in milliseconds; a value left out is serde's default.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+#[serde(tag = "curve", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Animation {
+	None,
+	Spring {
+		#[serde(default = "default_stiffness")]
+		stiffness: f32,
+		#[serde(default = "default_damping")]
+		damping: f32,
+	},
+	Linear {
+		#[serde(default = "default_duration")]
+		duration: f32,
+	},
+	EaseOut {
+		#[serde(default = "default_duration")]
+		duration: f32,
+	},
+	EaseInOut {
+		#[serde(default = "default_duration")]
+		duration: f32,
+	},
+	CubicBezier {
+		points: [f32; 4],
+		#[serde(default = "default_duration")]
+		duration: f32,
+	},
+}
+
+/// A curve of [`Animation`], for the help file
+#[derive(Debug)]
+pub struct Curve {
+	/// Its `curve` value
+	pub name: &'static str,
+
+	pub doc: &'static str,
+
+	/// Its keys without a default, with example values, as Lua
+	pub required: &'static str,
+}
+
+impl Animation {
+	/// Every curve, described
+	pub const CURVES: [Curve; 6] = [
+		Curve { name: "none", doc: "No animation: it's in its new place at once.", required: "" },
+		Curve {
+			name: "spring",
+			doc: "Like a weight on a spring: pulled by `stiffness`, slowed by `damping`. With less damping than \
+			      2 × √stiffness it overshoots and bounces back.",
+			required: "",
+		},
+		Curve { name: "linear", doc: "At an even speed over `duration`", required: "" },
+		Curve { name: "ease_out", doc: "Fast at first, then slowing down, over `duration`", required: "" },
+		Curve { name: "ease_in_out", doc: "Speeding up, then slowing down, over `duration`", required: "" },
+		Curve {
+			name: "cubic_bezier",
+			doc: "Like CSS's `cubic-bezier()` over `duration`: `points` are x1, y1, x2, y2, with the x values from 0 to 1.",
+			required: "points = { 0.25, 0.1, 0.25, 1 }",
+		},
+	];
+
+	/// Its `curve` value, one of [`Animation::CURVES`]'
+	pub fn curve(&self) -> &'static str {
+		match self {
+			Self::None => "none",
+			Self::Spring { .. } => "spring",
+			Self::Linear { .. } => "linear",
+			Self::EaseOut { .. } => "ease_out",
+			Self::EaseInOut { .. } => "ease_in_out",
+			Self::CubicBezier { .. } => "cubic_bezier",
+		}
+	}
+}
+
+fn default_stiffness() -> f32 {
+	400.0
+}
+
+fn default_damping() -> f32 {
+	32.0
+}
+
+fn default_duration() -> f32 {
+	150.0
+}
+
+impl Default for Animation {
+	fn default() -> Self {
+		Self::Spring { stiffness: default_stiffness(), damping: default_damping() }
+	}
+}
+
+section! {
+	/// How the cursor moves to a new place: its corners each on their way, the leading ones faster, so it stretches
+	/// towards where it goes and shrinks back as it arrives
+	CursorSettings {
+		/// For moves farther than a couple of cells along a row
+		animation: Animation = Animation::Spring { stiffness: 700.0, damping: 53.0 },
+
+		/// For short moves along a row, like typing
+		short_animation: Animation = Animation::EaseOut { duration: 40.0 },
+
+		/// How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1,
+		/// where its leading edge is there at once
+		trail: f32 = 0.7,
+
+		/// Whether moves in insert and replace mode animate, e.g. while typing
+		animate_insert_mode: bool = true,
+
+		/// Whether moves into and out of the command line animate
+		animate_cmdline: bool = true,
+	}
+}
+
+section! {
+	/// The shadow under floating and external windows, in logical pixels
+	ShadowSettings, window ShadowOptions { enabled: bool, blur: f32, offset: [f32; 2], opacity: f32 } {
+		/// Whether windows cast one
+		enabled: bool = true,
+
+		/// How far the edge fades out, like CSS's blur radius
+		blur: f32 = 16.0,
+
+		/// How far the shadow is moved from the window: right and down, or left and up if negative
+		offset: [f32; 2] = [0.0, 4.0],
+
+		/// From 0, invisible, to 1, black where fully shadowed
+		opacity: f32 = 0.3,
+
+		/// Windows showing these filetypes have no shadow, e.g. scrollbars, unless their `w:sarthi` gives
+		/// `shadow.enabled`
+		exclude_filetypes: Vec<String> = Vec::new(),
+	}
+}
+
+section! {
+	/// A line around floating and external windows, just outside them, in logical pixels
+	OutlineSettings, window OutlineOptions { enabled: bool, width: f32, highlight: String } {
+		/// Whether windows have one. Off by default: a window with a border of its own (`nvim_open_win()`'s `border`)
+		/// would have two.
+		enabled: bool = false,
+
+		/// How thick the line is
+		width: f32 = 1.0,
+
+		/// The highlight group whose text color the line has
+		highlight: String = String::from("FloatBorder"),
+
+		/// Windows showing these filetypes have no outline, unless their `w:sarthi` gives `outline.enabled`
+		exclude_filetypes: Vec<String> = Vec::new(),
+	}
+}
+
+section! {
+	/// Rounded corners of floating and external windows, in logical pixels. The outline follows them.
+	CornerSettings, window CornerOptions { enabled: bool, radius: f32 } {
+		/// Whether windows have them. Off by default: a window's text in its corner cells isn't cut to them.
+		enabled: bool = false,
+
+		radius: f32 = 8.0,
+
+		/// Windows showing these filetypes keep square corners, unless their `w:sarthi` gives `corners.enabled`
+		exclude_filetypes: Vec<String> = Vec::new(),
+	}
+}
+
+section! {
+	/// Space around floating and external windows' cells, in their background, in logical pixels
+	PaddingSettings, window PaddingOptions { enabled: bool, size: f32 } {
+		/// Whether windows have it
+		enabled: bool = false,
+
+		size: f32 = 4.0,
+
+		/// Windows showing these filetypes have no padding, unless their `w:sarthi` gives `padding.enabled`
+		exclude_filetypes: Vec<String> = Vec::new(),
+	}
+}
+
+section! {
+	/// How underlines are drawn, as adjustments to the font's own, in logical pixels
+	UnderlineSettings {
+		/// Moves underlines down from the font's position, or up if negative
+		offset: f32 = 0.0,
+
+		/// Thickness of every line (underlines, overlines, strikethroughs), or `false` for the font's
+		#[serde(with = "number_or_false")]
+		thickness: Option<f32> as "number|false" = None,
+
+		/// Height of an undercurl's wave, in line thicknesses
+		wave_height: f32 = 2.0,
+
+		/// Space kept between underlines and the text's ink where it crosses them, or `false` to draw through it
+		#[serde(with = "number_or_false")]
+		ink_gaps: Option<f32> as "number|false" = None,
+	}
+}
+
+section! {
+	/// Scrolling with a touchpad
+	TouchpadSettings {
+		/// Lines scrolled per row of finger movement: 1 follows the fingers, more scrolls faster
+		scroll_speed: f64 = 3.0,
+	}
+}
+
+section! {
+	/// The OS window: how see-through its background is, and whether the desktop behind it is blurred
+	WindowSettings {
+		/// How opaque the editor's background is, from 0 to 1. Text, highlighted backgrounds and floating windows
+		/// stay opaque. Needs a compositor that shows windows' transparency.
+		opacity: f32 = 1.0,
+
+		/// Whether the desktop behind a see-through background is blurred. The compositor does it, where it can (e.g.
+		/// KDE Plasma, macOS); elsewhere the background is only see-through.
+		blur: bool = false,
+	}
 }
 
 /// What a window's `w:sarthi` sets for it: the sections of the settings about a window, with the same keys. Each value
@@ -400,34 +460,46 @@ fn check(valid: bool, message: &str) -> Result<(), String> {
 }
 
 /// A number, or `false` for none (Lua can't keep `nil` in a table)
-fn number_or_false<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<f32>, D::Error> {
-	struct NumberOrFalse;
+mod number_or_false {
+	use serde::de::{self, Deserializer, Visitor};
+	use serde::ser::Serializer;
 
-	impl Visitor<'_> for NumberOrFalse {
-		type Value = Option<f32>;
+	pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<f32>, D::Error> {
+		struct NumberOrFalse;
 
-		fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-			formatter.write_str("a number or false")
+		impl Visitor<'_> for NumberOrFalse {
+			type Value = Option<f32>;
+
+			fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+				formatter.write_str("a number or false")
+			}
+
+			fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
+				if value { Err(E::invalid_value(de::Unexpected::Bool(true), &self)) } else { Ok(None) }
+			}
+
+			fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+				Ok(Some(value as f32))
+			}
+
+			fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+				Ok(Some(value as f32))
+			}
+
+			fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+				Ok(Some(value as f32))
+			}
 		}
 
-		fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
-			if value { Err(E::invalid_value(de::Unexpected::Bool(true), &self)) } else { Ok(None) }
-		}
-
-		fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
-			Ok(Some(value as f32))
-		}
-
-		fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
-			Ok(Some(value as f32))
-		}
-
-		fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
-			Ok(Some(value as f32))
-		}
+		deserializer.deserialize_any(NumberOrFalse)
 	}
 
-	deserializer.deserialize_any(NumberOrFalse)
+	pub fn serialize<S: Serializer>(value: &Option<f32>, serializer: S) -> Result<S::Ok, S::Error> {
+		match value {
+			Some(number) => serializer.serialize_f32(*number),
+			None => serializer.serialize_bool(false),
+		}
+	}
 }
 
 #[cfg(test)]

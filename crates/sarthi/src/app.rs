@@ -18,9 +18,9 @@ use rpc::neovim::{
 	UiTryResizeParams,
 };
 use rpc::sarthi::{
-	ChangeFontSizeArgs, CheckWindowOptionsArgs, Copied, FloatsChangedArgs, GetClipboardArgs, MODULES, PlaceWindowArgs,
-	Request, ResetFontSizeArgs, STARTUP, SetClipboardArgs, SetFontSizeArgs, Settings, SetupArgs, WinScrolledArgs,
-	WindowFont, WindowFontArgs, WindowOptions, WindowVariable,
+	ChangeFontSizeArgs, CheckWindowOptionsArgs, Copied, FloatsChangedArgs, GetClipboardArgs, HELP, MODULES,
+	PlaceWindowArgs, Request, ResetFontSizeArgs, STARTUP, SetClipboardArgs, SetFontSizeArgs, Settings, SetupArgs,
+	WinScrolledArgs, WindowFont, WindowFontArgs, WindowOptions, WindowVariable,
 };
 
 use crate::blur::Blur;
@@ -268,7 +268,7 @@ impl App {
 		// check for sarthi (`if vim.g.sarthi then … end`) and use `require("sarthi")`.
 		self.nvim.set_var("sarthi", true)?;
 		let channel = self.nvim.channel()?;
-		if let Err(error) = self.nvim.exec_lua::<()>(STARTUP, (channel, MODULES)) {
+		if let Err(error) = self.nvim.exec_lua::<()>(STARTUP, (channel, MODULES, HELP)) {
 			tracing::warn!("Couldn't set up sarthi's Lua: {error}");
 		}
 		self.nvim.ui_attach(params)?;

@@ -47,6 +47,8 @@
           rustToolchain
           wgsl-analyzer
           nil
+          # `cargo xtask docs`: the help file's Lua functions, from their annotations
+          vimcats
         ];
 
         env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibraries;

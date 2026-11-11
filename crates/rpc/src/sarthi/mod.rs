@@ -14,7 +14,8 @@ pub use place::*;
 pub use requests::*;
 pub use settings::*;
 
-/// What sarthi runs before the user's config (`runtime/startup.lua`), with its channel and [`MODULES`] as the arguments
+/// What sarthi runs before the user's config (`runtime/startup.lua`), with its channel, [`MODULES`] and [`HELP`] as
+/// the arguments
 pub const STARTUP: &str = include_str!("../../../../runtime/startup.lua");
 
 /// sarthi's Lua modules (`runtime/lua/`), by module name, preloaded at startup
@@ -26,6 +27,9 @@ pub const MODULES: [(&str, &str); 6] = [
 	("sarthi.scroll", include_str!("../../../../runtime/lua/sarthi/scroll.lua")),
 	("sarthi.floats", include_str!("../../../../runtime/lua/sarthi/floats.lua")),
 ];
+
+/// sarthi's help file (`:help sarthi`), which `cargo xtask docs` writes
+pub const HELP: &str = include_str!("../../../../runtime/doc/sarthi.txt");
 
 #[cfg(test)]
 mod tests {

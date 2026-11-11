@@ -1,11 +1,15 @@
--- `require("sarthi")`, for the user's config: `require("sarthi").setup({ … })`. Only sarthi has the module, so a config
--- shared with the TUI checks `vim.g.sarthi`, which sarthi sets, first.
+---@mod sarthi Lua module
+---@brief [[
+---`require("sarthi")`, for your config: `require("sarthi").setup({ … })`. Only
+---Sarthi has the module, so a config shared with the TUI checks `vim.g.sarthi`,
+---which Sarthi sets, first.
+---@brief ]]
 local rpc = require('sarthi.rpc')
 
-local M = {}
+local sarthi = {}
 
---- Neovim's window functions that take a window config, with a `sarthi` table in it (see `sarthi.api`)
-M.api = require('sarthi.api')
+-- Neovim's window functions that take a window config, with a `sarthi` table in it (see |sarthi.api|)
+sarthi.api = require('sarthi.api')
 
 -- The settings given so far, merged
 local current = {}
@@ -27,10 +31,11 @@ local function merge(opts)
   return merged
 end
 
---- Sets sarthi's settings: values given replace their previous ones, at first their defaults. Applies at once, so it
---- can be called again later, e.g. from a keymap. A mistake is an error at the call.
----@param opts table?
-function M.setup(opts)
+---Sets Sarthi's settings: values given replace their previous ones, at
+---first their defaults. Applies at once, so it can be called again later,
+---e.g. from a keymap. A mistake is an error at the call.
+---@param opts? table The sections to change (see |sarthi-settings|)
+function sarthi.setup(opts)
   if opts ~= nil and type(opts) ~= 'table' then
     error('sarthi: setup() takes a table, not a ' .. type(opts), 2)
   end
@@ -46,22 +51,23 @@ function M.setup(opts)
   require('sarthi.floats').resend(merged)
 end
 
---- Sets the font size, in points (4 to 96), by setting `:h` in `guifont`.
----@param points number
-function M.set_font_size(points)
+---Sets the font size, in points (4 to 96), by setting `:h` in `guifont`.
+---@param points number Size in points
+function sarthi.set_font_size(points)
   vim.o.guifont = rpc.request('set_font_size', vim.o.guifont, points)
 end
 
---- Makes the font `delta` points bigger, or smaller if negative, by setting `:h` in `guifont`. The size stays within
---- 4 to 96 points.
----@param delta number
-function M.change_font_size(delta)
+---Makes the font `delta` points bigger, or smaller if negative, by setting
+---`:h` in `guifont`. The size stays within 4 to 96 points.
+---@param delta number Points to add
+function sarthi.change_font_size(delta)
   vim.o.guifont = rpc.request('change_font_size', vim.o.guifont, delta)
 end
 
---- Sets `guifont` back to its value before the font size was first changed, unless it was set otherwise since.
-function M.reset_font_size()
+---Sets `guifont` back to its value before the font size was first changed,
+---unless it was set otherwise since.
+function sarthi.reset_font_size()
   vim.o.guifont = rpc.request('reset_font_size', vim.o.guifont)
 end
 
-return M
+return sarthi

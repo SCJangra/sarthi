@@ -1,71 +1,56 @@
--- `require("sarthi").api`: Neovim's window functions that take a window config, taking a `sarthi` table in it too, for
--- what only sarthi does with windows. Everything else is `vim.api`. Only sarthi has the module, so a plugin shared with
--- the TUI checks `vim.g.sarthi` first, and opens its window another way otherwise.
---
---   require('sarthi').api.nvim_open_win(buf, false, {
---     external = true, width = 40, height = 30,
---     sarthi = { place = { relative = 'editor', row = 2, col = 4 }, shadow = { opacity = 0.6 } },
---   })
---
--- The `sarthi` table:
---   place   For external windows (`external = true`), which sarthi places itself, over Neovim's screen:
---           `{ center = true }` centers it, as it is until placed; `{ relative = …, anchor = …, row = …, col = … }`
---           places it like a floating window: relative to the 'editor', a 'win' (`win`, or the current window) or the
---           'cursor', with its `anchor` corner ('NW', 'NE', 'SW', 'SE') at `row`, `col`.
---   font    For external windows: the fonts its text is drawn with, `{ family = …, size = … }`: a family or a list of
---           them (the first draws what it has the characters for), and a size in points, like `guifont`'s `:h`. Either
---           left out is `guifont`'s. The window is as many of its own cells as its config says.
---   shadow, outline, corners, padding, scroll
---           The window's own values of `setup()`'s sections of these names, with the same keys, each in place of the
---           setting's, e.g. `shadow = { enabled = true, opacity = 0.6 }`; `enabled` wins over `exclude_filetypes`.
---           They're kept in the window's `w:sarthi`, which a plugin can also set itself.
+---@mod sarthi.api Window functions
+---@brief [[
+---`require("sarthi").api`: Neovim's window functions that take a window config,
+---taking a `sarthi` table in it too, for what only Sarthi does with windows.
+---Everything else is `vim.api`. Only Sarthi has the module, so a plugin shared
+---with the TUI checks `vim.g.sarthi` first, and opens its window another way
+---otherwise.
+--->lua
+---  require('sarthi').api.nvim_open_win(buf, false, {
+---    external = true, width = 40, height = 30,
+---    sarthi = {
+---      place = { relative = 'editor', row = 2, col = 4 },
+---      shadow = { opacity = 0.6 },
+---    },
+---  })
+---<
+---The `sarthi` table (|sarthi.WindowConfig|) takes `place` and `font` for
+---external windows (`external = true`), and the window's own values of the
+---settings' sections about a window: `shadow`, `outline`, `corners`, `padding`
+---and `scroll`, with the same keys (|sarthi-settings|), each in place of the
+---setting's. Those are kept in the window's `w:sarthi`, which a plugin can also
+---set itself.
+---@brief ]]
 local rpc = require('sarthi.rpc')
 
-local M = {}
+local api = {}
 
+---Where Sarthi places an external window, over Neovim's screen: `{ center =
+---true }` centers it, as it is until placed; otherwise it's placed like a
+---floating window, with its `anchor` corner at `row`, `col` of what it's
+---`relative` to.
 ---@class sarthi.WindowPlace
----@field center? boolean
----@field relative? 'editor'|'win'|'cursor'
----@field win? integer
----@field anchor? 'NW'|'NE'|'SW'|'SE'
----@field row? number
----@field col? number
+---@field center? boolean Center it
+---@field relative? 'editor'|'win'|'cursor' What it's placed relative to
+---@field win? integer For 'win': the window, or the current one
+---@field anchor? 'NW'|'NE'|'SW'|'SE' Its corner at `row`, `col`
+---@field row? number Rows down
+---@field col? number Columns right
 
+---The fonts an external window's text is drawn with. Either left out is
+---`guifont`'s. The window is as many of its own cells as its config says.
 ---@class sarthi.WindowFont
----@field family? string|string[]
----@field size? number
-
----@class sarthi.ShadowOptions
----@field enabled? boolean
----@field blur? number
----@field offset? number[]
----@field opacity? number
-
----@class sarthi.OutlineOptions
----@field enabled? boolean
----@field width? number
----@field highlight? string
-
----@class sarthi.CornerOptions
----@field enabled? boolean
----@field radius? number
-
----@class sarthi.PaddingOptions
----@field enabled? boolean
----@field size? number
-
----@class sarthi.ScrollOptions
----@field enabled? boolean
----@field animation? table
+---@field family? string|string[] One or more, in fallback order
+---@field size? number In points, like `guifont`'s `:h`
 
 ---@class sarthi.WindowConfig
----@field place? sarthi.WindowPlace
----@field font? sarthi.WindowFont
----@field shadow? sarthi.ShadowOptions
----@field outline? sarthi.OutlineOptions
----@field corners? sarthi.CornerOptions
----@field padding? sarthi.PaddingOptions
----@field scroll? sarthi.ScrollOptions
+---@field place? sarthi.WindowPlace External windows only
+---@field font? sarthi.WindowFont External windows only
+---@field shadow? table Its own |sarthi-shadow| values
+---@field outline? table Its own |sarthi-outline| values
+---@field corners? table Its own |sarthi-corners| values
+---@field padding? table Its own |sarthi-padding| values
+---@field scroll? table Its own |sarthi-scroll| values
 
 -- What only the API keeps of each window's `sarthi` table, by handle, as last given: what isn't in `w:sarthi`
 local configs = {}
@@ -160,12 +145,12 @@ local function apply(win, sarthi, options, level)
   configs[win] = { place = vim.deepcopy(sarthi.place), font = vim.deepcopy(sarthi.font) }
 end
 
---- Like `vim.api.nvim_open_win()`, with a `sarthi` table in `config` (see above)
+---Like `vim.api.nvim_open_win()`, with a `sarthi` table in `config`.
 ---@param buf integer
 ---@param enter boolean
 ---@param config vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig }
 ---@return integer
-function M.nvim_open_win(buf, enter, config)
+function api.nvim_open_win(buf, enter, config)
   local plain, sarthi = split(config)
   local options = check(sarthi, {}, type(plain) == 'table' and plain.external, 3)
   local win = vim.api.nvim_open_win(buf, enter, plain)
@@ -180,11 +165,12 @@ function M.nvim_open_win(buf, enter, config)
   return win
 end
 
---- Like `vim.api.nvim_win_set_config()`, with a `sarthi` table in `config` (see above): what it gives replaces what was
---- given before, key by key, and a section's values key by key too.
+---Like `vim.api.nvim_win_set_config()`, with a `sarthi` table in `config`:
+---what it gives replaces what was given before, key by key, and a section's
+---values key by key too.
 ---@param win integer
 ---@param config vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig }
-function M.nvim_win_set_config(win, config)
+function api.nvim_win_set_config(win, config)
   win = win == 0 and vim.api.nvim_get_current_win() or win
   local plain, sarthi = split(config)
   -- External after this call: as given, or a float if given `relative`, or as it is
@@ -206,10 +192,11 @@ function M.nvim_win_set_config(win, config)
   apply(win, merged, options, 3)
 end
 
---- Like `vim.api.nvim_win_get_config()`, with the window's `sarthi` table: its `w:sarthi`, and what else was given
+---Like `vim.api.nvim_win_get_config()`, with the window's `sarthi` table:
+---its `w:sarthi`, and what else was given.
 ---@param win integer
 ---@return vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig }
-function M.nvim_win_get_config(win)
+function api.nvim_win_get_config(win)
   win = win == 0 and vim.api.nvim_get_current_win() or win
   local config = vim.api.nvim_win_get_config(win)
   local sarthi = vim.tbl_extend('force', vim.w[win].sarthi or {}, vim.deepcopy(configs[win] or {}))
@@ -224,4 +211,4 @@ vim.api.nvim_create_autocmd('WinClosed', {
   end,
 })
 
-return M
+return api

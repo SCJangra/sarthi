@@ -5,6 +5,7 @@ members = [
 	"crates/renderer",
 	"crates/rpc",
 	"crates/sarthi",
+	"crates/xtask",
 ]
 resolver = "3"
 
