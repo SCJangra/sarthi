@@ -7,7 +7,9 @@ use arrayvec::ArrayString;
 use crate::color::{rgba, wgpu_color};
 use crate::cursor::{CursorAnimation, cursor_rect};
 use crate::font::LineMetrics;
-use crate::quad::{FrameQuads, QuadPipeline, area_shadow, cell_backgrounds, cell_decorations, cursor_quad};
+use crate::quad::{
+	FrameQuads, QuadPipeline, area_shadow, cell_backgrounds, cell_decorations, cursor_quad, outline_quad,
+};
 use crate::scroll::{ScrollAnimations, SlidingRegion};
 use crate::shape::ShapePipeline;
 use crate::text::TextPipeline;
@@ -453,11 +455,11 @@ fn cursor_layer(layer: &CellLayer, cursor: Cursor) -> CellLayer {
 	CellLayer { width: cursor.width, height: 1, cells, ..empty }
 }
 
-/// A layer's ranges of the frame's quads: its shadow, drawn first and uncut since it reaches past the layer; its
-/// backgrounds, drawn under its text, and its decorations and bar cursor, drawn over it; and the rectangle these and the
-/// text are cut to
+/// A layer's ranges of the frame's quads: its shadow and outline, drawn first and uncut since they reach past the layer;
+/// its backgrounds, drawn under its text, and its decorations and bar cursor, drawn over it; and the rectangle these and
+/// the text are cut to
 struct LayerQuads {
-	shadow: Range<u32>,
+	around: Range<u32>,
 	under_text: Range<u32>,
 	over_text: Range<u32>,
 	clip: [u32; 4],
@@ -477,9 +479,14 @@ fn layer_quads(
 	moving: bool,
 ) -> LayerQuads {
 	let layer = &piece.layer;
-	let shadow = frame.quads.len();
-	if let Some(layer_shadow) = layer.shadow.as_ref().filter(|_| piece.kind == PieceKind::Layer) {
-		area_shadow(frame, layer_shadow, srgb);
+	let around = frame.quads.len();
+	if piece.kind == PieceKind::Layer {
+		if let Some(layer_shadow) = &layer.shadow {
+			area_shadow(frame, layer_shadow, srgb);
+		}
+		if let Some(outline) = layer.outline {
+			frame.quads.push(outline_quad(layer.rect(), outline, srgb));
+		}
 	}
 	let quads = &mut frame.quads;
 	let start = quads.len();
@@ -496,7 +503,7 @@ fn layer_quads(
 		quad.rect[1] += piece.offset;
 	}
 	LayerQuads {
-		shadow: shadow as u32..start as u32,
+		around: around as u32..start as u32,
 		under_text: start as u32..middle as u32,
 		over_text: middle as u32..quads.len() as u32,
 		clip: piece.clip,
@@ -505,8 +512,8 @@ fn layer_quads(
 }
 
 /// Draws the layers one after another, each with its backgrounds, text, then decorations and cursor, so a later
-/// layer (e.g. a floating window) covers everything of the earlier ones. A layer's shadow, and the cursor's shape drawn
-/// first for the cursor on its way, aren't cut to the layer: on a `surface` of width × height pixels, they reach past it.
+/// layer (e.g. a floating window) covers everything of the earlier ones. A layer's shadow and outline, and the cursor's
+/// shape drawn first for the cursor on its way, aren't cut to the layer: on a `surface` of width × height pixels, they reach past it.
 fn draw_layers(
 	pass: &mut wgpu::RenderPass<'_>,
 	quads: &QuadPipeline,
@@ -516,9 +523,9 @@ fn draw_layers(
 	layers: &[LayerQuads],
 ) -> Result<(), RendererError> {
 	for (index, layer) in layers.iter().enumerate() {
-		if !layer.shadow.is_empty() {
+		if !layer.around.is_empty() {
 			pass.set_scissor_rect(0, 0, surface.0, surface.1);
-			quads.render(pass, layer.shadow.clone());
+			quads.render(pass, layer.around.clone());
 		}
 		if layer.shape {
 			pass.set_scissor_rect(0, 0, surface.0, surface.1);
@@ -571,6 +578,7 @@ mod tests {
 			cursor: None,
 			scroll: None,
 			shadow: None,
+			outline: None,
 		})
 	}
 
@@ -623,7 +631,7 @@ mod tests {
 				.iter()
 				.map(|piece| layer_quads(&mut frame, piece, &text, lines, false, false))
 				.chain(shape.map(|_| super::LayerQuads {
-					shadow: 0..0,
+					around: 0..0,
 					under_text: 0..0,
 					over_text: 0..0,
 					clip: [0, 0, 1, 1],
@@ -811,6 +819,23 @@ mod tests {
 		assert_eq!(at(left - 14), [0, 0, 0, 255]);
 		// It's only a shadow: no green or blue in it
 		assert_eq!(&at(left - 1)[1..3], &[0, 0]);
+	}
+
+	#[test]
+	fn gpu_an_outline_goes_around_its_layer() {
+		// A white cell at column 3, with a 1 px red outline, on black
+		let Layer::Cells(white) = cell(1, " ", 0xFFFFFF);
+		let outline = crate::Outline { width: 1.0, color: 0xFF0000 };
+		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, outline: Some(outline), ..white });
+		let Some((pixels, cell)) = drawn(&[layer], None) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		let at = |x: u32| pixels[(9 * WIDTH + x) as usize];
+		let left = 3 * cell.width;
+		// Just outside the cell, the line; further out, nothing; the cell itself keeps its own pixels.
+		assert_eq!((at(left - 1), at(left - 2), at(left)), ([255, 0, 0, 255], [0, 0, 0, 255], [255, 255, 255, 255]));
+		assert_eq!(at(left + cell.width), [255, 0, 0, 255]);
 	}
 
 	#[test]

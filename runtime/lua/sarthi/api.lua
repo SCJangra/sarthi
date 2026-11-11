@@ -15,7 +15,7 @@
 --   font    For external windows: the fonts its text is drawn with, `{ family = …, size = … }`: a family or a list of
 --           them (the first draws what it has the characters for), and a size in points, like `guifont`'s `:h`. Either
 --           left out is `guifont`'s. The window is as many of its own cells as its config says.
---   shadow, scroll
+--   shadow, outline, scroll
 --           The window's own values of `setup()`'s sections of these names, with the same keys, each in place of the
 --           setting's, e.g. `shadow = { enabled = true, opacity = 0.6 }`; `enabled` wins over `exclude_filetypes`.
 --           They're kept in the window's `w:sarthi`, which a plugin can also set itself.
@@ -41,6 +41,11 @@ local M = {}
 ---@field offset? number[]
 ---@field opacity? number
 
+---@class sarthi.OutlineOptions
+---@field enabled? boolean
+---@field width? number
+---@field highlight? string
+
 ---@class sarthi.ScrollOptions
 ---@field enabled? boolean
 ---@field animation? table
@@ -49,6 +54,7 @@ local M = {}
 ---@field place? sarthi.WindowPlace
 ---@field font? sarthi.WindowFont
 ---@field shadow? sarthi.ShadowOptions
+---@field outline? sarthi.OutlineOptions
 ---@field scroll? sarthi.ScrollOptions
 
 -- What only the API keeps of each window's `sarthi` table, by handle, as last given: what isn't in `w:sarthi`
@@ -61,7 +67,7 @@ local EXTERNAL_ONLY = {
 }
 
 -- The sections of the settings a window can have its own values of, kept in `w:sarthi`
-local OPTIONS = { shadow = true, scroll = true }
+local OPTIONS = { shadow = true, outline = true, scroll = true }
 
 --- `config` without its `sarthi` table, for Neovim, and the table
 local function split(config)

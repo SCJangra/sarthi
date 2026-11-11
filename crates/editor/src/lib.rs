@@ -8,7 +8,9 @@ pub mod highlight;
 
 use std::collections::HashMap;
 
-use renderer::{CellLayer, CellSize, Decoration, FontId, Layer, LayerShadow, Motion, RenderCell, Scroll, Shadow};
+use renderer::{
+	CellLayer, CellSize, Decoration, FontId, Layer, LayerShadow, Motion, Outline, RenderCell, Scroll, Shadow,
+};
 use rpc::neovim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification, Window};
 
 use crate::compositor::cell_layer;
@@ -123,13 +125,29 @@ struct Viewport {
 }
 
 /// How a floating or external window looks besides its cells, in logical pixels
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct FloatStyle {
-	/// The shadow it casts, if any. Floats at one level share theirs (see [`Editor::float_shadows`]).
+	/// The shadow it casts, if any, from its outer edge: its outline's. Floats at one level share theirs (see
+	/// [`Editor::float_shadows`]).
 	pub shadow: Option<Shadow>,
+
+	/// The line just outside its cells, if it has one
+	pub outline: Option<OutlineStyle>,
 
 	/// The floating window it's attached to, like a scrollbar to its menu: it shares that window's shadow.
 	pub parent: Option<Window>,
+}
+
+/// A line around a floating or external window, in logical pixels
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutlineStyle {
+	pub width: f32,
+
+	/// The highlight group whose text color the line has
+	pub highlight: String,
+
+	/// That color, as `0xRRGGBB`, if known: the editor only knows Neovim's UI groups' own
+	pub color: Option<u32>,
 }
 
 /// How the mouse pointer looks, by what's under it (see [`Editor::pointer_at`])
@@ -299,14 +317,36 @@ impl Editor {
 
 	/// How floating or external window `win` looks besides its cells, until it closes
 	pub fn set_float_style(&mut self, win: Window, style: FloatStyle) {
-		self.stale |= self.floats.insert(win, style) != Some(style);
+		self.stale |= self.floats.get(&win) != Some(&style);
+		self.floats.insert(win, style);
+	}
+
+	/// How floating or external window `win` looks besides its cells: its own style, or the default one until it has one
+	fn style_of(&self, win: Window) -> &FloatStyle {
+		self.floats.get(&win).unwrap_or(&self.default_float)
 	}
 
 	/// The shadow floating or external window `win` casts, if any, in physical pixels
 	fn shadow_of(&self, win: Window) -> Option<Shadow> {
-		let shadow = self.floats.get(&win).unwrap_or(&self.default_float).shadow?;
+		let shadow = self.style_of(win).shadow?;
 		let scale = self.scale;
 		Some(Shadow { blur: shadow.blur * scale, offset: shadow.offset.map(|offset| offset * scale), ..shadow })
+	}
+
+	/// The outline of floating or external window `win`, if it has one, in physical pixels: in the highlight group's
+	/// text color
+	fn outline_of(&self, win: Window) -> Option<Outline> {
+		let outline = self.style_of(win).outline.as_ref()?;
+		let group = || self.highlights.resolve(self.highlights.group(&outline.highlight)).foreground;
+		let color = outline.color.unwrap_or_else(group);
+		Some(Outline { width: outline.width * self.scale, color })
+	}
+
+	/// What casts floating or external window `win`'s shadow, from its cells at `rect` (left, top, width, height in
+	/// pixels): its outer edge, its outline's
+	fn shadow_area(&self, win: Window, rect: [u32; 4]) -> [u32; 4] {
+		let outline = self.outline_of(win).map_or(0, |outline| outline.width.round().max(0.0) as u32);
+		outset(rect, outline)
 	}
 
 	/// A `guifont` value the way [`Editor::guifont`] gives it: empty if it's Neovim's default
@@ -716,10 +756,11 @@ impl Editor {
 				Placement::Tiled { row, col } => {
 					layers.push(self.see_through_cells(self.layer(id, *row, *col), (*row, *col), &messages))
 				},
-				Placement::Float { row, col, .. } => {
+				Placement::Float { win, row, col, .. } => {
 					let mut layer = self.layer(id, *row, *col);
 					let Layer::Cells(cells) = &mut layer;
 					cells.shadow = shadows.remove(&id);
+					cells.outline = self.outline_of(*win);
 					layers.push(layer);
 				},
 				Placement::Message { row, separator, .. } => {
@@ -809,7 +850,7 @@ impl Editor {
 			let Some(shadow) = self.shadow_of(win) else { continue };
 			let (grid, cell) = (&self.grids[&id], self.cell);
 			let [width, height] = [grid.width as u32 * cell.width, grid.height as u32 * cell.height];
-			let rect = [col * cell.width, row * cell.height, width, height];
+			let rect = self.shadow_area(win, [col * cell.width, row * cell.height, width, height]);
 			let same = groups
 				.iter_mut()
 				.find(|(group_level, _, group)| *group_level == level && group.shadow == shadow);
@@ -841,9 +882,9 @@ impl Editor {
 		let mut layer = self.layer(id, 0, 0);
 		let Layer::Cells(cells) = &mut layer;
 		[cells.x, cells.y, ..] = self.external_rect(id, win);
-		cells.shadow = self
-			.shadow_of(win)
-			.map(|shadow| LayerShadow { shadow, area: vec![cells.rect()] });
+		let area = vec![self.shadow_area(win, cells.rect())];
+		cells.shadow = self.shadow_of(win).map(|shadow| LayerShadow { shadow, area });
+		cells.outline = self.outline_of(win);
 		layer
 	}
 
@@ -899,6 +940,12 @@ impl Editor {
 	}
 }
 
+/// `rect` (left, top, width, height in pixels) with `by` pixels around it, up to the window's top and left edges
+fn outset([left, top, width, height]: [u32; 4], by: u32) -> [u32; 4] {
+	let (x, y) = (left.saturating_sub(by), top.saturating_sub(by));
+	[x, y, left + width + by - x, top + height + by - y]
+}
+
 /// Keeps the first `height` rows of `layer`, if it's taller
 fn clip_rows(layer: &mut Layer, height: u32) {
 	let Layer::Cells(CellLayer { height: layer_height, width, cells, cursor, .. }) = layer;
@@ -923,7 +970,7 @@ mod tests {
 	};
 	use serde::de::IgnoredAny;
 
-	use super::{Anchor, Editor, FloatStyle, GridPosition, Place, Pointer, Redraw, Relative};
+	use super::{Anchor, Editor, FloatStyle, GridPosition, OutlineStyle, Place, Pointer, Redraw, Relative};
 
 	const FG: u32 = 0xC7C7C7;
 	const BG: u32 = 0x1C1C1C;
@@ -1303,7 +1350,7 @@ mod tests {
 		let mut editor = screen();
 		editor.set_default_float_style(FloatStyle {
 			shadow: Some(Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 }),
-			parent: None,
+			..FloatStyle::default()
 		});
 		// A float and a 4×2 external window: the screen is 80×80 pixels, the window 32×32.
 		let events = vec![resize(3, 2, 1), float(3, 0, 0, 5), resize(4, 4, 2), external(4)];
@@ -1418,6 +1465,56 @@ mod tests {
 	}
 
 	#[test]
+	fn outlines_around_floating_and_external_windows() {
+		let mut editor = screen();
+		let outline_of = |redraw: &Redraw, id: u64| {
+			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
+			layer.outline
+		};
+		// A float and an external window; none until a style has one
+		let events = vec![resize(3, 2, 1), float(3, 0, 0, 1), resize(4, 2, 1), external(4)];
+		let redraw = flush(&mut editor, events);
+		assert_eq!((outline_of(&redraw, 3), outline_of(&redraw, 4)), (None, None));
+
+		// In the highlight group's text color, here the default one, in physical pixels
+		let outline = |width| Some(OutlineStyle { width, highlight: String::from("FloatBorder"), color: None });
+		editor.set_default_float_style(FloatStyle { outline: outline(2.0), ..FloatStyle::default() });
+		editor.set_scale(1.5);
+		let redraw = editor.refresh().expect("outlines changed");
+		let drawn = Some(renderer::Outline { width: 3.0, color: FG });
+		assert_eq!((outline_of(&redraw, 3), outline_of(&redraw, 4)), (drawn, drawn));
+		// Never around tiled windows or the screen
+		assert_eq!(outline_of(&redraw, 1), None);
+
+		// A window's own style: none, or one of its own
+		editor.set_float_style(win_of(4), FloatStyle::default());
+		editor.set_float_style(win_of(3), FloatStyle { outline: outline(3.0), ..FloatStyle::default() });
+		let redraw = editor.refresh().expect("their styles changed");
+		let thick = Some(renderer::Outline { width: 4.5, color: FG });
+		assert_eq!((outline_of(&redraw, 3), outline_of(&redraw, 4)), (thick, None));
+
+		// In the color Lua found for its group, which the editor may not know
+		let green = OutlineStyle { width: 1.0, highlight: String::from("Comment"), color: Some(0x00FF00) };
+		editor.set_float_style(win_of(4), FloatStyle { outline: Some(green), ..FloatStyle::default() });
+		let redraw = editor.refresh().expect("its style changed");
+		assert_eq!(outline_of(&redraw, 4), Some(renderer::Outline { width: 1.5, color: 0x00FF00 }));
+	}
+
+	#[test]
+	fn the_shadow_is_cast_from_the_outline() {
+		let mut editor = screen();
+		let shadow = Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 };
+		let outline = Some(OutlineStyle { width: 2.0, highlight: String::from("FloatBorder"), color: None });
+		editor.set_default_float_style(FloatStyle { shadow: Some(shadow), outline, parent: None });
+		let redraw = flush(&mut editor, vec![resize(3, 2, 1), float(3, 1, 1, 1)]);
+
+		// The float's cells and 2 pixels around them, which the outline covers: it doesn't hide the shadow's edge.
+		let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 3).unwrap();
+		let area = layer.shadow.as_ref().map(|shadow| shadow.area.clone());
+		assert_eq!(area, Some(vec![[CELL.width - 2, CELL.height - 2, 2 * CELL.width + 4, CELL.height + 4]]));
+	}
+
+	#[test]
 	fn floating_windows_have_the_shadow() {
 		let shadow = Shadow { blur: 8.0, offset: [0.0, 2.0], color: 0, opacity: 0.5 };
 		let mut editor = screen();
@@ -1427,20 +1524,20 @@ mod tests {
 		let redraw = flush(&mut editor, vec![line(3, 0, "a")]);
 		assert_eq!(shadow_of(&redraw, 3), None);
 
-		editor.set_default_float_style(FloatStyle { shadow: Some(shadow), parent: None });
+		editor.set_default_float_style(FloatStyle { shadow: Some(shadow), outline: None, parent: None });
 		let redraw = flush(&mut editor, vec![line(3, 0, "b")]);
 		// The float has it, under its own cells; the window doesn't.
 		assert_eq!((shadow_of(&redraw, 3), shadow_of(&redraw, 2)), (Some(vec![[1, 1, 2, 1]]), None));
 
 		// A float left out, until it isn't: either is a change to draw.
-		editor.set_float_style(win_of(3), FloatStyle { shadow: None, parent: None });
+		editor.set_float_style(win_of(3), FloatStyle { shadow: None, outline: None, parent: None });
 		assert_eq!(shadow_of(&flush(&mut editor, vec![]), 3), None);
-		editor.set_float_style(win_of(3), FloatStyle { shadow: Some(shadow), parent: None });
+		editor.set_float_style(win_of(3), FloatStyle { shadow: Some(shadow), outline: None, parent: None });
 		assert!(shadow_of(&flush(&mut editor, vec![]), 3).is_some());
 
 		// Changes on sarthi's side show without waiting for Neovim's next redraw, and only if there are any.
 		assert_eq!(editor.refresh(), None);
-		editor.set_float_style(win_of(3), FloatStyle { shadow: None, parent: None });
+		editor.set_float_style(win_of(3), FloatStyle { shadow: None, outline: None, parent: None });
 		let redraw = editor.refresh().expect("the shadow changed");
 		assert_eq!(shadow_of(&redraw, 3), None);
 
@@ -1453,7 +1550,7 @@ mod tests {
 	fn floats_at_one_level_share_a_shadow() {
 		let mut editor = screen();
 		let shadow = Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 };
-		editor.set_default_float_style(FloatStyle { shadow: Some(shadow), parent: None });
+		editor.set_default_float_style(FloatStyle { shadow: Some(shadow), outline: None, parent: None });
 		// 3 and 4 side by side at 50, like a picker's windows; 5 at 52 attached to 3, like a scrollbar; 6 at 100, a hover
 		// over them; 7 at 50, fully transparent
 		let mut events: Vec<_> = (3..=7).map(|id| resize(id, 2, 1)).collect();
@@ -1465,8 +1562,8 @@ mod tests {
 			float_at_level(7, 3, 0, 5, 50),
 		]);
 		flush(&mut editor, events);
-		editor.set_float_style(win_of(5), FloatStyle { shadow: Some(shadow), parent: Some(win_of(3)) });
-		editor.set_float_style(win_of(7), FloatStyle { shadow: None, parent: None });
+		editor.set_float_style(win_of(5), FloatStyle { shadow: Some(shadow), outline: None, parent: Some(win_of(3)) });
+		editor.set_float_style(win_of(7), FloatStyle { shadow: None, outline: None, parent: None });
 		let redraw = flush(&mut editor, vec![]);
 
 		// One shadow for 3, 4 and the attached 5, drawn with the first of them
@@ -1477,7 +1574,7 @@ mod tests {
 
 		// 4 with a shadow of its own: one for it, drawn with it, over 3's
 		let own = Shadow { opacity: 0.8, ..shadow };
-		editor.set_float_style(win_of(4), FloatStyle { shadow: Some(own), parent: None });
+		editor.set_float_style(win_of(4), FloatStyle { shadow: Some(own), outline: None, parent: None });
 		let redraw = flush(&mut editor, vec![]);
 		assert_eq!(shadow_of(&redraw, 3), Some(vec![[1, 1, 2, 1], [5, 1, 2, 1]]));
 		assert_eq!(shadow_of(&redraw, 4), Some(vec![[3, 1, 2, 1]]));

@@ -285,6 +285,7 @@ mod tests {
 			cursor: None,
 			scroll: None,
 			shadow: None,
+			outline: None,
 		};
 		let cursor = |shape| Cursor { row: 2, col: 3, width: 1, shape, color: 0, text_color: 0, animate: true };
 		assert_eq!(cursor_rect(&layer, cursor(CursorShape::Block)), [50.0, 60.0, 10.0, 20.0]);

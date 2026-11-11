@@ -43,7 +43,7 @@ function M.setup(opts)
   end
   current = merged
   -- Floating windows open already get the new settings too.
-  require('sarthi.floats').resend()
+  require('sarthi.floats').resend(merged)
 end
 
 --- Sets the font size, in points (4 to 96), by setting `:h` in `guifont`.

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use editor::FloatStyle;
+use editor::{FloatStyle, OutlineStyle};
 use renderer::{CursorMotion, Easing, Motion, Shadow, UnderlineSize};
 use rpc::sarthi::{Animation, FloatWindow, ScrolledWindow, Settings, WindowOptions, WindowVariable};
 
@@ -58,7 +58,12 @@ pub fn window_scroll(settings: &Settings, window: &ScrolledWindow, options: &Win
 /// How floating or external window `window` looks besides its cells, with `options` from its `w:sarthi`, in logical
 /// pixels (see [`style`])
 pub fn float_style(settings: &Settings, window: &FloatWindow, options: &WindowOptions) -> FloatStyle {
-	FloatStyle { parent: window.parent, ..style(settings, options, &window.filetype, window.winblend) }
+	let mut style = style(settings, options, &window.filetype, window.winblend);
+	// In the color Neovim has for its highlight group, which sarthi may not know
+	if let Some(outline) = &mut style.outline {
+		outline.color = window.outline_color;
+	}
+	FloatStyle { parent: window.parent, ..style }
 }
 
 /// How floating and external windows look until sarthi learns about them
@@ -80,7 +85,13 @@ fn style(settings: &Settings, options: &WindowOptions, filetype: &str, winblend:
 		color: 0x000000,
 		opacity: shadow.opacity,
 	});
-	FloatStyle { shadow, parent: None }
+	let outline = settings.outline.with(&options.outline);
+	let outline = shows(options.outline.enabled, outline.enabled, &outline.exclude_filetypes).then_some(OutlineStyle {
+		width: outline.width,
+		highlight: outline.highlight,
+		color: None,
+	});
+	FloatStyle { shadow, outline, parent: None }
 }
 
 /// How the renderer draws underlines, in logical pixels
@@ -99,7 +110,8 @@ mod tests {
 	use renderer::Motion;
 	use rpc::neovim::Window;
 	use rpc::sarthi::{
-		Animation, FloatWindow, ScrollOptions, ScrolledWindow, Settings, ShadowOptions, WindowOptions, WindowVariable,
+		Animation, FloatWindow, OutlineOptions, ScrollOptions, ScrolledWindow, Settings, ShadowOptions, WindowOptions,
+		WindowVariable,
 	};
 	use serde::de::IgnoredAny;
 
@@ -109,6 +121,7 @@ mod tests {
 			filetype: filetype.into(),
 			sarthi: WindowVariable::default(),
 			winblend: 0,
+			outline_color: None,
 			parent: None,
 		}
 	}
@@ -144,6 +157,37 @@ mod tests {
 		// Fully transparent: no shadow, whatever the window says
 		let transparent = FloatWindow { winblend: 100, ..float("lua") };
 		assert!(super::float_style(&settings, &transparent, &on).shadow.is_none());
+	}
+
+	#[test]
+	fn outlines() {
+		let mut settings = Settings::default();
+		let outline = |options: OutlineOptions| WindowOptions { outline: options, ..Default::default() };
+		let none = WindowOptions::default();
+		// Off by default, unless the window says so, with the settings' values where it gives none
+		assert_eq!(super::float_style(&settings, &float("lua"), &none).outline, None);
+		let on = outline(OutlineOptions { enabled: Some(true), width: Some(2.5), ..Default::default() });
+		let style = super::float_style(&settings, &float("lua"), &on).outline.unwrap();
+		assert_eq!((style.width, style.highlight.as_str()), (2.5, "FloatBorder"));
+
+		settings.outline.enabled = true;
+		settings.outline.exclude_filetypes = vec![String::from("satellite")];
+		let style = super::float_style(&settings, &float("lua"), &none).outline.unwrap();
+		assert_eq!(style.width, 1.0);
+		assert_eq!(super::default_float_style(&settings).outline, Some(style));
+		assert_eq!(super::float_style(&settings, &float("satellite"), &none).outline, None);
+		let off = outline(OutlineOptions { enabled: Some(false), ..Default::default() });
+		assert_eq!(super::float_style(&settings, &float("lua"), &off).outline, None);
+		// Its own color, still on as the settings say
+		let comment = outline(OutlineOptions { highlight: Some(String::from("Comment")), ..Default::default() });
+		let style = super::float_style(&settings, &float("lua"), &comment).outline.unwrap();
+		assert_eq!((style.width, style.highlight.as_str()), (1.0, "Comment"));
+		let transparent = FloatWindow { winblend: 100, ..float("lua") };
+		assert_eq!(super::float_style(&settings, &transparent, &on).outline, None);
+
+		// In the color Neovim has for the group, if it has one
+		let colored = FloatWindow { outline_color: Some(0xFF0000), ..float("lua") };
+		assert_eq!(super::float_style(&settings, &colored, &none).outline.unwrap().color, Some(0xFF0000));
 	}
 
 	#[test]

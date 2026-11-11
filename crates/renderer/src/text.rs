@@ -482,6 +482,7 @@ mod tests {
 			cursor: None,
 			scroll: None,
 			shadow: None,
+			outline: None,
 		}
 	}
 

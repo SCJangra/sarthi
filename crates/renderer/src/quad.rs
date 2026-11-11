@@ -4,7 +4,9 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::color::rgba;
 use crate::font::LineMetrics;
-use crate::{BarOrientation, CellLayer, CellSize, CursorShape, Decoration, LayerShadow, RenderCell, Shadow, Underline};
+use crate::{
+	BarOrientation, CellLayer, CellSize, CursorShape, Decoration, LayerShadow, Outline, RenderCell, Shadow, Underline,
+};
 
 /// A rectangle in physical pixels, with optional rounded corners and border
 #[repr(C)]
@@ -420,6 +422,15 @@ pub(crate) fn cursor_quad(quads: &mut Vec<Quad>, layer: &CellLayer, thickness: f
 	quads.push(Quad::fill(rect.map(|value| value as f32), rgba(cursor.color, srgb_surface)));
 }
 
+/// A quad for `outline` around a rectangle `rect` (left, top, width, height): a border just outside it, taking none of
+/// its pixels
+pub(crate) fn outline_quad(rect: [u32; 4], outline: Outline, srgb_surface: bool) -> Quad {
+	let width = outline.width.max(0.0);
+	let [left, top, rect_width, rect_height] = rect.map(|value| value as f32);
+	let rect = [left - width, top - width, rect_width + 2.0 * width, rect_height + 2.0 * width];
+	Quad { border_color: rgba(outline.color, srgb_surface), border_width: width, ..Quad::fill(rect, [0.0; 4]) }
+}
+
 /// Adds the quads of `shadow`. Its area is first cut into rectangles that don't overlap: a blur
 /// is linear, so the shadow of their union is the sum of theirs, and where the area's rectangles overlap (a window and
 /// its border, say) the shadow isn't drawn twice. Blending the pieces instead of summing them differs by well under 1%.
@@ -552,6 +563,7 @@ mod tests {
 			cursor: Some(cursor),
 			scroll: None,
 			shadow: None,
+			outline: None,
 		};
 		let mut quads = Vec::new();
 		cursor_quad(&mut quads, &layer, 1.0, false);
@@ -586,6 +598,7 @@ mod tests {
 			cursor: None,
 			scroll: None,
 			shadow: None,
+			outline: None,
 		};
 		let lines = LineMetrics {
 			underline_top: 17.0,

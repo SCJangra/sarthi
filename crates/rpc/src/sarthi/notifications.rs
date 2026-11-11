@@ -51,6 +51,11 @@ pub struct FloatWindow {
 	#[serde(default)]
 	pub winblend: u32,
 
+	/// The text color of its outline's highlight group, as `0xRRGGBB`, if the group has one: Neovim only sends the
+	/// colors of its UI groups
+	#[serde(default)]
+	pub outline_color: Option<u32>,
+
 	/// The floating window it's attached to (`relative = 'win'`), like a scrollbar to its menu
 	#[serde(default, deserialize_with = "optional_window_number")]
 	pub parent: Option<Window>,
@@ -146,8 +151,14 @@ mod tests {
 
 		let shadow = ShadowOptions { enabled: Some(true), blur: Some(4.0), ..Default::default() };
 		let options = WindowOptions { shadow, ..Default::default() };
-		let window =
-			|win, sarthi| FloatWindow { win: Window(win), filetype: String::new(), sarthi, winblend: 0, parent: None };
+		let window = |win, sarthi| FloatWindow {
+			win: Window(win),
+			filetype: String::new(),
+			sarthi,
+			winblend: 0,
+			outline_color: None,
+			parent: None,
+		};
 		let expected = vec![
 			window(1002, WindowVariable::Options(options)),
 			FloatWindow { winblend: 100, parent: Some(Window(1002)), ..window(1003, WindowVariable::default()) },

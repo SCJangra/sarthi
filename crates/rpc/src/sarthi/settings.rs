@@ -14,6 +14,7 @@ pub struct Settings {
 	pub scroll: ScrollSettings,
 	pub cursor: CursorSettings,
 	pub shadow: ShadowSettings,
+	pub outline: OutlineSettings,
 	pub underline: UnderlineSettings,
 	pub touchpad: TouchpadSettings,
 	pub window: WindowSettings,
@@ -158,6 +159,28 @@ impl Default for ShadowSettings {
 	}
 }
 
+/// A line around floating windows, just outside them, in logical pixels
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OutlineSettings {
+	/// Off by default: a window with a border of its own (`nvim_open_win()`'s `border`) would have two
+	pub enabled: bool,
+
+	pub width: f32,
+
+	/// The highlight group whose text color the line has
+	pub highlight: String,
+
+	/// Floating windows showing these filetypes have no outline, unless their `w:sarthi` gives `outline.enabled`
+	pub exclude_filetypes: Vec<String>,
+}
+
+impl Default for OutlineSettings {
+	fn default() -> Self {
+		Self { enabled: false, width: 1.0, highlight: String::from("FloatBorder"), exclude_filetypes: Vec::new() }
+	}
+}
+
 /// The OS window: how see-through its background is, and whether the desktop behind it is blurred
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -249,6 +272,11 @@ window_options! {
 	ShadowOptions for ShadowSettings { enabled: bool, blur: f32, offset: [f32; 2], opacity: f32 }
 }
 
+window_options! {
+	/// A window's own [`OutlineSettings`]
+	OutlineOptions for OutlineSettings { enabled: bool, width: f32, highlight: String }
+}
+
 /// What a window's `w:sarthi` sets for it: the sections of the settings about a window, with the same keys. Each value
 /// given replaces the setting's for this window. `exclude_filetypes` is only in the settings: the window gives
 /// `enabled` itself.
@@ -257,12 +285,18 @@ window_options! {
 pub struct WindowOptions {
 	pub scroll: ScrollOptions,
 	pub shadow: ShadowOptions,
+	pub outline: OutlineOptions,
 }
 
 impl Settings {
 	/// These settings with what `options` gives a window in their place, e.g. to validate them
 	pub fn for_window(&self, options: &WindowOptions) -> Self {
-		Self { scroll: self.scroll.with(&options.scroll), shadow: self.shadow.with(&options.shadow), ..self.clone() }
+		Self {
+			scroll: self.scroll.with(&options.scroll),
+			shadow: self.shadow.with(&options.shadow),
+			outline: self.outline.with(&options.outline),
+			..self.clone()
+		}
 	}
 
 	/// Whether the values make sense, beyond their types; the error names the first that doesn't
@@ -273,6 +307,7 @@ impl Settings {
 		check((0.0..=1.0).contains(&self.cursor.trail), "cursor.trail must be from 0 to 1")?;
 		check(self.shadow.blur >= 0.0, "shadow.blur can't be negative")?;
 		check((0.0..=1.0).contains(&self.shadow.opacity), "shadow.opacity must be from 0 to 1")?;
+		check(self.outline.width > 0.0, "outline.width must be more than 0")?;
 
 		let underline = &self.underline;
 		check(underline.thickness.is_none_or(|thickness| thickness > 0.0), "underline.thickness must be more than 0")?;
@@ -439,6 +474,18 @@ mod tests {
 	}
 
 	#[test]
+	fn outline() {
+		let outline = |pairs| parse(table(vec![("outline", table(pairs))]));
+		let settings = outline(vec![("enabled", Value::from(true)), ("highlight", Value::from("Comment"))])
+			.unwrap()
+			.outline;
+		assert_eq!((settings.enabled, settings.width, settings.highlight.as_str()), (true, 1.0, "Comment"));
+		assert!(!Settings::default().outline.enabled);
+		let error = outline(vec![("width", Value::from(0))]).unwrap_err();
+		assert_eq!(error, "outline.width must be more than 0");
+	}
+
+	#[test]
 	fn window_options() {
 		// `w:sarthi`: the same sections and keys, each replacing the setting's
 		let shadow = table(vec![("opacity", Value::from(0.6)), ("offset", Value::Array(vec![1.into(), 2.into()]))]);
@@ -458,6 +505,15 @@ mod tests {
 		let options: WindowOptions = rmpv::ext::from_value(opacity).unwrap();
 		let error = Settings::default().for_window(&options).validate().unwrap_err();
 		assert_eq!(error, "shadow.opacity must be from 0 to 1");
+
+		// Every value of a section, not only whether it's on
+		let outline = table(vec![("width", Value::from(3)), ("highlight", Value::from("Comment"))]);
+		let options: WindowOptions = rmpv::ext::from_value(table(vec![("outline", outline)])).unwrap();
+		let settings = Settings::default().for_window(&options);
+		assert_eq!(
+			(settings.outline.enabled, settings.outline.width, settings.outline.highlight.as_str()),
+			(false, 3.0, "Comment")
+		);
 	}
 
 	#[test]

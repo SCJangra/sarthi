@@ -40,6 +40,9 @@ pub struct CellLayer {
 	/// A shadow under the layer, and under others drawn with it: e.g. under the floating windows of one plugin's UI, drawn
 	/// with the first of them
 	pub shadow: Option<LayerShadow>,
+
+	/// A line around the layer, just outside its cells, so it takes none of them
+	pub outline: Option<Outline>,
 }
 
 impl CellLayer {
@@ -47,6 +50,15 @@ impl CellLayer {
 	pub fn rect(&self) -> [u32; 4] {
 		[self.x, self.y, self.width * self.cell.width, self.height * self.cell.height]
 	}
+}
+
+/// A line around a [`CellLayer`], in physical pixels
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Outline {
+	pub width: f32,
+
+	/// As `0xRRGGBB` in sRGB
+	pub color: u32,
 }
 
 /// A shadow under an area of the window, made of rectangles that may overlap
