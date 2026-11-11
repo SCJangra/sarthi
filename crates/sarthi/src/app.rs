@@ -252,7 +252,7 @@ impl App {
 
 	/// Shows the pointer's look for what's under it in `window`, if it changed
 	fn update_pointer(&mut self, window: &Window) {
-		let Some(pointer) = self.mouse.pointer(&self.editor, self.cell_size()) else { return };
+		let Some(pointer) = self.mouse.pointer(&self.editor) else { return };
 		if pointer != self.pointer {
 			self.pointer = pointer;
 			window.set_cursor(match pointer {
@@ -509,14 +509,13 @@ impl ApplicationHandler<AppEvent> for App {
 			},
 			WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
 			WindowEvent::CursorMoved { position, .. } => {
-				let event = self.mouse.moved(position, &self.editor, self.cell_size(), self.modifiers);
+				let event = self.mouse.moved(position, &self.editor, self.modifiers);
 				self.send_mouse(event);
 				self.update_pointer(&window);
 			},
 			WindowEvent::CursorLeft { .. } => self.mouse.left(),
 			WindowEvent::MouseInput { state, button, .. } => {
-				let cell = self.cell_size();
-				let event = self.mouse.button(button, state, &self.editor, cell, self.modifiers);
+				let event = self.mouse.button(button, state, &self.editor, self.modifiers);
 				self.send_mouse(event);
 				// A drag may end over something else.
 				self.update_pointer(&window);

@@ -45,21 +45,19 @@ impl Mouse {
 		&mut self,
 		position: PhysicalPosition<f64>,
 		editor: &Editor,
-		cell: CellSize,
 		modifiers: ModifiersState,
 	) -> Option<InputMouseParams> {
 		self.position = Some(position);
-		let (row, col) = screen_cell(position, cell);
 
 		let (input, grid, row, col) = if let Some((button, grid)) = self.held {
 			// A drag stays with the grid the press was on, even past its edges.
-			let Some((top, left)) = editor.grid_origin(grid) else {
+			let Some((row, col)) = editor.grid_cell(grid, position.x, position.y) else {
 				self.held = None;
 				return None;
 			};
-			(MouseInput::Drag(button), grid, row - i64::from(top), col - i64::from(left))
+			(MouseInput::Drag(button), grid, row, col)
 		} else if editor.mouse() && editor.mouse_move_events() {
-			let hit = grid_at(editor, row, col)?;
+			let hit = editor.grid_at(position.x, position.y)?;
 			(MouseInput::Move, hit.grid, i64::from(hit.row), i64::from(hit.col))
 		} else {
 			return None;
@@ -74,13 +72,12 @@ impl Mouse {
 
 	/// How the pointer should look where it is, or `None` to keep its look: while a button is held, e.g. dragging a
 	/// separator, it stays as it was where the drag started.
-	pub fn pointer(&self, editor: &Editor, cell: CellSize) -> Option<Pointer> {
+	pub fn pointer(&self, editor: &Editor) -> Option<Pointer> {
 		if self.held.is_some() {
 			return None;
 		}
-		let (row, col) = screen_cell(self.position?, cell);
-		let (row, col) = (u32::try_from(row).ok()?, u32::try_from(col).ok()?);
-		Some(editor.pointer_at(row, col))
+		let position = self.position?;
+		Some(editor.pointer_at(position.x, position.y))
 	}
 
 	/// The pointer left the window. While a button is held, its last position stays, so the release, which may come
@@ -97,7 +94,6 @@ impl Mouse {
 		button: WinitButton,
 		state: ElementState,
 		editor: &Editor,
-		cell: CellSize,
 		modifiers: ModifiersState,
 	) -> Option<InputMouseParams> {
 		let button = match button {
@@ -108,14 +104,14 @@ impl Mouse {
 			WinitButton::Forward => MouseButton::X2,
 			WinitButton::Other(_) => return None,
 		};
-		let (row, col) = screen_cell(self.position?, cell);
+		let position = self.position?;
 
 		match state {
 			ElementState::Pressed => {
 				if !editor.mouse() || self.held.is_some() {
 					return None;
 				}
-				let hit = grid_at(editor, row, col)?;
+				let hit = editor.grid_at(position.x, position.y)?;
 				let (row, col) = (i64::from(hit.row), i64::from(hit.col));
 				self.held = Some((button, hit.grid));
 				self.last = Some((hit.grid, row, col));
@@ -126,8 +122,7 @@ impl Mouse {
 			ElementState::Released => {
 				let (held, grid) = self.held.filter(|(held, _)| *held == button)?;
 				self.held = None;
-				let (top, left) = editor.grid_origin(grid)?;
-				let (row, col) = (row - i64::from(top), col - i64::from(left));
+				let (row, col) = editor.grid_cell(grid, position.x, position.y)?;
 				let input = MouseInput::Release(held);
 				Some(InputMouseParams { input, modifiers: notation(modifiers), grid, row, col })
 			},
@@ -152,10 +147,7 @@ impl Mouse {
 		};
 		self.wheel = (self.wheel.0 + across, self.wheel.1 + down);
 
-		let Some(hit) = self.position.and_then(|position| {
-			let (row, col) = screen_cell(position, cell);
-			grid_at(editor, row, col)
-		}) else {
+		let Some(hit) = self.position.and_then(|position| editor.grid_at(position.x, position.y)) else {
 			return Vec::new();
 		};
 		if !editor.mouse() {
@@ -186,19 +178,6 @@ impl Mouse {
 	}
 }
 
-/// The cell of the screen at `position`, in physical pixels from the window's top-left; negative or past the screen
-/// when the pointer is outside the window, e.g. during a drag
-fn screen_cell(position: PhysicalPosition<f64>, cell: CellSize) -> (i64, i64) {
-	let row = (position.y / f64::from(cell.height)).floor() as i64;
-	let col = (position.x / f64::from(cell.width)).floor() as i64;
-	(row, col)
-}
-
-/// The grid at screen cell `row`, `col`, if it's on the screen
-fn grid_at(editor: &Editor, row: i64, col: i64) -> Option<editor::GridPosition> {
-	editor.grid_at(u32::try_from(row).ok()?, u32::try_from(col).ok()?)
-}
-
 /// The modifiers held, as Neovim names them for mouse events: one letter each, e.g. "SC" for Shift+Ctrl
 fn notation(modifiers: ModifiersState) -> String {
 	[
@@ -218,7 +197,7 @@ mod tests {
 	use renderer::CellSize;
 	use rpc::neovim::{
 		GridResizeEvent, InputMouseParams, MouseButton, MouseInput, OptionSetEvent, OptionValue, RedrawNotification,
-		WheelDirection, WinPosEvent,
+		WheelDirection, WinExternalPosEvent, WinPosEvent, Window,
 	};
 	use serde::de::IgnoredAny;
 	use winit::dpi::PhysicalPosition;
@@ -232,6 +211,7 @@ mod tests {
 	/// A 20×10 screen with window grid 2 (10×5) at row 2, col 4, and mouse input on
 	fn editor() -> Editor {
 		let mut editor = Editor::new();
+		editor.set_cell_size(CELL);
 		let resize =
 			|grid, width, height| RedrawNotification::GridResize(vec![GridResizeEvent { grid, width, height }]);
 		let position = WinPosEvent { grid: 2, win: IgnoredAny, start_row: 2, start_col: 4, width: 10, height: 5 };
@@ -261,29 +241,45 @@ mod tests {
 		let (editor, mut mouse) = (editor(), Mouse::new(3.0));
 		let left = MouseButton::Left;
 
-		assert_eq!(mouse.moved(at(3.0, 5.0), &editor, CELL, NONE), None);
-		let press = mouse.button(WinitButton::Left, ElementState::Pressed, &editor, CELL, NONE);
+		assert_eq!(mouse.moved(at(3.0, 5.0), &editor, NONE), None);
+		let press = mouse.button(WinitButton::Left, ElementState::Pressed, &editor, NONE);
 		assert_eq!(press, event(MouseInput::Press(left), 2, 1, 1));
 
 		// Within the same cell: nothing; into the next row: a drag, also past the window's bottom
-		assert_eq!(mouse.moved(PhysicalPosition::new(47.0, 79.0), &editor, CELL, NONE), None);
-		assert_eq!(mouse.moved(at(4.0, 5.0), &editor, CELL, NONE), event(MouseInput::Drag(left), 2, 2, 1));
-		assert_eq!(mouse.moved(at(9.0, 2.0), &editor, CELL, NONE), event(MouseInput::Drag(left), 2, 7, -2));
+		assert_eq!(mouse.moved(PhysicalPosition::new(47.0, 79.0), &editor, NONE), None);
+		assert_eq!(mouse.moved(at(4.0, 5.0), &editor, NONE), event(MouseInput::Drag(left), 2, 2, 1));
+		assert_eq!(mouse.moved(at(9.0, 2.0), &editor, NONE), event(MouseInput::Drag(left), 2, 7, -2));
 
 		// Released outside the window: still sent, where the pointer was last
 		mouse.left();
-		let release = mouse.button(WinitButton::Left, ElementState::Released, &editor, CELL, NONE);
+		let release = mouse.button(WinitButton::Left, ElementState::Released, &editor, NONE);
 		assert_eq!(release, event(MouseInput::Release(left), 2, 7, -2));
 		// Afterwards, moving sends nothing: Neovim didn't ask for moves.
-		assert_eq!(mouse.moved(at(0.0, 0.0), &editor, CELL, NONE), None);
+		assert_eq!(mouse.moved(at(0.0, 0.0), &editor, NONE), None);
+	}
+
+	#[test]
+	fn an_external_window_gets_its_own_clicks() {
+		let (mut editor, mut mouse) = (editor(), Mouse::new(3.0));
+		// A 4×2 external window: 32×40 pixels, centered on the 160×200 pixel screen at (64, 80)
+		let resize = RedrawNotification::GridResize(vec![GridResizeEvent { grid: 4, width: 4, height: 2 }]);
+		let external = RedrawNotification::WinExternalPos(vec![WinExternalPosEvent { grid: 4, win: Window(1004) }]);
+		editor.apply(vec![resize, external, RedrawNotification::Flush]);
+
+		mouse.moved(PhysicalPosition::new(65.0, 81.0), &editor, NONE);
+		let press = mouse.button(WinitButton::Left, ElementState::Pressed, &editor, NONE);
+		assert_eq!(press, event(MouseInput::Press(MouseButton::Left), 4, 0, 0));
+		// Dragged out of it, past its top-left corner, in its own cells
+		let drag = mouse.moved(PhysicalPosition::new(50.0, 50.0), &editor, NONE);
+		assert_eq!(drag, event(MouseInput::Drag(MouseButton::Left), 4, -2, -2));
 	}
 
 	#[test]
 	fn modifiers_and_other_buttons() {
 		let (editor, mut mouse) = (editor(), Mouse::new(3.0));
-		mouse.moved(at(0.0, 0.0), &editor, CELL, NONE);
+		mouse.moved(at(0.0, 0.0), &editor, NONE);
 		let modifiers = ModifiersState::CONTROL | ModifiersState::SHIFT;
-		let press = mouse.button(WinitButton::Back, ElementState::Pressed, &editor, CELL, modifiers);
+		let press = mouse.button(WinitButton::Back, ElementState::Pressed, &editor, modifiers);
 		let expected = InputMouseParams {
 			input: MouseInput::Press(MouseButton::X1),
 			modifiers: String::from("SC"),
@@ -298,10 +294,10 @@ mod tests {
 	fn nothing_while_mouse_input_is_off() {
 		let (mut editor, mut mouse) = (editor(), Mouse::new(3.0));
 		editor.apply(vec![RedrawNotification::MouseOff]);
-		mouse.moved(at(3.0, 5.0), &editor, CELL, NONE);
-		assert_eq!(mouse.button(WinitButton::Left, ElementState::Pressed, &editor, CELL, NONE), None);
+		mouse.moved(at(3.0, 5.0), &editor, NONE);
+		assert_eq!(mouse.button(WinitButton::Left, ElementState::Pressed, &editor, NONE), None);
 		assert_eq!(mouse.wheel(MouseScrollDelta::LineDelta(0.0, -1.0), &editor, CELL, NONE), []);
-		assert_eq!(mouse.button(WinitButton::Left, ElementState::Released, &editor, CELL, NONE), None);
+		assert_eq!(mouse.button(WinitButton::Left, ElementState::Released, &editor, NONE), None);
 	}
 
 	#[test]
@@ -309,15 +305,15 @@ mod tests {
 		let (mut editor, mut mouse) = (editor(), Mouse::new(3.0));
 		let option = OptionSetEvent { name: String::from("mousemoveevent"), value: OptionValue::Bool(true) };
 		editor.apply(vec![RedrawNotification::OptionSet(vec![option])]);
-		assert_eq!(mouse.moved(at(2.0, 4.0), &editor, CELL, NONE), event(MouseInput::Move, 2, 0, 0));
-		assert_eq!(mouse.moved(at(2.0, 4.0), &editor, CELL, NONE), None);
-		assert_eq!(mouse.moved(at(0.0, 0.0), &editor, CELL, NONE), event(MouseInput::Move, 1, 0, 0));
+		assert_eq!(mouse.moved(at(2.0, 4.0), &editor, NONE), event(MouseInput::Move, 2, 0, 0));
+		assert_eq!(mouse.moved(at(2.0, 4.0), &editor, NONE), None);
+		assert_eq!(mouse.moved(at(0.0, 0.0), &editor, NONE), event(MouseInput::Move, 1, 0, 0));
 	}
 
 	#[test]
 	fn wheel_notches() {
 		let (editor, mut mouse) = (editor(), Mouse::new(3.0));
-		mouse.moved(at(3.0, 5.0), &editor, CELL, NONE);
+		mouse.moved(at(3.0, 5.0), &editor, NONE);
 		let down = || event(MouseInput::Wheel(WheelDirection::Down), 2, 1, 1).unwrap();
 
 		assert_eq!(mouse.wheel(MouseScrollDelta::LineDelta(0.0, -2.0), &editor, CELL, NONE), [down(), down()]);
@@ -336,7 +332,7 @@ mod tests {
 
 		// At 1 line per row, the text follows the fingers: a notch per three rows
 		let mut mouse = Mouse::new(1.0);
-		mouse.moved(at(3.0, 5.0), &editor, CELL, NONE);
+		mouse.moved(at(3.0, 5.0), &editor, NONE);
 		assert_eq!(mouse.wheel(pixels(0.0, -59.0), &editor, CELL, NONE), []);
 		assert_eq!(mouse.wheel(pixels(0.0, -1.0), &editor, CELL, NONE), [down()]);
 	}
