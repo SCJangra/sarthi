@@ -25,19 +25,27 @@ local function outline_color(win)
   return vim.api.nvim_get_hl(0, { name = type(own) == 'string' and own or highlight, link = false }).fg
 end
 
+--- What's sent about `win`, if it's a floating or external window
+local function facts(win)
+  local config = vim.api.nvim_win_get_config(win)
+  if config.relative == '' and not config.external then
+    return nil
+  end
+  return {
+    win = win,
+    filetype = vim.bo[vim.api.nvim_win_get_buf(win)].filetype,
+    sarthi = vim.w[win].sarthi,
+    winblend = vim.wo[win].winblend,
+    outline_color = outline_color(win),
+    parent = config.relative == 'win' and is_float(config.win) and config.win or nil,
+  }
+end
+
 local function forward()
   local windows = {}
   for _, win in ipairs(vim.api.nvim_list_wins()) do
-    local config = vim.api.nvim_win_get_config(win)
-    if config.relative ~= '' or config.external then
-      local window = {
-        win = win,
-        filetype = vim.bo[vim.api.nvim_win_get_buf(win)].filetype,
-        sarthi = vim.w[win].sarthi,
-        winblend = vim.wo[win].winblend,
-        outline_color = outline_color(win),
-        parent = config.relative == 'win' and is_float(config.win) and config.win or nil,
-      }
+    local window = facts(win)
+    if window then
       if not vim.deep_equal(sent[win], window) then
         sent[win] = window
         table.insert(windows, window)
@@ -52,6 +60,16 @@ local function forward()
   end
   if #windows > 0 then
     rpc.notify('floats_changed', windows)
+  end
+end
+
+--- Sends `win` now, e.g. as `require('sarthi').api` sets it up, so sarthi has its style before Neovim draws it: Neovim's
+--- redraw comes after this on the channel.
+function M.send(win)
+  local window = facts(win)
+  if window and not vim.deep_equal(sent[win], window) then
+    sent[win] = window
+    rpc.notify('floats_changed', { window })
   end
 end
 

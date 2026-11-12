@@ -140,6 +140,8 @@ end
 --- `level`
 local function apply(win, sarthi, place, options, level)
   vim.w[win].sarthi = options
+  -- At once, so sarthi has the window's style before Neovim draws it
+  require('sarthi.floats').send(win)
   local mistake = rpc.request('place_window', win, place or vim.NIL)
   if mistake ~= vim.NIL then
     error('sarthi: `sarthi.place`: ' .. mistake, level)
