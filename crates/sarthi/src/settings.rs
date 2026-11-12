@@ -94,7 +94,8 @@ fn style(settings: &Settings, options: &WindowOptions, filetype: &str, winblend:
 	let corners = settings.corners.with(&options.corners);
 	let corners = shows(options.corners.enabled, corners.enabled, &corners.exclude_filetypes).then_some(corners.radius);
 	let padding = settings.padding.with(&options.padding);
-	let padding = shows(options.padding.enabled, padding.enabled, &padding.exclude_filetypes).then_some(padding.size);
+	let padding =
+		shows(options.padding.enabled, padding.enabled, &padding.exclude_filetypes).then_some(padding.size.sides());
 	FloatStyle { shadow, outline, corners, padding, parent: None }
 }
 
@@ -114,8 +115,8 @@ mod tests {
 	use renderer::Motion;
 	use rpc::neovim::Window;
 	use rpc::sarthi::{
-		Animation, CornerOptions, FloatWindow, OutlineOptions, PaddingOptions, ScrollOptions, ScrolledWindow, Settings,
-		ShadowOptions, WindowOptions, WindowVariable,
+		Animation, CornerOptions, FloatWindow, OutlineOptions, PaddingOptions, PaddingSides, PaddingSize,
+		ScrollOptions, ScrolledWindow, Settings, ShadowOptions, WindowOptions, WindowVariable,
 	};
 	use serde::de::IgnoredAny;
 
@@ -221,12 +222,16 @@ mod tests {
 		// None by default, unless the window says so, at the settings' size or its own
 		assert_eq!(super::float_style(&settings, &float("lua"), &none).padding, None);
 		let on = padding(PaddingOptions { enabled: Some(true), ..Default::default() });
-		assert_eq!(super::float_style(&settings, &float("lua"), &on).padding, Some(4.0));
+		assert_eq!(super::float_style(&settings, &float("lua"), &on).padding, Some([4.0; 4]));
 
 		settings.padding.enabled = true;
 		settings.padding.exclude_filetypes = vec![String::from("satellite")];
-		let size = padding(PaddingOptions { size: Some(2.0), ..Default::default() });
-		assert_eq!(super::float_style(&settings, &float("lua"), &size).padding, Some(2.0));
+		let size = padding(PaddingOptions { size: Some(PaddingSize::All(2.0)), ..Default::default() });
+		assert_eq!(super::float_style(&settings, &float("lua"), &size).padding, Some([2.0; 4]));
+		// Each side its own
+		let sides = PaddingSize::Sides(PaddingSides { top: 1.0, left: 3.0, ..Default::default() });
+		let own = padding(PaddingOptions { size: Some(sides), ..Default::default() });
+		assert_eq!(super::float_style(&settings, &float("lua"), &own).padding, Some([1.0, 0.0, 0.0, 3.0]));
 		assert_eq!(super::float_style(&settings, &float("satellite"), &size).padding, None);
 		let off = padding(PaddingOptions { enabled: Some(false), ..Default::default() });
 		assert_eq!(super::float_style(&settings, &float("lua"), &off).padding, None);

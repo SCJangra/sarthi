@@ -335,11 +335,13 @@ section! {
 
 section! {
 	/// Space around floating and external windows' cells, in their background, in logical pixels
-	PaddingSettings, window PaddingOptions { enabled: bool, size: f32 } {
+	PaddingSettings, window PaddingOptions { enabled: bool, size: PaddingSize } {
 		/// Whether windows have it
 		enabled: bool = false,
 
-		size: f32 = 4.0,
+		/// In logical pixels: the same on every side, or each side's as numbers, those left out 0, e.g.
+		/// `{ top = 2, left = 8, right = 8 }`
+		size: PaddingSize as "number|{ top?, right?, bottom?, left? }" = PaddingSize::All(4.0),
 
 		/// Windows showing these filetypes have no padding, unless their `w:sarthi` gives `padding.enabled`
 		exclude_filetypes: Vec<String> = Vec::new(),
@@ -386,6 +388,77 @@ section! {
 	}
 }
 
+/// The size of a window's padding: the same on every side, or each side's
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum PaddingSize {
+	All(f32),
+	Sides(PaddingSides),
+}
+
+/// Each side's padding, in logical pixels; a side left out has none
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PaddingSides {
+	pub top: f32,
+	pub right: f32,
+	pub bottom: f32,
+	pub left: f32,
+}
+
+impl PaddingSize {
+	/// Top, right, bottom and left
+	pub fn sides(self) -> [f32; 4] {
+		match self {
+			Self::All(size) => [size; 4],
+			Self::Sides(PaddingSides { top, right, bottom, left }) => [top, right, bottom, left],
+		}
+	}
+}
+
+impl<'de> Deserialize<'de> for PaddingSize {
+	/// A number, or a table of sides: decoded as [`PaddingSides`], so a mistake in it is named
+	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		use serde::de::{self, value::MapAccessDeserializer};
+
+		struct Size;
+
+		impl<'de> de::Visitor<'de> for Size {
+			type Value = PaddingSize;
+
+			fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+				formatter.write_str("a number, or a table of top, right, bottom and left")
+			}
+
+			fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+				Ok(PaddingSize::All(value as f32))
+			}
+
+			fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+				Ok(PaddingSize::All(value as f32))
+			}
+
+			fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+				Ok(PaddingSize::All(value as f32))
+			}
+
+			fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+				PaddingSides::deserialize(MapAccessDeserializer::new(map)).map(PaddingSize::Sides)
+			}
+
+			/// An empty Lua table arrives as an array: no padding on any side.
+			fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+				match seq.next_element::<de::IgnoredAny>()? {
+					None => Ok(PaddingSize::Sides(PaddingSides::default())),
+					Some(_) => Err(de::Error::invalid_type(de::Unexpected::Seq, &self)),
+				}
+			}
+		}
+
+		deserializer.deserialize_any(Size)
+	}
+}
+
 /// What a window's `w:sarthi` sets for it: the sections of the settings about a window, with the same keys. Each value
 /// given replaces the setting's for this window. `exclude_filetypes` is only in the settings: the window gives
 /// `enabled` itself.
@@ -422,7 +495,7 @@ impl Settings {
 		check((0.0..=1.0).contains(&self.shadow.opacity), "shadow.opacity must be from 0 to 1")?;
 		check(self.outline.width > 0.0, "outline.width must be more than 0")?;
 		check(self.corners.radius >= 0.0, "corners.radius can't be negative")?;
-		check(self.padding.size >= 0.0, "padding.size can't be negative")?;
+		check(self.padding.size.sides().iter().all(|size| *size >= 0.0), "padding.size can't be negative")?;
 
 		let underline = &self.underline;
 		check(underline.thickness.is_none_or(|thickness| thickness > 0.0), "underline.thickness must be more than 0")?;
@@ -628,9 +701,19 @@ mod tests {
 		let settings = padding(vec![("enabled", Value::from(true)), ("size", Value::from(6))])
 			.unwrap()
 			.padding;
-		assert_eq!((settings.enabled, settings.size), (true, 6.0));
+		assert_eq!((settings.enabled, settings.size.sides()), (true, [6.0; 4]));
 		assert!(!Settings::default().padding.enabled);
 		let error = padding(vec![("size", Value::from(-1))]).unwrap_err();
+		assert_eq!(error, "padding.size can't be negative");
+
+		// Each side its own, those left out none; an empty table, none at all
+		let sides = table(vec![("top", Value::from(2)), ("left", Value::from(8.5))]);
+		let size = padding(vec![("size", sides)]).unwrap().padding.size;
+		assert_eq!(size.sides(), [2.0, 0.0, 0.0, 8.5]);
+		assert_eq!(padding(vec![("size", table(vec![]))]).unwrap().padding.size.sides(), [0.0; 4]);
+		let error = padding(vec![("size", table(vec![("lfet", Value::from(1))]))]).unwrap_err();
+		assert!(error.contains("unknown field `lfet`"), "{error}");
+		let error = padding(vec![("size", table(vec![("right", Value::from(-2))]))]).unwrap_err();
 		assert_eq!(error, "padding.size can't be negative");
 	}
 

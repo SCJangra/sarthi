@@ -455,16 +455,28 @@ pub(crate) fn cursor_quad(quads: &mut Vec<Quad>, layer: &CellLayer, thickness: f
 	quads.push(Quad::fill(rect.map(|value| value as f32), rgba(cursor.color, srgb_surface)));
 }
 
-/// A quad for `layer`'s padding, if it has any: its background around its cells, in the background of its first cell,
-/// which a floating window's usually has throughout, as see-through as that cell. Only the band around the cells: under a
-/// see-through window, the color would show twice.
-pub(crate) fn padding_quad(layer: &CellLayer, srgb_surface: bool) -> Option<Quad> {
-	let cell = layer.cells.first().filter(|_| layer.padding > 0)?;
+/// The quads of `layer`'s padding: its background around its cells, in the background of its first cell, which a
+/// floating window's usually has throughout, as see-through as that cell. Only the bands around the cells, one a side:
+/// under a see-through window, the color would show twice. They're cut to the layer's rounded corners.
+pub(crate) fn padding_quads(quads: &mut Vec<Quad>, layer: &CellLayer, srgb_surface: bool) {
+	let Some(cell) = layer.cells.first() else { return };
 	let [r, g, b, _] = rgba(cell.background, srgb_surface);
 	let color = [r, g, b, 1.0 - f32::from(cell.blend.min(100)) / 100.0];
-	let band =
-		Quad { border_color: color, border_width: layer.padding as f32, ..Quad::fill(layer.outer_rect(), [0.0; 4]) };
-	Some(Quad { corner_radius: layer.corner_radius, ..band })
+	let outer = layer.outer_rect();
+	let [left, top, width, _] = outer;
+	let [x, y, cells_width, cells_height] = layer.rect().map(|value| value as f32);
+	let [top_size, right_size, bottom_size, left_size] = layer.padding.map(|padding| padding as f32);
+	let bands = [
+		[left, top, width, top_size],
+		[left, y + cells_height, width, bottom_size],
+		[left, y, left_size, cells_height],
+		[x + cells_width, y, right_size, cells_height],
+	];
+	for band in bands.into_iter().filter(|[_, _, width, height]| *width > 0.0 && *height > 0.0) {
+		let clip = (layer.corner_radius > 0.0).then_some((outer, [layer.corner_radius, 0.0]));
+		let (clip, clip_radius) = clip.unwrap_or(([0.0; 4], [0.0; 2]));
+		quads.push(Quad { clip, clip_radius, ..Quad::fill(band, color) });
+	}
 }
 
 /// A quad for `outline` around a rectangle `rect` (left, top, width, height) with corners rounded by `radius`: a border
@@ -636,7 +648,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
-			padding: 0,
+			padding: [0; 4],
 			corner_radius: 0.0,
 		};
 		let mut quads = Vec::new();
@@ -673,7 +685,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
-			padding: 0,
+			padding: [0; 4],
 			corner_radius: 0.0,
 		};
 		let lines = LineMetrics {

@@ -9,7 +9,7 @@ use crate::cursor::{CursorAnimation, cursor_rect};
 use crate::font::LineMetrics;
 use crate::quad::{
 	FrameQuads, Quad, QuadPipeline, area_shadow, cell_backgrounds, cell_decorations, cursor_quad, outline_quad,
-	padding_quad,
+	padding_quads,
 };
 use crate::scroll::{ScrollAnimations, SlidingRegion};
 use crate::shape::ShapePipeline;
@@ -500,9 +500,7 @@ fn layer_quads(
 		if let Some(layer_shadow) = &layer.shadow {
 			area_shadow(frame, layer_shadow, srgb);
 		}
-		if let Some(padding) = padding_quad(layer, srgb) {
-			frame.quads.push(padding);
-		}
+		padding_quads(&mut frame.quads, layer, srgb);
 		if let Some(outline) = layer.outline {
 			frame
 				.quads
@@ -610,7 +608,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
-			padding: 0,
+			padding: [0; 4],
 			corner_radius: 0.0,
 		})
 	}
@@ -937,7 +935,7 @@ mod tests {
 		// A white cell at column 3 with 2 px of padding, and a red outline around that, on black
 		let Layer::Cells(white) = cell(1, " ", 0xFFFFFF);
 		let outline = Some(crate::Outline { width: 1.0, color: 0xFF0000 });
-		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, padding: 2, outline, ..white });
+		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, padding: [2; 4], outline, ..white });
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");
 			return;

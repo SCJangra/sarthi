@@ -286,7 +286,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
-			padding: 0,
+			padding: [0; 4],
 			corner_radius: 0.0,
 		};
 		let cursor = |shape| Cursor { row: 2, col: 3, width: 1, shape, color: 0, text_color: 0, animate: true };

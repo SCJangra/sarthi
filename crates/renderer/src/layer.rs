@@ -44,9 +44,9 @@ pub struct CellLayer {
 	/// A line around the layer, just outside its cells, so it takes none of them
 	pub outline: Option<Outline>,
 
-	/// Pixels of its background around its cells, taking none of them: the outline, the rounded corners and the shadow
-	/// go around it
-	pub padding: u32,
+	/// Pixels of its background around its cells, taking none of them: top, right, bottom and left. The outline, the
+	/// rounded corners and the shadow go around it.
+	pub padding: [u32; 4],
 
 	/// Radius of its rounded corners, in pixels; 0 for square ones. What's drawn in its cells is cut to them, except text.
 	pub corner_radius: f32,
@@ -62,8 +62,8 @@ impl CellLayer {
 	/// window's edge
 	pub fn outer_rect(&self) -> [f32; 4] {
 		let [x, y, width, height] = self.rect().map(|value| value as f32);
-		let padding = self.padding as f32;
-		[x - padding, y - padding, width + 2.0 * padding, height + 2.0 * padding]
+		let [top, right, bottom, left] = self.padding.map(|padding| padding as f32);
+		[x - left, y - top, width + left + right, height + top + bottom]
 	}
 }
 

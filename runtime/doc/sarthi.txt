@@ -217,8 +217,10 @@ padding.enabled                                       *sarthi-padding.enabled*
     Whether windows have it
 
 padding.size                                             *sarthi-padding.size*
-    Type: number
+    Type: number|{ top?, right?, bottom?, left? }
     Default: `4`
+    In logical pixels: the same on every side, or each side's as numbers,
+    those left out 0, e.g. `{ top = 2, left = 8, right = 8 }`
 
 padding.exclude_filetypes                   *sarthi-padding.exclude_filetypes*
     Type: string[]

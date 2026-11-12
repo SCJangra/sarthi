@@ -47,7 +47,7 @@ pub fn cell_layer(
 		scroll: None,
 		shadow: None,
 		outline: None,
-		padding: 0,
+		padding: [0; 4],
 		corner_radius: 0.0,
 	};
 	if let Some(style) = cursor {
