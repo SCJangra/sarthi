@@ -29,6 +29,16 @@ local api = {}
 ---true }` centers it, as it is until placed; otherwise it's placed like a
 ---floating window, with its `anchor` corner at `row`, `col` of what it's
 ---`relative` to.
+---
+---A window's frame, its padding and outline (|sarthi-padding|,
+---|sarthi-outline|), is in pixels around its cells, so it goes around
+---where the window is placed: the frame starts at the anchor point, and
+---the cells move away from it by the frame's width. Relative to a window,
+---`row` and `col` count in its cells from where its frame starts, not its
+---text, unlike from inside a Neovim `border`. So windows line up in whole
+---cells whatever their frames: `col = 0` lines up with the window's left
+---edge, and `row` = its height starts just below it. Floating windows
+---placed by Neovim go the same.
 ---@class sarthi.WindowPlace
 ---@field center? boolean Center it
 ---@field relative? 'editor'|'win'|'cursor' What it's placed relative to

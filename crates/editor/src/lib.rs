@@ -1017,6 +1017,20 @@ impl Editor {
 	/// [`Editor::external_rect`], `depth` external windows away from the one asked for: windows placed relative to one
 	/// another can't go round in a loop.
 	fn external_rect_within(&self, id: u32, win: Window, depth: u32) -> [u32; 4] {
+		let ([left, top], size) = self.external_place(id, win, depth);
+		// Its frame away from what it's placed by, like a float's
+		let [x, y] = match self.places.get(&win).copied().unwrap_or(Place::Center) {
+			Place::Relative { anchor, .. } => self.frame_offset(win, anchor),
+			Place::Center => [0, 0],
+		};
+		let moved = |at: u32, by: i64| (i64::from(at) + by).max(0) as u32;
+		[moved(left, x), moved(top, y), size[0], size[1]]
+	}
+
+	/// Where external window `win`, grid `id`, is placed, before its frame moves its cells away from what it's placed by:
+	/// like where Neovim places a float, where its frame starts. And its size, in pixels. A window placed relative to it
+	/// counts from there, like from a float, so windows put together line up in whole cells whatever their frames.
+	fn external_place(&self, id: u32, win: Window, depth: u32) -> ([u32; 2], [u32; 2]) {
 		let (grid, cell) = (&self.grids[&id], self.cell_of(id));
 		let size = [grid.width as u32 * cell.width, grid.height as u32 * cell.height];
 		let screen = self
@@ -1030,8 +1044,8 @@ impl Editor {
 			match self.placements.get(&grid) {
 				// In its own cells, where it's placed; past a few in a row, as if not shown
 				Some(Placement::External { win, .. }) => (depth < 8).then(|| {
-					let [left, top, ..] = self.external_rect_within(grid, *win, depth + 1);
-					([left, top], self.cell_of(grid))
+					let (corner, _) = self.external_place(grid, *win, depth + 1);
+					(corner, self.cell_of(grid))
 				}),
 				_ => {
 					let (row, col) = self.grid_origin(grid)?;
@@ -1039,14 +1053,7 @@ impl Editor {
 				},
 			}
 		};
-		let [left, top] = external::position(place, size, screen, self.cell, origin);
-		// Its frame away from what it's placed by, like a float's
-		let [x, y] = match place {
-			Place::Relative { anchor, .. } => self.frame_offset(win, anchor),
-			Place::Center => [0, 0],
-		};
-		let moved = |at: u32, by: i64| (i64::from(at) + by).max(0) as u32;
-		[moved(left, x), moved(top, y), size[0], size[1]]
+		(external::position(place, size, screen, self.cell, origin), size)
 	}
 
 	/// How the text of grid `id`, `width` × `height` cells, scrolled since the last `flush`, if it did
@@ -1546,6 +1553,9 @@ mod tests {
 			Place::Relative { relative: Relative::Win(win_of(5)), anchor: Anchor::NorthWest, row: 1.0, col: 2.0 };
 		editor.set_external_place(win_of(4), below);
 		assert_eq!(at(&editor.refresh().expect("placed")), (2 * 10, 20));
+		// Counted from where 5's frame starts: its padding moves its cells, not what's placed relative to it
+		editor.set_float_style(win_of(5), FloatStyle { padding: Some([4.0; 4]), ..FloatStyle::default() });
+		assert_eq!(at(&editor.refresh().expect("padded")), (2 * 10, 20));
 
 		// Placed relative to each other: no loop, centered past a few
 		editor.set_external_place(
