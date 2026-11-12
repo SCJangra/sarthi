@@ -102,7 +102,12 @@ impl TextPipeline {
 			// Custom glyphs are the cells sarthi draws itself, rasterized once per size.
 			let thickness = fonts.line_metrics(piece.layer.font).thickness;
 			if index == self.renderers.len() {
-				let renderer = TextRenderer::new(&mut self.atlas, device, wgpu::MultisampleState::default(), None);
+				let renderer = TextRenderer::new(
+					&mut self.atlas,
+					device,
+					wgpu::MultisampleState::default(),
+					Some(crate::stencil::tested()),
+				);
 				self.renderers.push(renderer);
 			}
 

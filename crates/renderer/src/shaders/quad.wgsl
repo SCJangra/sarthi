@@ -15,7 +15,7 @@ struct Quad {
 	// Corner radius, border width
 	@location(3) radius_border: vec2<f32>,
 	// Kind (0: none, 1: wave, 2: dots, 3: dashes), period and line thickness in pixels, unused; or for a shadow
-	// (kind 4), its blur radius in pixels and its holes' corner radius
+	// (kind 4), its blur radius in pixels, its holes' corner radius, and 1 for the union of the rectangles after its holes
 	@location(4) pattern: vec4<f32>,
 	// For a shadow: the first of its holes, and how many
 	@location(5) holes: vec2<u32>,
@@ -114,11 +114,32 @@ fn erf(x: vec2<f32>) -> vec2<f32> {
 
 // How much of a box shadow covers this pixel: a box of `half_size` blurred with a Gaussian of standard deviation
 // `sigma`, which is exact for a box (the blur is separable). The quad reaches 3 sigma past the box on each side.
-fn shadow_coverage(in: VertexOutput, sigma: f32) -> f32 {
+//
+// A box with corners rounded by `radius` is blurred along its distance instead, which is close but not exact: its
+// corners would show a square box's shadow.
+fn shadow_coverage(in: VertexOutput, sigma: f32, radius: f32) -> f32 {
 	let half = max(in.half_size - 3.0 * sigma, vec2<f32>(0.0));
 	let scale = 1.0 / (sqrt(2.0) * sigma);
+	if radius > 0.0 {
+		let distance = rounded_box(in.local, half, min(radius, min(half.x, half.y)));
+		return 0.5 - 0.5 * erf(vec2<f32>(distance * scale, 0.0)).x;
+	}
 	let both = 0.5 * (erf((in.local + half) * scale) - erf((in.local - half) * scale));
 	return both.x * both.y;
+}
+
+// How much of the shadow of several rectangles with corners rounded by `radius` covers this pixel: their union, blurred
+// along the distance to the nearest, each rounded at most to its own size. They follow the quad's holes.
+fn union_coverage(in: VertexOutput, sigma: f32, radius: f32) -> f32 {
+	var distance = 1e9;
+	let first = in.holes.x + in.holes.y;
+	for (var i = first; i < first + in.holes.y; i++) {
+		let rect = holes[i];
+		let half = rect.zw * 0.5;
+		let corner = min(radius, min(half.x, half.y));
+		distance = min(distance, rounded_box(in.position.xy - (rect.xy + half), half, corner));
+	}
+	return 0.5 - 0.5 * erf(vec2<f32>(distance / (sqrt(2.0) * sigma), 0.0)).x;
 }
 
 @fragment
@@ -134,7 +155,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 			}
 		}
 		let sigma = max(in.pattern.y * 0.5, 0.01);
-		return vec4<f32>(in.color.rgb * in.color.a, in.color.a) * shadow_coverage(in, sigma);
+		var coverage = shadow_coverage(in, sigma, in.pattern.z);
+		if in.pattern.w > 0.5 {
+			coverage = union_coverage(in, sigma, in.pattern.z);
+		}
+		return vec4<f32>(in.color.rgb * in.color.a, in.color.a) * coverage;
 	}
 	if in.pattern.x > 0.5 {
 		return vec4<f32>(in.color.rgb * in.color.a, in.color.a) * pattern_coverage(in) * clip_coverage(in);
@@ -155,4 +180,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 	// Premultiplied alpha
 	return vec4<f32>(color.rgb * color.a, color.a) * coverage * clip_coverage(in);
+}
+
+// For the stencil (see `stencil.rs`): the quad's pixels whose centers are in its rounded rectangle, and no color
+@fragment
+fn fs_mask(in: VertexOutput) -> @location(0) vec4<f32> {
+	let radius = min(in.radius_border.x, min(in.half_size.x, in.half_size.y));
+	if rounded_box(in.local, in.half_size, radius) > 0.0 {
+		discard;
+	}
+	return vec4<f32>(0.0);
 }

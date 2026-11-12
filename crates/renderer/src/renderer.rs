@@ -8,10 +8,12 @@ use crate::color::{rgba, wgpu_color};
 use crate::cursor::{CursorAnimation, cursor_rect};
 use crate::font::LineMetrics;
 use crate::quad::{
-	FrameQuads, QuadPipeline, area_shadow, cell_backgrounds, cell_decorations, cursor_quad, outline_quad, padding_quad,
+	FrameQuads, Quad, QuadPipeline, area_shadow, cell_backgrounds, cell_decorations, cursor_quad, outline_quad,
+	padding_quad,
 };
 use crate::scroll::{ScrollAnimations, SlidingRegion};
 use crate::shape::ShapePipeline;
+use crate::stencil;
 use crate::text::TextPipeline;
 use crate::{
 	CellLayer, Cursor, CursorMotion, CursorShape, Decoration, Fonts, Layer, Motion, RenderCell, RendererConfig,
@@ -38,6 +40,9 @@ pub struct Renderer {
 	/// Quads of the current frame, layer by layer, and each layer's ranges of them; kept to reuse the allocations
 	frame_quads: FrameQuads,
 	layer_quads: Vec<LayerQuads>,
+
+	/// The surface's stencil buffer (see [`crate::stencil`]), as large as the surface
+	stencil: wgpu::TextureView,
 }
 
 impl Renderer {
@@ -138,6 +143,7 @@ impl Renderer {
 		let text = TextPipeline::new(&device, &queue, config.format);
 		let shape = ShapePipeline::new(&device, config.format);
 
+		let stencil = stencil::view(&device, config.width, config.height);
 		Ok(Self {
 			surface,
 			device,
@@ -153,6 +159,7 @@ impl Renderer {
 			cursor: CursorAnimation::new(renderer_config.cursor),
 			frame_quads: FrameQuads::default(),
 			layer_quads: Vec::new(),
+			stencil,
 		})
 	}
 
@@ -160,6 +167,7 @@ impl Renderer {
 		self.config.width = width.max(1);
 		self.config.height = height.max(1);
 		self.surface.configure(&self.device, &self.config);
+		self.stencil = stencil::view(&self.device, self.config.width, self.config.height);
 	}
 
 	/// Sets the color the window is cleared to, as `0xRRGGBB` in sRGB (the format Neovim uses)
@@ -279,7 +287,7 @@ impl Renderer {
 						store: wgpu::StoreOp::Store,
 					},
 				})],
-				depth_stencil_attachment: None,
+				depth_stencil_attachment: Some(stencil::attachment(&self.stencil)),
 				occlusion_query_set: None,
 				timestamp_writes: None,
 				multiview_mask: None,
@@ -467,6 +475,9 @@ struct LayerQuads {
 	around: Range<u32>,
 	under_text: Range<u32>,
 	over_text: Range<u32>,
+
+	/// Where its text may be drawn, for the stencil: its rounded rectangle, or all of it
+	mask: Range<u32>,
 	clip: [u32; 4],
 
 	/// Whether the cursor's shape is drawn first, uncut: for the cursor on its way
@@ -516,10 +527,14 @@ fn layer_quads(
 			(quad.clip, quad.clip_radius) = (clip, [radius, 0.0]);
 		}
 	}
+	let end = quads.len();
+	let (rect, radius) = piece.round.unwrap_or((layer.rect().map(|value| value as f32), 0.0));
+	quads.push(Quad { corner_radius: radius, ..Quad::fill(rect, [0.0; 4]) });
 	LayerQuads {
 		around: around as u32..start as u32,
 		under_text: start as u32..middle as u32,
-		over_text: middle as u32..quads.len() as u32,
+		over_text: middle as u32..end as u32,
+		mask: end as u32..quads.len() as u32,
 		clip: piece.clip,
 		shape: moving,
 	}
@@ -548,6 +563,8 @@ fn draw_layers(
 		let [left, top, width, height] = layer.clip;
 		pass.set_scissor_rect(left, top, width, height);
 		quads.render(pass, layer.under_text.clone());
+		pass.set_stencil_reference(stencil::reference(index));
+		quads.render_mask(pass, layer.mask.clone());
 		text.render(pass, index)?;
 		quads.render(pass, layer.over_text.clone());
 	}
@@ -650,6 +667,7 @@ mod tests {
 					around: 0..0,
 					under_text: 0..0,
 					over_text: 0..0,
+					mask: 0..0,
 					clip: [0, 0, 1, 1],
 					shape: true,
 				}))
@@ -662,6 +680,7 @@ mod tests {
 			pipeline.prepare(device, queue, width, height, &frame.quads, &frame.holes);
 
 			let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+			let stencil = crate::stencil::view(device, width, height);
 			let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 			{
 				let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -675,7 +694,7 @@ mod tests {
 							store: wgpu::StoreOp::Store,
 						},
 					})],
-					depth_stencil_attachment: None,
+					depth_stencil_attachment: Some(crate::stencil::attachment(&stencil)),
 					occlusion_query_set: None,
 					timestamp_writes: None,
 					multiview_mask: None,
@@ -869,6 +888,48 @@ mod tests {
 		assert_eq!(at(left, 0), [0, 0, 0, 255]);
 		assert_eq!(at(left + cell.width - 1, 18), [0, 0, 0, 255]);
 		assert_eq!((at(left + 4, 0), at(left, 9)), ([255, 255, 255, 255], [255, 255, 255, 255]));
+	}
+
+	#[test]
+	fn gpu_a_group_s_shadow_follows_its_rounded_corners() {
+		// The red shadow of a menu with a scrollbar inside its right edge, on black, away from the layer drawn with it
+		let shadow = crate::Shadow { blur: 4.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
+		let Layer::Cells(black) = cell(1, " ", 0x000000);
+		let reds = |radius: f32| {
+			let area = vec![[20, 3, 24, 13], [40, 5, 3, 9]];
+			let shadow = crate::LayerShadow { shadow, area, radius };
+			let (pixels, _) = drawn(&[Layer::Cells(CellLayer { shadow: Some(shadow), ..black.clone() })], None)?;
+			let red = |x: u32, y: u32| pixels[(y * WIDTH + x) as usize][0];
+			// The menu's corner pixel, and one just above its straight top edge
+			Some((u32::from(red(20, 3)), u32::from(red(30, 2))))
+		};
+		let Some((corner, edge)) = reds(6.0) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		// Its corner is cut off, so shadowed, but lightly: the shadow follows the curve, past the corner of the square.
+		assert!(0 < corner && corner * 2 < edge, "{corner} {edge}");
+	}
+
+	#[test]
+	fn gpu_rounded_corners_cut_the_text() {
+		// A full block in white, which inks its cell into the corners, on black: square, then rounded by 3 px
+		let Layer::Cells(block) = cell(1, "█", 0x000000);
+		let corner_of = |radius: f32| {
+			let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, corner_radius: radius, ..block.clone() });
+			let (pixels, cell) = drawn(&[layer], None)?;
+			let at = |x: u32, y: u32| pixels[(y * WIDTH + x) as usize];
+			let left = 3 * cell.width;
+			Some((at(left, 0), at(left + 4, 9)))
+		};
+		let Some(square) = corner_of(0.0) else {
+			eprintln!("skipped: no GPU adapter");
+			return;
+		};
+		let white = [255, 255, 255, 255];
+		assert_eq!(square, (white, white));
+		// The corner pixel is outside the curve, the middle inside.
+		assert_eq!(corner_of(3.0), Some(([0, 0, 0, 255], white)));
 	}
 
 	#[test]

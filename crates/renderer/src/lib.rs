@@ -10,6 +10,7 @@ mod quad;
 mod renderer;
 mod scroll;
 mod shape;
+mod stencil;
 #[cfg(test)]
 mod test_gpu;
 mod text;

@@ -886,11 +886,11 @@ impl Editor {
 				.iter_mut()
 				.find(|(group_level, _, group)| *group_level == level && group.shadow == shadow);
 			match same {
-				// Rounded holes only under a lone window: a group's area is cut into bands, whose corners aren't the
-				// windows'.
+				// Rounded like its roundest window: the renderer rounds each rectangle at most to its size, so a scrollbar
+				// in a menu stays itself.
 				Some((_, _, group)) => {
 					group.area.push(rect);
-					group.radius = 0.0;
+					group.radius = group.radius.max(self.shadow_radius(win));
 				},
 				None => {
 					let carrier = if groups.iter().any(|(group_level, ..)| *group_level == level) { id } else { first };
@@ -1566,9 +1566,9 @@ mod tests {
 		editor.set_default_float_style(FloatStyle { shadow, corners: Some(3.0), ..FloatStyle::default() });
 		editor.set_scale(2.0);
 		let redraw = editor.refresh().expect("corners changed");
-		// In physical pixels. The lone float's shadow is rounded under it; the pair's, cut into bands, isn't.
+		// In physical pixels, and the shadows too: the lone float's, and the pair's.
 		assert_eq!(radius_of(&redraw, 3), (6.0, Some(6.0)));
-		assert_eq!((radius_of(&redraw, 5), radius_of(&redraw, 6)), ((6.0, Some(0.0)), (6.0, None)));
+		assert_eq!((radius_of(&redraw, 5), radius_of(&redraw, 6)), ((6.0, Some(6.0)), (6.0, None)));
 		assert_eq!(radius_of(&redraw, 4), (6.0, Some(6.0)));
 		// Never the screen's or tiled windows'
 		assert_eq!(radius_of(&redraw, 1).0, 0.0);

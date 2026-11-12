@@ -84,8 +84,8 @@ pub struct LayerShadow {
 	/// Rectangles in pixels from the window's top-left corner: left, top, width, height
 	pub area: Vec<[u32; 4]>,
 
-	/// Radius of the area's rounded corners, in pixels, under which the shadow is drawn too: a window's with rounded
-	/// corners
+	/// Radius of the area's rectangles' rounded corners, in pixels, each at most its own size: windows' with rounded
+	/// corners. The shadow follows them, and is drawn under the cut-off corners too.
 	pub radius: f32,
 }
 

@@ -75,7 +75,7 @@ impl ShapePipeline {
 				compilation_options: wgpu::PipelineCompilationOptions::default(),
 			}),
 			primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
-			depth_stencil: None,
+			depth_stencil: Some(crate::stencil::ignored()),
 			multisample: wgpu::MultisampleState::default(),
 			cache: None,
 			multiview_mask: None,

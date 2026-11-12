@@ -4,6 +4,7 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::color::rgba;
 use crate::font::LineMetrics;
+use crate::stencil;
 use crate::{
 	BarOrientation, CellLayer, CellSize, CursorShape, Decoration, LayerShadow, Outline, RenderCell, Shadow, Underline,
 };
@@ -95,6 +96,9 @@ impl FrameQuads {
 /// Draws [`Quad`]s with instanced draw calls: all quads of a frame are uploaded at once, and drawn in ranges
 pub(crate) struct QuadPipeline {
 	pipeline: wgpu::RenderPipeline,
+
+	/// Writes the stencil's reference where each quad's rounded rectangle is, and no color (see [`crate::stencil`])
+	mask: wgpu::RenderPipeline,
 	viewport: wgpu::Buffer,
 	bind_group_layout: wgpu::BindGroupLayout,
 	bind_group: wgpu::BindGroup,
@@ -152,41 +156,49 @@ impl QuadPipeline {
 			..Default::default()
 		});
 
-		let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-			label: Some("sarthi-quad-pipeline"),
-			layout: Some(&layout),
-			vertex: wgpu::VertexState {
-				module: &shader,
-				entry_point: Some("vs_main"),
-				buffers: &[Some(wgpu::VertexBufferLayout {
-					array_stride: size_of::<Quad>() as u64,
-					step_mode: wgpu::VertexStepMode::Instance,
-					attributes: &wgpu::vertex_attr_array![
-						0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x2, 4 => Float32x4, 5 => Uint32x2,
-						6 => Float32x4, 7 => Float32x2
-					],
-				})],
-				compilation_options: wgpu::PipelineCompilationOptions::default(),
-			},
-			fragment: Some(wgpu::FragmentState {
-				module: &shader,
-				entry_point: Some("fs_main"),
-				targets: &[Some(wgpu::ColorTargetState {
-					format,
-					blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-					write_mask: wgpu::ColorWrites::ALL,
-				})],
-				compilation_options: wgpu::PipelineCompilationOptions::default(),
-			}),
-			primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
-			depth_stencil: None,
-			multisample: wgpu::MultisampleState::default(),
-			cache: None,
-			multiview_mask: None,
-		});
+		let pipeline_with = |entry_point, write_mask, depth_stencil| {
+			device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+				label: Some(entry_point),
+				layout: Some(&layout),
+				vertex: wgpu::VertexState {
+					module: &shader,
+					entry_point: Some("vs_main"),
+					buffers: &[Some(wgpu::VertexBufferLayout {
+						array_stride: size_of::<Quad>() as u64,
+						step_mode: wgpu::VertexStepMode::Instance,
+						attributes: &wgpu::vertex_attr_array![
+							0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x2, 4 => Float32x4, 5 => Uint32x2,
+							6 => Float32x4, 7 => Float32x2
+						],
+					})],
+					compilation_options: wgpu::PipelineCompilationOptions::default(),
+				},
+				fragment: Some(wgpu::FragmentState {
+					module: &shader,
+					entry_point: Some(entry_point),
+					targets: &[Some(wgpu::ColorTargetState {
+						format,
+						blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+						write_mask,
+					})],
+					compilation_options: wgpu::PipelineCompilationOptions::default(),
+				}),
+				primitive: wgpu::PrimitiveState {
+					topology: wgpu::PrimitiveTopology::TriangleStrip,
+					..Default::default()
+				},
+				depth_stencil: Some(depth_stencil),
+				multisample: wgpu::MultisampleState::default(),
+				cache: None,
+				multiview_mask: None,
+			})
+		};
+		let pipeline = pipeline_with("fs_main", wgpu::ColorWrites::ALL, stencil::ignored());
+		// Only the stencil: where the quad's rounded rectangle is
+		let mask = pipeline_with("fs_mask", wgpu::ColorWrites::empty(), stencil::writes());
 
 		let instances = instance_buffer(device, 0);
-		Self { pipeline, viewport, bind_group_layout, bind_group, instances, holes }
+		Self { pipeline, mask, viewport, bind_group_layout, bind_group, instances, holes }
 	}
 
 	/// Uploads `quads` for a surface of `width` × `height` pixels, and the rectangles their shadows leave out, `holes`
@@ -222,6 +234,17 @@ impl QuadPipeline {
 			return;
 		}
 		pass.set_pipeline(&self.pipeline);
+		pass.set_bind_group(0, &self.bind_group, &[]);
+		pass.set_vertex_buffer(0, self.instances.slice(..));
+		pass.draw(0..4, range);
+	}
+
+	/// Writes the stencil reference set on `pass` where each quad at `range` is, cut to its rounded corners
+	pub(crate) fn render_mask(&self, pass: &mut wgpu::RenderPass<'_>, range: Range<u32>) {
+		if range.is_empty() {
+			return;
+		}
+		pass.set_pipeline(&self.mask);
 		pass.set_bind_group(0, &self.bind_group, &[]);
 		pass.set_vertex_buffer(0, self.instances.slice(..));
 		pass.draw(0..4, range);
@@ -462,7 +485,31 @@ pub(crate) fn outline_quad(rect: [f32; 4], outline: Outline, radius: f32, srgb_s
 ///
 /// Like CSS's `box-shadow`, the shadow is only drawn outside the area: under a see-through window, it would darken it.
 /// The area's pieces are added to the frame's holes, which the shadow's quads leave out.
+///
+/// With rounded corners, an area of several rectangles is one quad over them all instead: the shader blurs their union,
+/// each rounded, by the distance to the nearest. The rectangles are its holes, then again moved by the shadow's offset,
+/// what casts it.
 pub(crate) fn area_shadow(frame: &mut FrameQuads, shadow: &LayerShadow, srgb_surface: bool) {
+	if shadow.radius > 0.0 && shadow.area.len() > 1 {
+		let rects: Vec<[f32; 4]> = shadow.area.iter().map(|rect| rect.map(|value| value as f32)).collect();
+		let [x, y] = shadow.shadow.offset;
+		let range = [frame.holes.len() as u32, rects.len() as u32];
+		frame.holes.extend(&rects);
+		frame.holes.extend(
+			rects
+				.iter()
+				.map(|&[left, top, width, height]| [left + x, top + y, width, height]),
+		);
+		let left = rects.iter().map(|rect| rect[0]).fold(f32::MAX, f32::min);
+		let top = rects.iter().map(|rect| rect[1]).fold(f32::MAX, f32::min);
+		let right = rects.iter().map(|rect| rect[0] + rect[2]).fold(f32::MIN, f32::max);
+		let bottom = rects.iter().map(|rect| rect[1] + rect[3]).fold(f32::MIN, f32::max);
+		let mut quad =
+			Quad::shadow([left, top, right - left, bottom - top], shadow.shadow, shadow.radius, srgb_surface);
+		(quad.holes, quad.pattern[3]) = (range, 1.0);
+		frame.quads.push(quad);
+		return;
+	}
 	let pieces: Vec<[f32; 4]> = disjoint(&shadow.area)
 		.into_iter()
 		.map(|rect| rect.map(|value| value as f32))
@@ -734,6 +781,7 @@ mod tests {
 			pipeline.prepare(device, queue, SIZE, SIZE, quads, &[]);
 
 			let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+			let stencil = crate::stencil::view(device, SIZE, SIZE);
 			let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 			{
 				let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -747,7 +795,7 @@ mod tests {
 							store: wgpu::StoreOp::Store,
 						},
 					})],
-					depth_stencil_attachment: None,
+					depth_stencil_attachment: Some(crate::stencil::attachment(&stencil)),
 					occlusion_query_set: None,
 					timestamp_writes: None,
 					multiview_mask: None,
