@@ -123,14 +123,14 @@ local function resolve(place)
   if place ~= nil and place.relative == 'win' and (place.win == nil or place.win == 0) then
     return vim.tbl_extend('force', place, { win = vim.api.nvim_get_current_win() })
   end
-  -- By the cursor where it is now, which sarthi only learns with Neovim's next redraw: relative to the editor, at the
-  -- cursor's cell of the screen
+  -- By the cursor where it is now, which sarthi only learns with Neovim's next redraw: relative to the current window, at
+  -- the cursor's cell of it, so in its own cells if it's an external window with fonts of its own
   if place ~= nil and place.relative == 'cursor' then
-    local cursor = vim.fn.screenpos(0, vim.fn.line('.'), vim.fn.col('.'))
     return vim.tbl_extend('force', place, {
-      relative = 'editor',
-      row = cursor.row - 1 + (place.row or 0),
-      col = cursor.col - 1 + (place.col or 0),
+      relative = 'win',
+      win = vim.api.nvim_get_current_win(),
+      row = vim.fn.winline() - 1 + (place.row or 0),
+      col = vim.fn.wincol() - 1 + (place.col or 0),
     })
   end
   return place

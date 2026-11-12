@@ -930,6 +930,12 @@ impl Editor {
 
 	/// Where external window `win`, grid `id`, is: left, top, width, height in pixels
 	fn external_rect(&self, id: u32, win: Window) -> [u32; 4] {
+		self.external_rect_within(id, win, 0)
+	}
+
+	/// [`Editor::external_rect`], `depth` external windows away from the one asked for: windows placed relative to one
+	/// another can't go round in a loop.
+	fn external_rect_within(&self, id: u32, win: Window, depth: u32) -> [u32; 4] {
 		let (grid, cell) = (&self.grids[&id], self.cell_of(id));
 		let size = [grid.width as u32 * cell.width, grid.height as u32 * cell.height];
 		let screen = self
@@ -937,10 +943,20 @@ impl Editor {
 			.get(&1)
 			.map_or([0, 0], |grid| [grid.width as u32 * self.cell.width, grid.height as u32 * self.cell.height]);
 		let place = self.places.get(&win).copied().unwrap_or(Place::Center);
-		// A window's grid, by the window: every window has a viewport.
+		// A window's top-left corner and cells, by its grid: every window has a viewport.
 		let origin = |win: Window| {
 			let (&grid, _) = self.viewports.iter().find(|(_, viewport)| viewport.win == Some(win))?;
-			self.grid_origin(grid)
+			match self.placements.get(&grid) {
+				// In its own cells, where it's placed; past a few in a row, as if not shown
+				Some(Placement::External { win, .. }) => (depth < 8).then(|| {
+					let [left, top, ..] = self.external_rect_within(grid, *win, depth + 1);
+					([left, top], self.cell_of(grid))
+				}),
+				_ => {
+					let (row, col) = self.grid_origin(grid)?;
+					Some(([col * self.cell.width, row * self.cell.height], self.cell))
+				},
+			}
 		};
 		let [left, top] = external::position(place, size, screen, self.cell, origin);
 		[left, top, size[0], size[1]]
@@ -1431,6 +1447,24 @@ mod tests {
 		editor.set_external_place(win_of(4), cursor);
 		assert_eq!(at(&editor.refresh().expect("placed")), (4 * 8, 4 * 16));
 		assert_eq!(at(&flush(&mut editor, vec![goto(1, 0, 0)])), (4 * 8, 4 * 16));
+
+		// Relative to external window 5, at the top left with cells of its own (10×20): in those cells
+		let events = vec![viewport(5, 10, 0), resize(5, 2, 1), external(5)];
+		flush(&mut editor, events);
+		editor.set_external_font(win_of(5), Some((FontId::MAIN, CellSize { width: 10, height: 20 })));
+		let top_left = Place::Relative { relative: Relative::Editor, anchor: Anchor::NorthWest, row: 0.0, col: 0.0 };
+		editor.set_external_place(win_of(5), top_left);
+		let below =
+			Place::Relative { relative: Relative::Win(win_of(5)), anchor: Anchor::NorthWest, row: 1.0, col: 2.0 };
+		editor.set_external_place(win_of(4), below);
+		assert_eq!(at(&editor.refresh().expect("placed")), (2 * 10, 20));
+
+		// Placed relative to each other: no loop, centered past a few
+		editor.set_external_place(
+			win_of(5),
+			Place::Relative { relative: Relative::Win(win_of(4)), anchor: Anchor::NorthWest, row: 0.0, col: 0.0 },
+		);
+		let _ = editor.refresh();
 	}
 
 	#[test]

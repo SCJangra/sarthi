@@ -38,19 +38,20 @@ pub enum Anchor {
 }
 
 /// The top-left corner, in pixels, of a window `size` pixels large (width, height) placed by `place` on a screen
-/// `screen` pixels large, in cells of `cell`. `origin` gives the cell where a window's top-left corner is, if it's shown;
-/// a [`Relative::Cursor`] place must be made relative to the editor before (see [`at_cursor`]).
+/// `screen` pixels large, whose cells are `cell`. `origin` gives a window's top-left corner in pixels, if it's shown, and
+/// its cells, which `row` and `col` relative to it count in; a [`Relative::Cursor`] place must be made relative to the
+/// editor before (see [`at_cursor`]).
 pub(crate) fn position(
 	place: Place,
 	size: [u32; 2],
 	screen: [u32; 2],
 	cell: CellSize,
-	origin: impl Fn(Window) -> Option<(u32, u32)>,
+	origin: impl Fn(Window) -> Option<([u32; 2], CellSize)>,
 ) -> [u32; 2] {
 	let centered = [0, 1].map(|axis| screen[axis].saturating_sub(size[axis]) / 2);
 	let Place::Relative { relative, anchor, row, col } = place else { return centered };
-	let (base_row, base_col) = match relative {
-		Relative::Editor | Relative::Cursor => (0, 0),
+	let ([base_x, base_y], cell) = match relative {
+		Relative::Editor | Relative::Cursor => ([0, 0], cell),
 		Relative::Win(win) => {
 			let Some(origin) = origin(win) else { return centered };
 			origin
@@ -58,8 +59,8 @@ pub(crate) fn position(
 	};
 
 	// The anchor corner, in pixels
-	let x = (f64::from(base_col) + col) * f64::from(cell.width);
-	let y = (f64::from(base_row) + row) * f64::from(cell.height);
+	let x = f64::from(base_x) + col * f64::from(cell.width);
+	let y = f64::from(base_y) + row * f64::from(cell.height);
 	let (east, south) = match anchor {
 		Anchor::NorthWest => (false, false),
 		Anchor::NorthEast => (true, false),
@@ -98,9 +99,14 @@ mod tests {
 
 	const CELL: CellSize = CellSize { width: 10, height: 20 };
 
-	/// A 100×200 pixel screen (10×10 cells), with window 7 at row 2, column 3
+	/// A 100×200 pixel screen (10×10 cells), with window 7 at row 2, column 3, and window 8, with cells of its own
+	/// (5×10), at 15, 25 pixels
 	fn placed(place: Place, size: [u32; 2]) -> [u32; 2] {
-		position(place, size, [100, 200], CELL, |win| (win == Window(7)).then_some((2, 3)))
+		position(place, size, [100, 200], CELL, |win| match win {
+			Window(7) => Some(([30, 40], CELL)),
+			Window(8) => Some(([15, 25], CellSize { width: 5, height: 10 })),
+			_ => None,
+		})
 	}
 
 	fn relative(relative: Relative, anchor: Anchor, row: f64, col: f64) -> Place {
@@ -137,8 +143,10 @@ mod tests {
 	fn relative_to_a_window() {
 		// One row below window 7's top-left corner (2, 3)
 		assert_eq!(placed(relative(Relative::Win(Window(7)), Anchor::NorthWest, 1.0, 0.0), [20, 40]), [30, 60]);
+		// In window 8's own cells: 2 rows and 3 columns of 5×10
+		assert_eq!(placed(relative(Relative::Win(Window(8)), Anchor::NorthWest, 2.0, 3.0), [20, 40]), [30, 45]);
 		// A window that isn't shown: centered
-		assert_eq!(placed(relative(Relative::Win(Window(8)), Anchor::NorthWest, 1.0, 0.0), [20, 40]), [40, 80]);
+		assert_eq!(placed(relative(Relative::Win(Window(9)), Anchor::NorthWest, 1.0, 0.0), [20, 40]), [40, 80]);
 	}
 
 	#[test]
