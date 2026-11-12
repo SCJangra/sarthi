@@ -117,23 +117,29 @@ local function check(sarthi, options, external, level)
   return options
 end
 
---- Applies `sarthi` to `win`, with `options` for its `w:sarthi`, raising a mistake at `level`
-local function apply(win, sarthi, options, level)
-  vim.w[win].sarthi = options
-  local place = sarthi.place
-  if place ~= nil and place.relative == 'win' and place.win == nil then
-    place = vim.tbl_extend('force', place, { win = vim.api.nvim_get_current_win() })
+--- `place` with what it's relative to as it is now, before a window is opened and maybe entered: the current window
+--- for 'win' without one or 0, and the cursor for 'cursor'
+local function resolve(place)
+  if place ~= nil and place.relative == 'win' and (place.win == nil or place.win == 0) then
+    return vim.tbl_extend('force', place, { win = vim.api.nvim_get_current_win() })
   end
   -- By the cursor where it is now, which sarthi only learns with Neovim's next redraw: relative to the editor, at the
   -- cursor's cell of the screen
   if place ~= nil and place.relative == 'cursor' then
     local cursor = vim.fn.screenpos(0, vim.fn.line('.'), vim.fn.col('.'))
-    place = vim.tbl_extend('force', place, {
+    return vim.tbl_extend('force', place, {
       relative = 'editor',
       row = cursor.row - 1 + (place.row or 0),
       col = cursor.col - 1 + (place.col or 0),
     })
   end
+  return place
+end
+
+--- Applies `sarthi` to `win`, placed at `place` (see `resolve`), with `options` for its `w:sarthi`, raising a mistake at
+--- `level`
+local function apply(win, sarthi, place, options, level)
+  vim.w[win].sarthi = options
   local mistake = rpc.request('place_window', win, place or vim.NIL)
   if mistake ~= vim.NIL then
     error('sarthi: `sarthi.place`: ' .. mistake, level)
@@ -153,10 +159,12 @@ end
 function api.nvim_open_win(buf, enter, config)
   local plain, sarthi = split(config)
   local options = check(sarthi, {}, type(plain) == 'table' and plain.external, 3)
+  -- What it's placed relative to, before entering it makes it the current window
+  local place = sarthi and resolve(sarthi.place)
   local win = vim.api.nvim_open_win(buf, enter, plain)
   if sarthi ~= nil then
     -- A mistake in the place closes the window again, so the call does nothing but fail.
-    local ok, mistake = pcall(apply, win, sarthi, options, 0)
+    local ok, mistake = pcall(apply, win, sarthi, place, options, 0)
     if not ok then
       vim.api.nvim_win_close(win, true)
       error(mistake, 2)
@@ -189,7 +197,7 @@ function api.nvim_win_set_config(win, config)
     merged.place = nil
     merged.font = nil
   end
-  apply(win, merged, options, 3)
+  apply(win, merged, resolve(merged.place), options, 3)
 end
 
 ---Like `vim.api.nvim_win_get_config()`, with the window's `sarthi` table:
