@@ -785,6 +785,7 @@ impl Editor {
 		let placed = self.stacked();
 
 		let mut shadows = self.float_shadows(&placed);
+		shadows.extend(self.external_shadows(&placed));
 		// What covers grid 1, and what covers the tiled windows: column, row, width, height in cells
 		let screen_width = self.grids.get(&1).map_or(0, |grid| grid.width as u32);
 		let area_of = |kind: fn(&Placement) -> Option<[u32; 2]>| -> Vec<[u32; 4]> {
@@ -837,7 +838,7 @@ impl Editor {
 					clip_rows(&mut layer, screen_height.saturating_sub(*row));
 					layers.push(self.see_through_cells(layer, (*row, 0), &[]));
 				},
-				Placement::External { win, .. } => layers.push(self.external_layer(id, *win)),
+				Placement::External { win, .. } => layers.push(self.external_layer(id, *win, shadows.remove(&id))),
 				Placement::Hidden => (),
 			}
 		}
@@ -948,15 +949,54 @@ impl Editor {
 		Layer::Cells(layer)
 	}
 
-	/// External window `win`, grid `id`, as a layer where it's placed (see [`Editor::set_external_place`]), with the shadow
-	/// it casts, if any
-	fn external_layer(&self, id: u32, win: Window) -> Layer {
+	/// The shadows under the external windows among `placed`, by the grid of the window each is drawn with. Like attached
+	/// floats, external windows placed relative to another external window, and so on, share its shadow if it's the same,
+	/// so windows put together read as one; it's drawn with the first of them, under all of them.
+	fn external_shadows(&self, placed: &[(u32, &Placement)]) -> HashMap<u32, LayerShadow> {
+		let grid_of = |win: Window| {
+			let (&grid, _) = self.viewports.iter().find(|(_, viewport)| viewport.win == Some(win))?;
+			matches!(self.placements.get(&grid), Some(Placement::External { .. })).then_some(grid)
+		};
+		// The external window it's placed relative to, if any, and on from there; a few at most, so a loop ends
+		let root = |mut win: Window| {
+			for _ in 0..8 {
+				let Some(Place::Relative { relative: Relative::Win(next), .. }) = self.places.get(&win) else { break };
+				if grid_of(*next).is_none() {
+					break;
+				}
+				win = *next;
+			}
+			win
+		};
+
+		// By root and shadow, in the order of their first windows: the root, the grid it's drawn with, and the shadow
+		let mut groups: Vec<(Window, u32, LayerShadow)> = Vec::new();
+		for &(id, placement) in placed {
+			let Placement::External { win, .. } = placement else { continue };
+			let Some(shadow) = self.shadow_of(*win) else { continue };
+			let rect = self.shadow_area(*win, self.external_rect(id, *win));
+			let (root, radius) = (root(*win), self.shadow_radius(*win));
+			match groups
+				.iter_mut()
+				.find(|(group_root, _, group)| *group_root == root && group.shadow == shadow)
+			{
+				Some((_, _, group)) => {
+					group.area.push(rect);
+					group.radius = group.radius.max(radius);
+				},
+				None => groups.push((root, id, LayerShadow { shadow, area: vec![rect], radius })),
+			}
+		}
+		groups.into_iter().map(|(_, carrier, group)| (carrier, group)).collect()
+	}
+
+	/// External window `win`, grid `id`, as a layer where it's placed (see [`Editor::set_external_place`]), with `shadow`,
+	/// the shadow drawn with it (see [`Editor::external_shadows`])
+	fn external_layer(&self, id: u32, win: Window, shadow: Option<LayerShadow>) -> Layer {
 		let mut layer = self.layer(id, 0, 0);
 		let Layer::Cells(cells) = &mut layer;
 		[cells.x, cells.y, ..] = self.external_rect(id, win);
-		let area = vec![self.shadow_area(win, cells.rect())];
-		let radius = self.shadow_radius(win);
-		cells.shadow = self.shadow_of(win).map(|shadow| LayerShadow { shadow, area, radius });
+		cells.shadow = shadow;
 		cells.outline = self.outline_of(win);
 		cells.corner_radius = self.corners_of(win);
 		cells.padding = self.padding_of(win);
@@ -1690,6 +1730,28 @@ mod tests {
 		editor.set_float_style(win_of(4), FloatStyle { shadow, ..FloatStyle::default() });
 		let redraw = editor.refresh().expect("their styles changed");
 		assert_eq!((padding_of(&redraw, 3).0, padding_of(&redraw, 4).0), (2, 0));
+	}
+
+	#[test]
+	fn external_windows_placed_together_share_a_shadow() {
+		let mut editor = screen();
+		let shadow = Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 };
+		editor.set_default_float_style(FloatStyle { shadow: Some(shadow), ..FloatStyle::default() });
+		// 2×1 external windows: 4 at the top left, 5 just below it, and 6 on its own, centered
+		let mut events = vec![];
+		for id in 4..=6 {
+			events.extend([viewport(id, 10, 0), resize(id, 2, 1), external(id)]);
+		}
+		flush(&mut editor, events);
+		let at = |relative, row| Place::Relative { relative, anchor: Anchor::NorthWest, row, col: 0.0 };
+		editor.set_external_place(win_of(4), at(Relative::Editor, 0.0));
+		editor.set_external_place(win_of(5), at(Relative::Win(win_of(4)), 1.0));
+		let redraw = editor.refresh().expect("placed");
+
+		// One shadow under 4 and 5, drawn with 4, the first; 6 has its own.
+		assert_eq!(shadow_of(&redraw, 4), Some(vec![[0, 0, 2, 1], [0, 1, 2, 1]]));
+		assert_eq!(shadow_of(&redraw, 5), None);
+		assert_eq!(shadow_of(&redraw, 6).map(|area| area.len()), Some(1));
 	}
 
 	#[test]
