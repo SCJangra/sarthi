@@ -37,6 +37,29 @@ pub enum Anchor {
 	SouthEast,
 }
 
+impl Anchor {
+	/// The anchor Neovim names `name`: "NW", "NE", "SW" or "SE"
+	pub(crate) fn from_name(name: &str) -> Option<Self> {
+		match name {
+			"NW" => Some(Self::NorthWest),
+			"NE" => Some(Self::NorthEast),
+			"SW" => Some(Self::SouthWest),
+			"SE" => Some(Self::SouthEast),
+			_ => None,
+		}
+	}
+
+	/// Whether it's on the right, and whether at the bottom
+	pub(crate) fn sides(self) -> (bool, bool) {
+		match self {
+			Self::NorthWest => (false, false),
+			Self::NorthEast => (true, false),
+			Self::SouthWest => (false, true),
+			Self::SouthEast => (true, true),
+		}
+	}
+}
+
 /// The top-left corner, in pixels, of a window `size` pixels large (width, height) placed by `place` on a screen
 /// `screen` pixels large, whose cells are `cell`. `origin` gives a window's top-left corner in pixels, if it's shown, and
 /// its cells, which `row` and `col` relative to it count in; a [`Relative::Cursor`] place must be made relative to the
@@ -61,12 +84,7 @@ pub(crate) fn position(
 	// The anchor corner, in pixels
 	let x = f64::from(base_x) + col * f64::from(cell.width);
 	let y = f64::from(base_y) + row * f64::from(cell.height);
-	let (east, south) = match anchor {
-		Anchor::NorthWest => (false, false),
-		Anchor::NorthEast => (true, false),
-		Anchor::SouthWest => (false, true),
-		Anchor::SouthEast => (true, true),
-	};
+	let (east, south) = anchor.sides();
 	let left = if east { x - f64::from(size[0]) } else { x };
 	let top = if south { y - f64::from(size[1]) } else { y };
 
