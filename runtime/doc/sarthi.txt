@@ -339,6 +339,15 @@ sarthi.setup({opts?})                                           *sarthi.setup*
         {opts?}  (table) The sections to change (see |sarthi-settings|)
 
 
+sarthi.settings()                                            *sarthi.settings*
+    The settings in effect: those given to `setup()`, and the defaults of the
+    rest (|sarthi-settings|), e.g. to place a window past another's padding
+    when it has the user's. A copy: changing it changes nothing.
+
+    Returns: ~
+        (table)
+
+
 sarthi.set_font_size({points})                          *sarthi.set_font_size*
     Sets the font size, in points (4 to 96), by setting `:h` in `guifont`.
 

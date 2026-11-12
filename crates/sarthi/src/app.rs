@@ -464,6 +464,7 @@ impl App {
 				let mistake = self.settings.for_window(&options).validate().err();
 				responder.respond(Ok::<_, String>(mistake));
 			},
+			Request::GetSettings(_) => responder.respond(Ok::<_, String>(&self.settings)),
 			Request::Other { method, .. } => responder.respond::<()>(Err(format!("sarthi doesn't know {method}"))),
 		}
 	}

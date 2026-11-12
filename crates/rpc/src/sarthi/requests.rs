@@ -40,9 +40,17 @@ pub enum Request {
 	/// answered with what's wrong with them, if anything
 	WindowFont(WindowFontArgs),
 
+	/// `require("sarthi").settings()`; answered with the settings in effect: those given to `setup()`, and the defaults
+	/// of the rest
+	GetSettings(GetSettingsArgs),
+
 	/// A method sarthi doesn't know
 	Other { method: String, value: IgnoredAny },
 }
+
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct GetSettingsArgs {}
 
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -170,6 +178,8 @@ mod tests {
 		let options = Value::Map(vec![(Value::from("shadow"), Value::from(true))]);
 		let error = decode("check_window_options", vec![options]).unwrap_err();
 		assert!(error.contains("invalid type"), "{error}");
+
+		assert!(matches!(decode("get_settings", vec![]), Ok(Request::GetSettings(_))));
 
 		let request = decode("unknown", vec![]).unwrap();
 		assert!(matches!(&request, Request::Other { method, .. } if method == "unknown"), "{request:?}");

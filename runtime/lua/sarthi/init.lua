@@ -51,6 +51,14 @@ function sarthi.setup(opts)
   require('sarthi.floats').resend(merged)
 end
 
+---The settings in effect: those given to `setup()`, and the defaults of the
+---rest (|sarthi-settings|), e.g. to place a window past another's padding
+---when it has the user's. A copy: changing it changes nothing.
+---@return table
+function sarthi.settings()
+  return rpc.request('get_settings')
+end
+
 ---Sets the font size, in points (4 to 96), by setting `:h` in `guifont`.
 ---@param points number Size in points
 function sarthi.set_font_size(points)

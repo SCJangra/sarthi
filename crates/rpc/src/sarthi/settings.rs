@@ -718,6 +718,18 @@ mod tests {
 	}
 
 	#[test]
+	fn settings_go_to_lua_as_setup_takes_them() {
+		// As `require("sarthi").settings()` gets them: every section and key, by name, which setup() takes back
+		let mut settings = Settings::default();
+		settings.padding.size = super::PaddingSize::Sides(super::PaddingSides { top: 2.0, ..Default::default() });
+		settings.underline.ink_gaps = Some(1.5);
+		let encoded = rmp_serde::to_vec_named(&settings).unwrap();
+		assert_eq!(rmp_serde::from_slice::<Settings>(&encoded).unwrap(), settings);
+		let encoded = rmp_serde::to_vec_named(&Settings::default()).unwrap();
+		assert_eq!(rmp_serde::from_slice::<Settings>(&encoded).unwrap(), Settings::default());
+	}
+
+	#[test]
 	fn window_options() {
 		// `w:sarthi`: the same sections and keys, each replacing the setting's
 		let shadow = table(vec![("opacity", Value::from(0.6)), ("offset", Value::Array(vec![1.into(), 2.into()]))]);
