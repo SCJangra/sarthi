@@ -10,8 +10,8 @@ pub enum Place {
 	Center,
 
 	/// Like a floating window (`nvim_open_win()`'s `relative`, `anchor`, `row` and `col`): its `anchor` corner at `row`,
-	/// `col` from what it's relative to, kept on the screen
-	Relative { relative: Relative, anchor: Anchor, row: f64, col: f64 },
+	/// `col` from what it's relative to, moved further by `offset` (right and down, in logical pixels), kept on the screen
+	Relative { relative: Relative, anchor: Anchor, row: f64, col: f64, offset: [f64; 2] },
 }
 
 /// What a [`Place::Relative`] window's `row` and `col` count from
@@ -62,17 +62,18 @@ impl Anchor {
 
 /// The top-left corner, in pixels, of a window `size` pixels large (width, height) placed by `place` on a screen
 /// `screen` pixels large, whose cells are `cell`. `origin` gives a window's top-left corner in pixels, if it's shown, and
-/// its cells, which `row` and `col` relative to it count in; a [`Relative::Cursor`] place must be made relative to the
-/// editor before (see [`at_cursor`]).
+/// its cells, which `row` and `col` relative to it count in. `scale` physical pixels make a logical one, which the
+/// offset is in. A [`Relative::Cursor`] place must be made relative to the editor before (see [`at_cursor`]).
 pub(crate) fn position(
 	place: Place,
 	size: [u32; 2],
 	screen: [u32; 2],
 	cell: CellSize,
+	scale: f64,
 	origin: impl Fn(Window) -> Option<([u32; 2], CellSize)>,
 ) -> [u32; 2] {
 	let centered = [0, 1].map(|axis| screen[axis].saturating_sub(size[axis]) / 2);
-	let Place::Relative { relative, anchor, row, col } = place else { return centered };
+	let Place::Relative { relative, anchor, row, col, offset } = place else { return centered };
 	let ([base_x, base_y], cell) = match relative {
 		Relative::Editor | Relative::Cursor => ([0, 0], cell),
 		Relative::Win(win) => {
@@ -82,8 +83,8 @@ pub(crate) fn position(
 	};
 
 	// The anchor corner, in pixels
-	let x = f64::from(base_x) + col * f64::from(cell.width);
-	let y = f64::from(base_y) + row * f64::from(cell.height);
+	let x = f64::from(base_x) + col * f64::from(cell.width) + offset[0] * scale;
+	let y = f64::from(base_y) + row * f64::from(cell.height) + offset[1] * scale;
 	let (east, south) = anchor.sides();
 	let left = if east { x - f64::from(size[0]) } else { x };
 	let top = if south { y - f64::from(size[1]) } else { y };
@@ -98,9 +99,10 @@ pub(crate) fn position(
 /// screen): where it is when placed
 pub(crate) fn at_cursor(place: Place, cursor: (u32, u32)) -> Place {
 	match place {
-		Place::Relative { relative: Relative::Cursor, anchor, row, col } => Place::Relative {
+		Place::Relative { relative: Relative::Cursor, anchor, row, col, offset } => Place::Relative {
 			relative: Relative::Editor,
 			anchor,
+			offset,
 			row: f64::from(cursor.0) + row,
 			col: f64::from(cursor.1) + col,
 		},
@@ -120,7 +122,7 @@ mod tests {
 	/// A 100×200 pixel screen (10×10 cells), with window 7 at row 2, column 3, and window 8, with cells of its own
 	/// (5×10), at 15, 25 pixels
 	fn placed(place: Place, size: [u32; 2]) -> [u32; 2] {
-		position(place, size, [100, 200], CELL, |win| match win {
+		position(place, size, [100, 200], CELL, 2.0, |win| match win {
 			Window(7) => Some(([30, 40], CELL)),
 			Window(8) => Some(([15, 25], CellSize { width: 5, height: 10 })),
 			_ => None,
@@ -128,7 +130,7 @@ mod tests {
 	}
 
 	fn relative(relative: Relative, anchor: Anchor, row: f64, col: f64) -> Place {
-		Place::Relative { relative, anchor, row, col }
+		Place::Relative { relative, anchor, row, col, offset: [0.0; 2] }
 	}
 
 	#[test]
@@ -155,6 +157,28 @@ mod tests {
 		// Past the bottom-right corner, and before the top-left one
 		assert_eq!(placed(relative(Relative::Editor, Anchor::NorthWest, 9.0, 9.0), [20, 40]), [80, 160]);
 		assert_eq!(placed(relative(Relative::Editor, Anchor::SouthEast, 0.0, 0.0), [20, 40]), [0, 0]);
+	}
+
+	#[test]
+	fn moved_by_an_offset() {
+		// 3 and 5 logical pixels, at 2 physical pixels in one
+		let offset = Place::Relative {
+			relative: Relative::Editor,
+			anchor: Anchor::NorthWest,
+			row: 1.0,
+			col: 2.0,
+			offset: [3.0, 5.0],
+		};
+		assert_eq!(placed(offset, [20, 40]), [2 * 10 + 6, 20 + 10]);
+		// Still kept on the screen
+		let far = Place::Relative {
+			relative: Relative::Editor,
+			anchor: Anchor::NorthWest,
+			row: 0.0,
+			col: 0.0,
+			offset: [-50.0, 0.0],
+		};
+		assert_eq!(placed(far, [20, 40]), [0, 0]);
 	}
 
 	#[test]

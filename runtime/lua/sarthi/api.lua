@@ -38,7 +38,9 @@ local api = {}
 ---text, unlike from inside a Neovim `border`. So windows line up in whole
 ---cells whatever their frames: `col = 0` lines up with the window's left
 ---edge, and `row` = its height starts just below it. Floating windows
----placed by Neovim go the same.
+---placed by Neovim go the same. To go past a frame, e.g. the window's
+---padding, `offset` moves it further by pixels: `{ y = 16 }` is just below
+---a window with 8 pixels of padding above and below its text.
 ---@class sarthi.WindowPlace
 ---@field center? boolean Center it
 ---@field relative? 'editor'|'win'|'cursor' What it's placed relative to
@@ -46,6 +48,7 @@ local api = {}
 ---@field anchor? 'NW'|'NE'|'SW'|'SE' Its corner at `row`, `col`
 ---@field row? number Rows down
 ---@field col? number Columns right
+---@field offset? { x?: number, y?: number } Logical pixels right and down
 
 ---The fonts an external window's text is drawn with. Either left out is
 ---`guifont`'s. The window is as many of its own cells as its config says.

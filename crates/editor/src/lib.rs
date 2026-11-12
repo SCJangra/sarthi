@@ -1053,7 +1053,7 @@ impl Editor {
 				},
 			}
 		};
-		(external::position(place, size, screen, self.cell, origin), size)
+		(external::position(place, size, screen, self.cell, f64::from(self.scale), origin), size)
 	}
 
 	/// How the text of grid `id`, `width` × `height` cells, scrolled since the last `flush`, if it did
@@ -1528,8 +1528,13 @@ mod tests {
 		};
 		// A 2×1 external window a row below window 2's top-left corner
 		flush(&mut editor, vec![win_pos(2, 1, 6), viewport(2, 10, 0), resize(4, 2, 1), external(4)]);
-		let below =
-			Place::Relative { relative: Relative::Win(win_of(2)), anchor: Anchor::NorthWest, row: 1.0, col: 0.0 };
+		let below = Place::Relative {
+			relative: Relative::Win(win_of(2)),
+			anchor: Anchor::NorthWest,
+			row: 1.0,
+			col: 0.0,
+			offset: [0.0; 2],
+		};
 		editor.set_external_place(win_of(4), below);
 		assert_eq!(at(&editor.refresh().expect("placed")), (6 * 8, 2 * 16));
 
@@ -1538,7 +1543,13 @@ mod tests {
 
 		// Placed by the cursor, it goes where the cursor is, and stays there.
 		flush(&mut editor, vec![goto(1, 3, 4)]);
-		let cursor = Place::Relative { relative: Relative::Cursor, anchor: Anchor::NorthWest, row: 1.0, col: 0.0 };
+		let cursor = Place::Relative {
+			relative: Relative::Cursor,
+			anchor: Anchor::NorthWest,
+			row: 1.0,
+			col: 0.0,
+			offset: [0.0; 2],
+		};
 		editor.set_external_place(win_of(4), cursor);
 		assert_eq!(at(&editor.refresh().expect("placed")), (4 * 8, 4 * 16));
 		assert_eq!(at(&flush(&mut editor, vec![goto(1, 0, 0)])), (4 * 8, 4 * 16));
@@ -1547,10 +1558,21 @@ mod tests {
 		let events = vec![viewport(5, 10, 0), resize(5, 2, 1), external(5)];
 		flush(&mut editor, events);
 		editor.set_external_font(win_of(5), Some((FontId::MAIN, CellSize { width: 10, height: 20 })));
-		let top_left = Place::Relative { relative: Relative::Editor, anchor: Anchor::NorthWest, row: 0.0, col: 0.0 };
+		let top_left = Place::Relative {
+			relative: Relative::Editor,
+			anchor: Anchor::NorthWest,
+			row: 0.0,
+			col: 0.0,
+			offset: [0.0; 2],
+		};
 		editor.set_external_place(win_of(5), top_left);
-		let below =
-			Place::Relative { relative: Relative::Win(win_of(5)), anchor: Anchor::NorthWest, row: 1.0, col: 2.0 };
+		let below = Place::Relative {
+			relative: Relative::Win(win_of(5)),
+			anchor: Anchor::NorthWest,
+			row: 1.0,
+			col: 2.0,
+			offset: [0.0; 2],
+		};
 		editor.set_external_place(win_of(4), below);
 		assert_eq!(at(&editor.refresh().expect("placed")), (2 * 10, 20));
 		// Counted from where 5's frame starts: its padding moves its cells, not what's placed relative to it
@@ -1560,7 +1582,13 @@ mod tests {
 		// Placed relative to each other: no loop, centered past a few
 		editor.set_external_place(
 			win_of(5),
-			Place::Relative { relative: Relative::Win(win_of(4)), anchor: Anchor::NorthWest, row: 0.0, col: 0.0 },
+			Place::Relative {
+				relative: Relative::Win(win_of(4)),
+				anchor: Anchor::NorthWest,
+				row: 0.0,
+				col: 0.0,
+				offset: [0.0; 2],
+			},
 		);
 		let _ = editor.refresh();
 	}
@@ -1766,7 +1794,8 @@ mod tests {
 			events.extend([viewport(id, 10, 0), resize(id, 2, 1), external(id)]);
 		}
 		flush(&mut editor, events);
-		let at = |relative, row| Place::Relative { relative, anchor: Anchor::NorthWest, row, col: 0.0 };
+		let at =
+			|relative, row| Place::Relative { relative, anchor: Anchor::NorthWest, row, col: 0.0, offset: [0.0; 2] };
 		editor.set_external_place(win_of(4), at(Relative::Editor, 0.0));
 		editor.set_external_place(win_of(5), at(Relative::Win(win_of(4)), 1.0));
 		let redraw = editor.refresh().expect("placed");

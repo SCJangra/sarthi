@@ -397,7 +397,9 @@ sarthi.WindowPlace                                        *sarthi.WindowPlace*
     text, unlike from inside a Neovim `border`. So windows line up in whole
     cells whatever their frames: `col = 0` lines up with the window's left
     edge, and `row` = its height starts just below it. Floating windows
-    placed by Neovim go the same.
+    placed by Neovim go the same. To go past a frame, e.g. the window's
+    padding, `offset` moves it further by pixels: `{ y = 16 }` is just below
+    a window with 8 pixels of padding above and below its text.
 
     Fields: ~
         {center?}    (boolean) Center it
@@ -406,6 +408,7 @@ sarthi.WindowPlace                                        *sarthi.WindowPlace*
         {anchor?}    ("NW"|"NE"|"SW"|"SE") Its corner at `row`, `col`
         {row?}       (number) Rows down
         {col?}       (number) Columns right
+        {offset?}    ({x?:number,y?:number}) Logical pixels right and down
 
 
 sarthi.WindowFont                                          *sarthi.WindowFont*

@@ -21,6 +21,18 @@ pub struct WindowPlace {
 	pub anchor: Option<PlaceAnchor>,
 	pub row: Option<f64>,
 	pub col: Option<f64>,
+
+	/// Moves it further, in logical pixels, e.g. past another window's padding: `{ x = …, y = … }`
+	pub offset: Option<PlaceOffset>,
+}
+
+/// `sarthi.place.offset`, right and down in logical pixels, or left and up if negative; either left out is 0
+#[derive(Debug, Default, Clone, Copy, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+#[serde(default, deny_unknown_fields)]
+pub struct PlaceOffset {
+	pub x: f64,
+	pub y: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -48,7 +60,7 @@ pub enum PlaceAnchor {
 mod tests {
 	use rmpv::Value;
 
-	use super::{PlaceAnchor, PlaceRelative, WindowPlace};
+	use super::{PlaceAnchor, PlaceOffset, PlaceRelative, WindowPlace};
 	use crate::Window;
 
 	fn decode(fields: Vec<(&str, Value)>) -> Result<WindowPlace, String> {
@@ -79,6 +91,11 @@ mod tests {
 			..WindowPlace::default()
 		};
 		assert_eq!(relative, expected);
+
+		// An offset, either side left out
+		let offset = Value::Map(vec![(Value::from("y"), Value::from(16))]);
+		let place = decode(vec![("relative", Value::from("editor")), ("offset", offset)]).unwrap();
+		assert_eq!(place.offset, Some(PlaceOffset { x: 0.0, y: 16.0 }));
 	}
 
 	#[test]
