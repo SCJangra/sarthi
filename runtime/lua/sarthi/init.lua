@@ -11,44 +11,23 @@ local sarthi = {}
 -- Neovim's window functions that take a window config, with a `sarthi` table in it (see |sarthi.api|)
 sarthi.api = require('sarthi.api')
 
--- The settings given so far, merged
-local current = {}
-
--- The animations in the settings, by section and key
-local animations = { scroll = { 'animation' }, cursor = { 'animation', 'short_animation' } }
-
--- `opts` merged into the settings given so far. An animation replaces the previous one whole, since each curve has its
--- own keys.
-local function merge(opts)
-  local merged = vim.tbl_deep_extend('force', current, opts)
-  for section, keys in pairs(animations) do
-    for _, key in ipairs(keys) do
-      if type(opts[section]) == 'table' and opts[section][key] ~= nil then
-        merged[section][key] = opts[section][key]
-      end
-    end
-  end
-  return merged
-end
-
----Sets Sarthi's settings: values given replace their previous ones, at
----first their defaults. Applies at once, so it can be called again later,
----e.g. from a keymap. A mistake is an error at the call.
----@param opts? table The sections to change (see |sarthi-settings|)
+---Sets Sarthi's settings: those given, and the defaults of the rest, in place
+---of what an earlier call gave. Applies at once, so it can be called again
+---later, e.g. from a keymap. A mistake is an error at the call.
+---@param opts? table The settings (see |sarthi-settings|)
 function sarthi.setup(opts)
   if opts ~= nil and type(opts) ~= 'table' then
     error('sarthi: setup() takes a table, not a ' .. type(opts), 2)
   end
-  local merged = merge(opts or {})
+  opts = opts or {}
   -- Settings sarthi can't decode (unknown keys, wrong types) fail the request; values it decodes but finds wrong (out
   -- of range) come back as the answer. Either way the mistake is raised here, at the caller's setup().
-  local mistake = rpc.request('setup', merged)
+  local mistake = rpc.request('setup', opts)
   if mistake ~= vim.NIL then
     error('sarthi: ' .. mistake, 2)
   end
-  current = merged
   -- Floating windows open already get the new settings too.
-  require('sarthi.floats').resend(merged)
+  require('sarthi.floats').resend(opts)
 end
 
 ---The settings in effect: those given to `setup()`, and the defaults of the

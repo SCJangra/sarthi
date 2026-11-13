@@ -11,7 +11,7 @@ use crate::{DeserializeTaggedEnum, Register, Settings, Window, WindowFont, Windo
 #[derive(Debug, DeserializeTaggedEnum)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum Request {
-	/// `require("sarthi").setup(opts)`, with the settings given so far merged
+	/// `require("sarthi").setup(opts)`, with the settings given
 	Setup(SetupArgs),
 
 	/// The clipboard provider copying to `+` or `*`

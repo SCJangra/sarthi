@@ -30,9 +30,11 @@ Set with `require('sarthi').setup({ … })`, by section, e.g.
       outline = { enabled = true, highlight = 'Comment' },
     })
 <
-Each section and key is optional: what isn't given keeps its value, at first
-its default. setup() can be called again, e.g. from a keymap; it applies at
-once. A mistake is an error at the call.
+Each section and key is optional: what isn't given has its default.
+setup() can be called again, e.g. from a keymap, and applies at once; each
+call replaces what the last one gave, so what it leaves out is back to its
+default. A mistake is an error at the call, and keeps the settings as they
+were.
 
 PER-WINDOW SETTINGS                                          *sarthi-w:sarthi*
 
@@ -342,12 +344,12 @@ Sarthi has the module, so a config shared with the TUI checks `vim.g.sarthi`,
 which Sarthi sets, first.
 
 sarthi.setup({opts?})                                           *sarthi.setup*
-    Sets Sarthi's settings: values given replace their previous ones, at
-    first their defaults. Applies at once, so it can be called again later,
-    e.g. from a keymap. A mistake is an error at the call.
+    Sets Sarthi's settings: those given, and the defaults of the rest, in place
+    of what an earlier call gave. Applies at once, so it can be called again
+    later, e.g. from a keymap. A mistake is an error at the call.
 
     Parameters: ~
-        {opts?}  (table) The sections to change (see |sarthi-settings|)
+        {opts?}  (table) The settings (see |sarthi-settings|)
 
 
 sarthi.settings()                                            *sarthi.settings*
