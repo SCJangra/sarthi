@@ -18,8 +18,9 @@
 ---external windows (`external = true`), and the window's own values of the
 ---settings' sections about a window: `shadow`, `outline`, `corners`, `padding`
 ---and `scroll`, with the same keys (|sarthi-settings|), each in place of the
----setting's. Those are kept in the window's `w:sarthi`, which a plugin can also
----set itself.
+---setting's; for those it doesn't give, the settings'. Those are kept in the
+---window's `w:sarthi`, marked `managed`, which a plugin can also set itself
+---(|sarthi-w:sarthi|).
 ---@brief ]]
 local rpc = require('sarthi.rpc')
 
@@ -87,9 +88,11 @@ local function split(config)
   return plain, config.sarthi
 end
 
---- `options`, a window's `w:sarthi`, with the sections given in `sarthi` merged in, key by key
+--- `options`, a window's `w:sarthi`, with the sections given in `sarthi` merged in, key by key, and marked `managed`:
+--- the settings' outline, corners and padding apply to it too
 local function merge(options, sarthi)
   local merged = vim.deepcopy(options or {})
+  merged.managed = true
   for section in pairs(OPTIONS) do
     if sarthi[section] ~= nil then
       merged[section] = vim.tbl_extend('force', merged[section] or {}, sarthi[section])
@@ -173,6 +176,10 @@ end
 ---@return integer
 function api.nvim_open_win(buf, enter, config)
   local plain, sarthi = split(config)
+  -- Managed even without a `sarthi` table: it has the settings' outline, corners and padding.
+  if type(plain) == 'table' and sarthi == nil then
+    sarthi = {}
+  end
   local options = check(sarthi, {}, type(plain) == 'table' and plain.external, 3)
   -- What it's placed relative to, before entering it makes it the current window
   local place = sarthi and resolve(sarthi.place)
@@ -223,6 +230,8 @@ function api.nvim_win_get_config(win)
   win = win == 0 and vim.api.nvim_get_current_win() or win
   local config = vim.api.nvim_win_get_config(win)
   local sarthi = vim.tbl_extend('force', vim.w[win].sarthi or {}, vim.deepcopy(configs[win] or {}))
+  -- Not something to give back: the API sets it
+  sarthi.managed = nil
   config.sarthi = next(sarthi) ~= nil and sarthi or nil
   return config
 end

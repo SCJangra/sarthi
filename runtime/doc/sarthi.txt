@@ -400,8 +400,9 @@ The `sarthi` table (|sarthi.WindowConfig|) takes `place` and `font` for
 external windows (`external = true`), and the window's own values of the
 settings' sections about a window: `shadow`, `outline`, `corners`, `padding`
 and `scroll`, with the same keys (|sarthi-settings|), each in place of the
-setting's. Those are kept in the window's `w:sarthi`, which a plugin can also
-set itself.
+setting's; for those it doesn't give, the settings'. Those are kept in the
+window's `w:sarthi`, marked `managed`, which a plugin can also set itself
+(|sarthi-w:sarthi|).
 
 sarthi.WindowPlace                                        *sarthi.WindowPlace*
     Where Sarthi places an external window, over Neovim's screen: `{ center =
