@@ -47,10 +47,12 @@ over it: such a window never has that effect, even with `enabled = true`.
     vim.w[win].sarthi = { outline = { enabled = true, width = 2 } }
 <
 For a key it doesn't give, a window has the setting's `scroll` and `shadow`
-(every window scrolls, and every floating window casts a shadow). The
-settings' `outline`, `corners` and `padding` are only for windows whose
-`w:sarthi` has `managed = true`; others have those only if their `w:sarthi`
-turns them on, with the defaults for the keys it doesn't give.
+(every window scrolls, and every floating and external window casts a
+shadow). `outline`, `corners` and `padding` are only ever around external
+windows: Neovim places floating windows in its cells, without room for them.
+The settings' are for windows whose `w:sarthi` has `managed = true`; others
+have them only if their `w:sarthi` turns them on, with the defaults for the
+keys it doesn't give.
 >lua
     vim.w[win].sarthi = { managed = true, padding = { size = 2 } }
 <
@@ -156,9 +158,10 @@ shadow.exclude_filetypes                     *sarthi-shadow.exclude_filetypes*
 ------------------------------------------------------------------------------
 OUTLINE                                                       *sarthi-outline*
 
-A line around floating and external windows, just outside them, in logical
-pixels. For windows whose `w:sarthi` is `managed`, e.g. opened with
-|sarthi.api|; others have one only if their `w:sarthi` turns it on.
+A line around external windows, just outside them, in logical pixels: not
+floating windows, which Neovim places without room for it. For windows whose
+`w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have one only
+if their `w:sarthi` turns it on.
 
 Per window too, in `w:sarthi.outline` or `sarthi.outline` (|sarthi.api|):
 `enabled`, `width`, `highlight`. Each is the window's, whatever the setting's,
@@ -189,9 +192,10 @@ outline.exclude_filetypes                   *sarthi-outline.exclude_filetypes*
 ------------------------------------------------------------------------------
 CORNERS                                                       *sarthi-corners*
 
-Rounded corners of floating and external windows, in logical pixels. The
-outline follows them. For windows whose `w:sarthi` is `managed`, e.g. opened
-with |sarthi.api|; others have them only if their `w:sarthi` turns them on.
+Rounded corners of external windows, in logical pixels: not floating windows,
+whose text would be cut by them. The outline follows them. For windows whose
+`w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have them only
+if their `w:sarthi` turns them on.
 
 Per window too, in `w:sarthi.corners` or `sarthi.corners` (|sarthi.api|):
 `enabled`, `radius`. Each is the window's, whatever the setting's, but
@@ -216,9 +220,10 @@ corners.exclude_filetypes                   *sarthi-corners.exclude_filetypes*
 ------------------------------------------------------------------------------
 PADDING                                                       *sarthi-padding*
 
-Space around floating and external windows' cells, in their background, in
-logical pixels. For windows whose `w:sarthi` is `managed`, e.g. opened with
-|sarthi.api|; others have it only if their `w:sarthi` turns it on.
+Space around external windows' cells, in their background, in logical pixels:
+not floating windows, which Neovim places without room for it. For windows
+whose `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have it
+only if their `w:sarthi` turns it on.
 
 Per window too, in `w:sarthi.padding` or `sarthi.padding` (|sarthi.api|):
 `enabled`, `size`. Each is the window's, whatever the setting's, but
@@ -398,13 +403,13 @@ otherwise.
     },
   })
 <
-The `sarthi` table (|sarthi.WindowConfig|) takes `place` and `font` for
-external windows (`external = true`), and the window's own values of the
-settings' sections about a window: `shadow`, `outline`, `corners`, `padding`
-and `scroll`, with the same keys (|sarthi-settings|), each in place of the
-setting's; for those it doesn't give, the settings'. Those are kept in the
-window's `w:sarthi`, marked `managed`, which a plugin can also set itself
-(|sarthi-w:sarthi|).
+The `sarthi` table (|sarthi.WindowConfig|) takes the window's own values of
+the settings' sections about a window, with the same keys
+(|sarthi-settings|), each in place of the setting's; for those it doesn't
+give, the settings'. `shadow` and `scroll` apply to any window; `outline`,
+`corners` and `padding` only to external windows (`external = true`), as
+do `place` and `font`. The values are kept in the window's `w:sarthi`,
+marked `managed`, which a plugin can also set itself (|sarthi-w:sarthi|).
 
 sarthi.WindowPlace                                        *sarthi.WindowPlace*
     Where Sarthi places an external window, over Neovim's screen: `{ center =
@@ -449,9 +454,9 @@ sarthi.WindowConfig                                      *sarthi.WindowConfig*
         {place?}    (sarthi.WindowPlace) External windows only
         {font?}     (sarthi.WindowFont) External windows only
         {shadow?}   (table) Its own |sarthi-shadow| values
-        {outline?}  (table) Its own |sarthi-outline| values
-        {corners?}  (table) Its own |sarthi-corners| values
-        {padding?}  (table) Its own |sarthi-padding| values
+        {outline?}  (table) External windows only: its own |sarthi-outline| values
+        {corners?}  (table) External windows only: its own |sarthi-corners| values
+        {padding?}  (table) External windows only: its own |sarthi-padding| values
         {scroll?}   (table) Its own |sarthi-scroll| values
 
 

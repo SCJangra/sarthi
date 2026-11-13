@@ -14,13 +14,13 @@
 ---    },
 ---  })
 ---<
----The `sarthi` table (|sarthi.WindowConfig|) takes `place` and `font` for
----external windows (`external = true`), and the window's own values of the
----settings' sections about a window: `shadow`, `outline`, `corners`, `padding`
----and `scroll`, with the same keys (|sarthi-settings|), each in place of the
----setting's; for those it doesn't give, the settings'. Those are kept in the
----window's `w:sarthi`, marked `managed`, which a plugin can also set itself
----(|sarthi-w:sarthi|).
+---The `sarthi` table (|sarthi.WindowConfig|) takes the window's own values of
+---the settings' sections about a window, with the same keys
+---(|sarthi-settings|), each in place of the setting's; for those it doesn't
+---give, the settings'. `shadow` and `scroll` apply to any window; `outline`,
+---`corners` and `padding` only to external windows (`external = true`), as
+---do `place` and `font`. The values are kept in the window's `w:sarthi`,
+---marked `managed`, which a plugin can also set itself (|sarthi-w:sarthi|).
 ---@brief ]]
 local rpc = require('sarthi.rpc')
 
@@ -61,9 +61,9 @@ local api = {}
 ---@field place? sarthi.WindowPlace External windows only
 ---@field font? sarthi.WindowFont External windows only
 ---@field shadow? table Its own |sarthi-shadow| values
----@field outline? table Its own |sarthi-outline| values
----@field corners? table Its own |sarthi-corners| values
----@field padding? table Its own |sarthi-padding| values
+---@field outline? table External windows only: its own |sarthi-outline| values
+---@field corners? table External windows only: its own |sarthi-corners| values
+---@field padding? table External windows only: its own |sarthi-padding| values
 ---@field scroll? table Its own |sarthi-scroll| values
 
 -- What only the API keeps of each window's `sarthi` table, by handle, as last given: what isn't in `w:sarthi`
@@ -73,6 +73,9 @@ local configs = {}
 local EXTERNAL_ONLY = {
   place = 'floating windows are placed by Neovim',
   font = "floating windows share the main grid's cells",
+  outline = 'Neovim places floating windows without room for it',
+  corners = "they'd cut a floating window's text",
+  padding = 'Neovim places floating windows without room for it',
 }
 
 -- The sections of the settings a window can have its own values of, kept in `w:sarthi`

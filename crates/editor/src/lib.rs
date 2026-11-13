@@ -92,9 +92,8 @@ enum Placement {
 	Tiled { row: u32, col: u32 },
 
 	/// Floating window `win` at a cell of the screen, in Neovim's drawing order of floats (`win_float_pos`). Without
-	/// `mouse`, clicks go to what's below it. Its `anchor` is the corner Neovim placed by: its frame (padding and outline)
-	/// goes away from it (see [`Editor::float_origin`]).
-	Float { win: Window, row: u32, col: u32, anchor: Anchor, zindex: u32, compindex: u32, mouse: bool },
+	/// `mouse`, clicks go to what's below it.
+	Float { win: Window, row: u32, col: u32, zindex: u32, compindex: u32, mouse: bool },
 
 	/// External window `win` (`win_external_pos`), which sarthi places itself: centered over the screen, over the floating
 	/// windows. Neovim ignores their `zindex`; they stack in the `order` they were first shown in.
@@ -128,11 +127,12 @@ struct Viewport {
 /// How a floating or external window looks besides its cells, in logical pixels
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FloatStyle {
-	/// The shadow it casts, if any, from its outer edge: its outline's. Floats at one level share theirs (see
-	/// [`Editor::float_shadows`]).
+	/// The shadow it casts, if any, from its outer edge: its outline's, or a float's cells. Floats at one level share
+	/// theirs (see [`Editor::float_shadows`]).
 	pub shadow: Option<Shadow>,
 
-	/// The line just outside its cells, if it has one
+	/// The line just outside its cells, if it has one. External windows only, like `corners` and `padding`: Neovim
+	/// places floats in its cells, without room for them.
 	pub outline: Option<OutlineStyle>,
 
 	/// The radius of its rounded corners, if they are: its padding's, which goes around its cells
@@ -340,7 +340,7 @@ impl Editor {
 		Some(Shadow { blur: shadow.blur * scale, offset: shadow.offset.map(|offset| offset * scale), ..shadow })
 	}
 
-	/// The outline of floating or external window `win`, if it has one, in physical pixels: in the highlight group's
+	/// The outline of external window `win`, if it has one, in physical pixels: in the highlight group's
 	/// text color
 	fn outline_of(&self, win: Window) -> Option<Outline> {
 		let outline = self.style_of(win).outline.as_ref()?;
@@ -349,30 +349,30 @@ impl Editor {
 		Some(Outline { width: outline.width * self.scale, color })
 	}
 
-	/// The radius of floating or external window `win`'s corners, in physical pixels: 0 for square ones
+	/// The radius of external window `win`'s corners, in physical pixels: 0 for square ones
 	fn corners_of(&self, win: Window) -> f32 {
 		self.style_of(win).corners.map_or(0.0, |radius| radius * self.scale)
 	}
 
-	/// The width of floating or external window `win`'s outline in whole physical pixels, 0 without one
+	/// The width of external window `win`'s outline in whole physical pixels, 0 without one
 	fn outline_width(&self, win: Window) -> u32 {
 		self.outline_of(win).map_or(0, |outline| outline.width.round().max(0.0) as u32)
 	}
 
-	/// Floating or external window `win`'s padding, in whole physical pixels: top, right, bottom and left
+	/// External window `win`'s padding, in whole physical pixels: top, right, bottom and left
 	fn padding_of(&self, win: Window) -> [u32; 4] {
 		let padding = self.style_of(win).padding.unwrap_or([0.0; 4]);
 		padding.map(|size| (size * self.scale).round().max(0.0) as u32)
 	}
 
-	/// How wide floating or external window `win`'s frame is on each side, in pixels: its padding and outline; top, right,
+	/// How wide external window `win`'s frame is on each side, in pixels: its padding and outline; top, right,
 	/// bottom and left
 	fn frame_of(&self, win: Window) -> [u32; 4] {
 		let outline = self.outline_width(win);
 		self.padding_of(win).map(|padding| padding + outline)
 	}
 
-	/// How far floating or external window `win`'s cells go from where they're placed by `anchor`, in pixels: as far as
+	/// How far external window `win`'s cells go from where they're placed by `anchor`, in pixels: as far as
 	/// its frame (padding and outline) is wide, away from the anchor, so the frame doesn't cover what it's placed by,
 	/// e.g. the cursor
 	fn frame_offset(&self, win: Window, anchor: Anchor) -> [i64; 2] {
@@ -381,22 +381,13 @@ impl Editor {
 		[if east { -right } else { left }, if south { -bottom } else { top }]
 	}
 
-	/// Where floating window grid `id`'s top-left cell is, in pixels: where Neovim placed it, moved by its frame (see
-	/// [`Editor::frame_offset`])
-	fn float_origin(&self, id: u32) -> Option<[u32; 2]> {
-		let Some(Placement::Float { win, row, col, anchor, .. }) = self.placements.get(&id) else { return None };
-		let [x, y] = self.frame_offset(*win, *anchor);
-		let moved = |cells: u32, size: u32, by: i64| (i64::from(cells * size) + by).max(0) as u32;
-		Some([moved(*col, self.cell.width, x), moved(*row, self.cell.height, y)])
-	}
-
-	/// What casts floating or external window `win`'s shadow, from its cells at `rect` (left, top, width, height in
+	/// What casts external window `win`'s shadow, from its cells at `rect` (left, top, width, height in
 	/// pixels): its outer edge, its outline's around its padding
 	fn shadow_area(&self, win: Window, rect: [u32; 4]) -> [u32; 4] {
 		outset(rect, self.frame_of(win))
 	}
 
-	/// The radius of the corners of what casts floating or external window `win`'s shadow (see
+	/// The radius of the corners of what casts external window `win`'s shadow (see
 	/// [`Editor::shadow_area`]): its outline goes around its rounded corners, so they're rounder by its width.
 	fn shadow_radius(&self, win: Window) -> f32 {
 		let radius = self.corners_of(win);
@@ -431,15 +422,7 @@ impl Editor {
 			return Some(GridPosition { grid, row: row as u32, col: col as u32 });
 		}
 		let (row, col) = self.screen_cell(x, y)?;
-		let mut position = self.grid_at_cell(row, col)?;
-		// A float's cells are moved by its frame: its cell under the mouse, by pixels
-		if let Some(Placement::Float { .. }) = self.placements.get(&position.grid) {
-			let grid = &self.grids[&position.grid];
-			let (row, col) = self.grid_cell(position.grid, x, y)?;
-			position.row = row.clamp(0, grid.height as i64 - 1) as u32;
-			position.col = col.clamp(0, grid.width as i64 - 1) as u32;
-		}
-		Some(position)
+		self.grid_at_cell(row, col)
 	}
 
 	/// The grid shown at cell `row`, `col` of the screen, and that cell in it, among the grids on the screen's cells (not
@@ -486,11 +469,8 @@ impl Editor {
 				([f64::from(left), f64::from(top)], self.cell_of(id))
 			},
 			_ => {
-				let origin = self.float_origin(id).or_else(|| {
-					let (row, col) = self.grid_origin(id)?;
-					Some([col * self.cell.width, row * self.cell.height])
-				})?;
-				(origin.map(f64::from), self.cell)
+				let (row, col) = self.grid_origin(id)?;
+				([f64::from(col * self.cell.width), f64::from(row * self.cell.height)], self.cell)
 			},
 		};
 		let row = ((y - top) / f64::from(cell.height)).floor() as i64;
@@ -626,8 +606,7 @@ impl Editor {
 				for position in positions {
 					let (row, col, compindex) = (position.screen_row, position.screen_col, position.compindex);
 					let (win, zindex, mouse) = (position.win, position.zindex, position.mouse_enabled);
-					let anchor = Anchor::from_name(&position.anchor).unwrap_or_default();
-					self.place(position.grid, Placement::Float { win, row, col, anchor, zindex, compindex, mouse });
+					self.place(position.grid, Placement::Float { win, row, col, zindex, compindex, mouse });
 				}
 			},
 			RedrawNotification::WinExternalPos(positions) => {
@@ -823,16 +802,12 @@ impl Editor {
 				Placement::Tiled { row, col } => {
 					layers.push(self.see_through_cells(self.layer(id, *row, *col), (*row, *col), &messages))
 				},
-				Placement::Float { win, row, col, .. } => {
+				// Placed by Neovim in its cells: a shadow, but no frame (outline, corners, padding), which Neovim
+				// wouldn't leave room for
+				Placement::Float { row, col, .. } => {
 					let mut layer = self.layer(id, *row, *col);
 					let Layer::Cells(cells) = &mut layer;
-					if let Some([x, y]) = self.float_origin(id) {
-						(cells.x, cells.y) = (x, y);
-					}
 					cells.shadow = shadows.remove(&id);
-					cells.outline = self.outline_of(*win);
-					cells.corner_radius = self.corners_of(*win);
-					cells.padding = self.padding_of(*win);
 					layers.push(layer);
 				},
 				Placement::Message { row, separator, .. } => {
@@ -922,22 +897,17 @@ impl Editor {
 			let Some(shadow) = self.shadow_of(win) else { continue };
 			let (grid, cell) = (&self.grids[&id], self.cell);
 			let [width, height] = [grid.width as u32 * cell.width, grid.height as u32 * cell.height];
-			let [x, y] = self.float_origin(id).unwrap_or([col * cell.width, row * cell.height]);
-			let rect = self.shadow_area(win, [x, y, width, height]);
+			// Its cells': a float has no frame
+			let rect = [col * cell.width, row * cell.height, width, height];
 			let same = groups
 				.iter_mut()
 				.find(|(group_level, _, group)| *group_level == level && group.shadow == shadow);
 			match same {
-				// Rounded like its roundest window: the renderer rounds each rectangle at most to its size, so a scrollbar
-				// in a menu stays itself.
-				Some((_, _, group)) => {
-					group.area.push(rect);
-					group.radius = group.radius.max(self.shadow_radius(win));
-				},
+				Some((_, _, group)) => group.area.push(rect),
 				None => {
 					let carrier = if groups.iter().any(|(group_level, ..)| *group_level == level) { id } else { first };
-					let radius = self.shadow_radius(win);
-					groups.push((level, carrier, LayerShadow { shadow, area: vec![rect], radius }));
+					// Square, like its cells
+					groups.push((level, carrier, LayerShadow { shadow, area: vec![rect], radius: 0.0 }));
 				},
 			}
 		}
@@ -1018,7 +988,7 @@ impl Editor {
 	/// another can't go round in a loop.
 	fn external_rect_within(&self, id: u32, win: Window, depth: u32) -> [u32; 4] {
 		let ([left, top], size) = self.external_place(id, win, depth);
-		// Its frame away from what it's placed by, like a float's
+		// Its frame away from what it's placed by
 		let [x, y] = match self.places.get(&win).copied().unwrap_or(Place::Center) {
 			Place::Relative { anchor, .. } => self.frame_offset(win, anchor),
 			Place::Center => [0, 0],
@@ -1665,7 +1635,7 @@ mod tests {
 	}
 
 	#[test]
-	fn outlines_around_floating_and_external_windows() {
+	fn outlines_around_external_windows() {
 		let mut editor = screen();
 		let outline_of = |redraw: &Redraw, id: u64| {
 			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
@@ -1682,16 +1652,18 @@ mod tests {
 		editor.set_scale(1.5);
 		let redraw = editor.refresh().expect("outlines changed");
 		let drawn = Some(renderer::Outline { width: 3.0, color: FG });
-		assert_eq!((outline_of(&redraw, 3), outline_of(&redraw, 4)), (drawn, drawn));
-		// Never around tiled windows or the screen
+		// Never around floats, which Neovim places without room for it, tiled windows or the screen
+		assert_eq!((outline_of(&redraw, 3), outline_of(&redraw, 4)), (None, drawn));
 		assert_eq!(outline_of(&redraw, 1), None);
 
-		// A window's own style: none, or one of its own
-		editor.set_float_style(win_of(4), FloatStyle::default());
+		// A window's own style: one of its own, or none; a float's own still none
 		editor.set_float_style(win_of(3), FloatStyle { outline: outline(3.0), ..FloatStyle::default() });
+		editor.set_float_style(win_of(4), FloatStyle { outline: outline(3.0), ..FloatStyle::default() });
 		let redraw = editor.refresh().expect("their styles changed");
 		let thick = Some(renderer::Outline { width: 4.5, color: FG });
-		assert_eq!((outline_of(&redraw, 3), outline_of(&redraw, 4)), (thick, None));
+		assert_eq!((outline_of(&redraw, 3), outline_of(&redraw, 4)), (None, thick));
+		editor.set_float_style(win_of(4), FloatStyle::default());
+		assert_eq!(outline_of(&editor.refresh().expect("its style changed"), 4), None);
 
 		// In the color Lua found for its group, which the editor may not know
 		let green = OutlineStyle { width: 1.0, highlight: String::from("Comment"), color: Some(0x00FF00) };
@@ -1701,7 +1673,7 @@ mod tests {
 	}
 
 	#[test]
-	fn rounded_corners_of_floating_and_external_windows() {
+	fn rounded_corners_of_external_windows() {
 		let mut editor = screen();
 		let shadow = Some(Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 });
 		editor.set_default_float_style(FloatStyle { shadow, ..FloatStyle::default() });
@@ -1726,26 +1698,25 @@ mod tests {
 		editor.set_default_float_style(FloatStyle { shadow, corners: Some(3.0), ..FloatStyle::default() });
 		editor.set_scale(2.0);
 		let redraw = editor.refresh().expect("corners changed");
-		// In physical pixels, and the shadows too: the lone float's, and the pair's.
-		assert_eq!(radius_of(&redraw, 3), (6.0, Some(6.0)));
-		assert_eq!((radius_of(&redraw, 5), radius_of(&redraw, 6)), ((6.0, Some(6.0)), (6.0, None)));
+		// In physical pixels, and the shadow too
 		assert_eq!(radius_of(&redraw, 4), (6.0, Some(6.0)));
-		// Never the screen's or tiled windows'
+		// Never floats', which Neovim places in its cells, alone or side by side, nor the screen's or tiled windows'
+		assert_eq!(radius_of(&redraw, 3), (0.0, Some(0.0)));
+		assert_eq!((radius_of(&redraw, 5), radius_of(&redraw, 6)), ((0.0, Some(0.0)), (0.0, None)));
 		assert_eq!(radius_of(&redraw, 1).0, 0.0);
 
-		// A window's own: square, or its own radius, with the shadow round its outline
-		editor.set_float_style(win_of(3), FloatStyle { shadow, ..FloatStyle::default() });
+		// A window's own radius, with the shadow round its outline
 		let outline = Some(OutlineStyle { width: 1.0, highlight: String::from("FloatBorder"), color: None });
 		editor.set_float_style(
 			win_of(4),
 			FloatStyle { shadow, outline, corners: Some(5.0), padding: None, parent: None },
 		);
 		let redraw = editor.refresh().expect("their styles changed");
-		assert_eq!((radius_of(&redraw, 3), radius_of(&redraw, 4)), ((0.0, Some(0.0)), (10.0, Some(12.0))));
+		assert_eq!(radius_of(&redraw, 4), (10.0, Some(12.0)));
 	}
 
 	#[test]
-	fn padding_around_floating_and_external_windows() {
+	fn padding_around_external_windows() {
 		let mut editor = screen();
 		let shadow = Some(Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 });
 		editor.set_default_float_style(FloatStyle { shadow, ..FloatStyle::default() });
@@ -1753,10 +1724,20 @@ mod tests {
 			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
 			(layer.padding, layer.shadow.as_ref().map(|shadow| shadow.area.clone()))
 		};
-		// A float at row 1, column 1, and an external window; none until a style has it
+		// A float at row 1, column 1, and an external window at the top left; none until a style has it
 		let events = vec![resize(3, 2, 1), float(3, 1, 1, 1), resize(4, 2, 1), external(4)];
-		let redraw = flush(&mut editor, events);
+		flush(&mut editor, events);
+		let place = Place::Relative {
+			relative: Relative::Editor,
+			anchor: Anchor::NorthWest,
+			row: 0.0,
+			col: 0.0,
+			offset: [0.0; 2],
+		};
+		editor.set_external_place(win_of(4), place);
+		let redraw = editor.refresh().expect("placed");
 		assert_eq!(padding_of(&redraw, 3), ([0; 4], Some(vec![[8, 16, 16, 16]])));
+		assert_eq!(padding_of(&redraw, 4), ([0; 4], Some(vec![[0, 0, 16, 16]])));
 
 		// In whole physical pixels; the shadow is cast from around it, and the outline around that.
 		let outline = Some(OutlineStyle { width: 1.0, highlight: String::from("FloatBorder"), color: None });
@@ -1764,23 +1745,24 @@ mod tests {
 		editor.set_default_float_style(style.clone());
 		editor.set_scale(2.0);
 		let redraw = editor.refresh().expect("padding changed");
-		// The float's cells move 8 pixels away from its anchor (NW), so its frame starts where Neovim placed it.
-		assert_eq!(padding_of(&redraw, 3), ([6; 4], Some(vec![[8, 16, 32, 32]])));
-		assert_eq!(padding_of(&redraw, 4).0, [6; 4]);
-		// Never the screen's or tiled windows'
+		// The external window's cells move 8 pixels away from its anchor (NW), so its frame starts where it's placed.
+		assert_eq!(padding_of(&redraw, 4), ([6; 4], Some(vec![[0, 0, 32, 32]])));
+		// Never a float's, which Neovim places without room for it, nor the screen's or tiled windows'
+		assert_eq!(padding_of(&redraw, 3), ([0; 4], Some(vec![[8, 16, 16, 16]])));
 		assert_eq!(padding_of(&redraw, 1).0, [0; 4]);
 
 		// A window's own size, or none
-		editor.set_float_style(win_of(3), FloatStyle { padding: Some([1.0; 4]), ..style.clone() });
-		editor.set_float_style(win_of(4), FloatStyle { shadow, ..FloatStyle::default() });
-		let redraw = editor.refresh().expect("their styles changed");
-		assert_eq!((padding_of(&redraw, 3).0, padding_of(&redraw, 4).0), ([2; 4], [0; 4]));
+		editor.set_float_style(win_of(4), FloatStyle { padding: Some([1.0; 4]), ..style.clone() });
+		let redraw = editor.refresh().expect("its style changed");
+		assert_eq!(padding_of(&redraw, 4).0, [2; 4]);
 
-		// Each side its own: top 1, right 2, bottom 3, left 4, so 2, 4, 6 and 8 pixels. The cells move from the anchor (NW)
-		// by the left and top frame, 8 + 2 and 2 + 2 pixels, and the shadow grows by each side's.
-		editor.set_float_style(win_of(3), FloatStyle { padding: Some([1.0, 2.0, 3.0, 4.0]), ..style.clone() });
+		// Each side its own: top 1, right 2, bottom 3, left 4, so 2, 4, 6 and 8 pixels, and the shadow grows by each
+		// side's.
+		editor.set_float_style(win_of(4), FloatStyle { padding: Some([1.0, 2.0, 3.0, 4.0]), ..style });
 		let redraw = editor.refresh().expect("its padding changed");
-		assert_eq!(padding_of(&redraw, 3), ([2, 4, 6, 8], Some(vec![[8, 16, 32, 28]])));
+		assert_eq!(padding_of(&redraw, 4), ([2, 4, 6, 8], Some(vec![[0, 0, 32, 28]])));
+		editor.set_float_style(win_of(4), FloatStyle { shadow, ..FloatStyle::default() });
+		assert_eq!(padding_of(&editor.refresh().expect("none"), 4).0, [0; 4]);
 	}
 
 	#[test]
@@ -1807,27 +1789,17 @@ mod tests {
 	}
 
 	#[test]
-	fn a_float_s_frame_goes_away_from_its_anchor() {
+	fn a_float_stays_in_its_cells() {
 		let mut editor = screen();
 		let outline = Some(OutlineStyle { width: 2.0, highlight: String::from("FloatBorder"), color: None });
 		editor.set_default_float_style(FloatStyle { outline, padding: Some([2.0; 4]), ..FloatStyle::default() });
-		let at = |redraw: &Redraw| {
-			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 3).unwrap();
-			(layer.x, layer.y)
-		};
-		// Placed at row 2, column 2 by its top-left corner (NW), like below the cursor: right and down by its frame
+		// Placed at row 2, column 2: drawn there whatever its style, with no frame to move it
 		let redraw = flush(&mut editor, vec![resize(3, 2, 1), float(3, 2, 2, 1)]);
-		assert_eq!(at(&redraw), (2 * 8 + 4, 2 * 16 + 4));
-
-		// By its bottom-left corner (SW), like above the cursor: right and up
-		if let Some(super::Placement::Float { anchor, .. }) = editor.placements.get_mut(&3) {
-			*anchor = Anchor::SouthWest;
-		}
-		editor.stale = true;
-		assert_eq!(at(&editor.refresh().expect("moved")), (2 * 8 + 4, 2 * 16 - 4));
-		// The mouse finds its cells where they're drawn.
-		assert_eq!(editor.grid_at(21.0, 33.0), Some(GridPosition { grid: 3, row: 0, col: 0 }));
-		assert_eq!(editor.grid_at(29.0, 33.0), Some(GridPosition { grid: 3, row: 0, col: 1 }));
+		let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 3).unwrap();
+		assert_eq!((layer.x, layer.y, layer.padding, layer.outline), (2 * 8, 2 * 16, [0; 4], None));
+		// The mouse finds its cells where Neovim placed them.
+		assert_eq!(editor.grid_at(17.0, 33.0), Some(GridPosition { grid: 3, row: 0, col: 0 }));
+		assert_eq!(editor.grid_at(25.0, 33.0), Some(GridPosition { grid: 3, row: 0, col: 1 }));
 	}
 
 	#[test]
@@ -1842,10 +1814,19 @@ mod tests {
 			padding: None,
 			parent: None,
 		});
-		let redraw = flush(&mut editor, vec![resize(3, 2, 1), float(3, 1, 1, 1)]);
+		flush(&mut editor, vec![resize(3, 2, 1), external(3)]);
+		let place = Place::Relative {
+			relative: Relative::Editor,
+			anchor: Anchor::NorthWest,
+			row: 1.0,
+			col: 1.0,
+			offset: [0.0; 2],
+		};
+		editor.set_external_place(win_of(3), place);
+		let redraw = editor.refresh().expect("placed");
 
-		// The float's cells and 2 pixels around them, which the outline covers: it doesn't hide the shadow's edge. The
-		// cells moved by those 2 pixels from where Neovim placed them, so the outline starts there.
+		// The external window's cells and 2 pixels around them, which the outline covers: it doesn't hide the shadow's
+		// edge. The cells moved by those 2 pixels from where it's placed, so the outline starts there.
 		let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 3).unwrap();
 		let area = layer.shadow.as_ref().map(|shadow| shadow.area.clone());
 		assert_eq!(area, Some(vec![[CELL.width, CELL.height, 2 * CELL.width + 4, CELL.height + 4]]));

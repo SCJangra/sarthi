@@ -38,17 +38,6 @@ pub enum Anchor {
 }
 
 impl Anchor {
-	/// The anchor Neovim names `name`: "NW", "NE", "SW" or "SE"
-	pub(crate) fn from_name(name: &str) -> Option<Self> {
-		match name {
-			"NW" => Some(Self::NorthWest),
-			"NE" => Some(Self::NorthEast),
-			"SW" => Some(Self::SouthWest),
-			"SE" => Some(Self::SouthEast),
-			_ => None,
-		}
-	}
-
 	/// Whether it's on the right, and whether at the bottom
 	pub(crate) fn sides(self) -> (bool, bool) {
 		match self {

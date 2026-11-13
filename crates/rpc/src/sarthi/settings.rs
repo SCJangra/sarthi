@@ -303,8 +303,9 @@ section! {
 }
 
 section! {
-	/// A line around floating and external windows, just outside them, in logical pixels. For windows whose
-	/// `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have one only if their `w:sarthi` turns it on.
+	/// A line around external windows, just outside them, in logical pixels: not floating windows, which Neovim places
+	/// without room for it. For windows whose `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have one
+	/// only if their `w:sarthi` turns it on.
 	OutlineSettings, window OutlineOptions { enabled: bool, width: f32, highlight: String } {
 		/// Whether windows have one. Off by default: a window with a border of its own (`nvim_open_win()`'s `border`)
 		/// would have two.
@@ -322,9 +323,9 @@ section! {
 }
 
 section! {
-	/// Rounded corners of floating and external windows, in logical pixels. The outline follows them. For windows
-	/// whose `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have them only if their `w:sarthi` turns
-	/// them on.
+	/// Rounded corners of external windows, in logical pixels: not floating windows, whose text would be cut by them.
+	/// The outline follows them. For windows whose `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have
+	/// them only if their `w:sarthi` turns them on.
 	CornerSettings, window CornerOptions { enabled: bool, radius: f32 } {
 		/// Whether windows have them. Off by default: a window's text in its corner cells isn't cut to them.
 		enabled: bool = false,
@@ -338,8 +339,9 @@ section! {
 }
 
 section! {
-	/// Space around floating and external windows' cells, in their background, in logical pixels. For windows whose
-	/// `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have it only if their `w:sarthi` turns it on.
+	/// Space around external windows' cells, in their background, in logical pixels: not floating windows, which Neovim
+	/// places without room for it. For windows whose `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others
+	/// have it only if their `w:sarthi` turns it on.
 	PaddingSettings, window PaddingOptions { enabled: bool, size: PaddingSize } {
 		/// Whether windows have it
 		enabled: bool = false,
