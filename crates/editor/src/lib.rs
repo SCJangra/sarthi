@@ -138,8 +138,15 @@ pub struct FloatStyle {
 	/// The radius of its rounded corners, if they are: its padding's, which goes around its cells
 	pub corners: Option<f32>,
 
-	/// The space around its cells, in their background, if it has any; its outline goes around it.
+	/// The space around its cells, in its background, if it has any; its outline goes around it.
 	pub padding: Option<[f32; 4]>,
+
+	/// Its background, as `0xRRGGBB`, its padding's whatever its cells are highlighted with: Neovim's default one if
+	/// `None`
+	pub background: Option<u32>,
+
+	/// How see-through its background is, from 0 to 100, like `winblend`
+	pub blend: u8,
 
 	/// The floating window it's attached to, like a scrollbar to its menu: it shares that window's shadow.
 	pub parent: Option<Window>,
@@ -976,6 +983,8 @@ impl Editor {
 		cells.outline = self.outline_of(win);
 		cells.corner_radius = self.corners_of(win);
 		cells.padding = self.padding_of(win);
+		let style = self.style_of(win);
+		cells.padding_background = (style.background.unwrap_or_else(|| self.background()), style.blend);
 		layer
 	}
 
@@ -1709,7 +1718,7 @@ mod tests {
 		let outline = Some(OutlineStyle { width: 1.0, highlight: String::from("FloatBorder"), color: None });
 		editor.set_float_style(
 			win_of(4),
-			FloatStyle { shadow, outline, corners: Some(5.0), padding: None, parent: None },
+			FloatStyle { shadow, outline, corners: Some(5.0), padding: None, parent: None, ..FloatStyle::default() },
 		);
 		let redraw = editor.refresh().expect("their styles changed");
 		assert_eq!(radius_of(&redraw, 4), (10.0, Some(12.0)));
@@ -1763,6 +1772,18 @@ mod tests {
 		assert_eq!(padding_of(&redraw, 4), ([2, 4, 6, 8], Some(vec![[0, 0, 32, 28]])));
 		editor.set_float_style(win_of(4), FloatStyle { shadow, ..FloatStyle::default() });
 		assert_eq!(padding_of(&editor.refresh().expect("none"), 4).0, [0; 4]);
+
+		// In the window's own background, whatever its cells', or Neovim's default one until known
+		let background_of = |redraw: &Redraw| {
+			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 4).unwrap();
+			layer.padding_background
+		};
+		editor.set_float_style(win_of(4), FloatStyle { padding: Some([1.0; 4]), ..FloatStyle::default() });
+		assert_eq!(background_of(&editor.refresh().expect("padded")), (editor.background(), 0));
+		let own =
+			FloatStyle { padding: Some([1.0; 4]), background: Some(0x123456), blend: 30, ..FloatStyle::default() };
+		editor.set_float_style(win_of(4), own);
+		assert_eq!(background_of(&editor.refresh().expect("its background")), (0x123456, 30));
 	}
 
 	#[test]
@@ -1813,6 +1834,7 @@ mod tests {
 			corners: None,
 			padding: None,
 			parent: None,
+			..FloatStyle::default()
 		});
 		flush(&mut editor, vec![resize(3, 2, 1), external(3)]);
 		let place = Place::Relative {
@@ -1848,6 +1870,7 @@ mod tests {
 			corners: None,
 			padding: None,
 			parent: None,
+			..FloatStyle::default()
 		});
 		let redraw = flush(&mut editor, vec![line(3, 0, "b")]);
 		// The float has it, under its own cells; the window doesn't.
@@ -1856,12 +1879,26 @@ mod tests {
 		// A float left out, until it isn't: either is a change to draw.
 		editor.set_float_style(
 			win_of(3),
-			FloatStyle { shadow: None, outline: None, corners: None, padding: None, parent: None },
+			FloatStyle {
+				shadow: None,
+				outline: None,
+				corners: None,
+				padding: None,
+				parent: None,
+				..FloatStyle::default()
+			},
 		);
 		assert_eq!(shadow_of(&flush(&mut editor, vec![]), 3), None);
 		editor.set_float_style(
 			win_of(3),
-			FloatStyle { shadow: Some(shadow), outline: None, corners: None, padding: None, parent: None },
+			FloatStyle {
+				shadow: Some(shadow),
+				outline: None,
+				corners: None,
+				padding: None,
+				parent: None,
+				..FloatStyle::default()
+			},
 		);
 		assert!(shadow_of(&flush(&mut editor, vec![]), 3).is_some());
 
@@ -1869,7 +1906,14 @@ mod tests {
 		assert_eq!(editor.refresh(), None);
 		editor.set_float_style(
 			win_of(3),
-			FloatStyle { shadow: None, outline: None, corners: None, padding: None, parent: None },
+			FloatStyle {
+				shadow: None,
+				outline: None,
+				corners: None,
+				padding: None,
+				parent: None,
+				..FloatStyle::default()
+			},
 		);
 		let redraw = editor.refresh().expect("the shadow changed");
 		assert_eq!(shadow_of(&redraw, 3), None);
@@ -1889,6 +1933,7 @@ mod tests {
 			corners: None,
 			padding: None,
 			parent: None,
+			..FloatStyle::default()
 		});
 		// 3 and 4 side by side at 50, like a picker's windows; 5 at 52 attached to 3, like a scrollbar; 6 at 100, a hover
 		// over them; 7 at 50, fully transparent
@@ -1903,11 +1948,25 @@ mod tests {
 		flush(&mut editor, events);
 		editor.set_float_style(
 			win_of(5),
-			FloatStyle { shadow: Some(shadow), outline: None, corners: None, padding: None, parent: Some(win_of(3)) },
+			FloatStyle {
+				shadow: Some(shadow),
+				outline: None,
+				corners: None,
+				padding: None,
+				parent: Some(win_of(3)),
+				..FloatStyle::default()
+			},
 		);
 		editor.set_float_style(
 			win_of(7),
-			FloatStyle { shadow: None, outline: None, corners: None, padding: None, parent: None },
+			FloatStyle {
+				shadow: None,
+				outline: None,
+				corners: None,
+				padding: None,
+				parent: None,
+				..FloatStyle::default()
+			},
 		);
 		let redraw = flush(&mut editor, vec![]);
 
@@ -1921,7 +1980,14 @@ mod tests {
 		let own = Shadow { opacity: 0.8, ..shadow };
 		editor.set_float_style(
 			win_of(4),
-			FloatStyle { shadow: Some(own), outline: None, corners: None, padding: None, parent: None },
+			FloatStyle {
+				shadow: Some(own),
+				outline: None,
+				corners: None,
+				padding: None,
+				parent: None,
+				..FloatStyle::default()
+			},
 		);
 		let redraw = flush(&mut editor, vec![]);
 		assert_eq!(shadow_of(&redraw, 3), Some(vec![[1, 1, 2, 1], [5, 1, 2, 1]]));

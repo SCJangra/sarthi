@@ -609,6 +609,7 @@ mod tests {
 			shadow: None,
 			outline: None,
 			padding: [0; 4],
+			padding_background: (0, 0),
 			corner_radius: 0.0,
 		})
 	}
@@ -932,21 +933,23 @@ mod tests {
 
 	#[test]
 	fn gpu_padding_goes_around_its_layer() {
-		// A white cell at column 3 with 2 px of padding, and a red outline around that, on black
+		// A white cell at column 3 with 2 px of the window's green padding, and a red outline around that, on black
 		let Layer::Cells(white) = cell(1, " ", 0xFFFFFF);
 		let outline = Some(crate::Outline { width: 1.0, color: 0xFF0000 });
-		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, padding: [2; 4], outline, ..white });
+		let padding_background = (0x00FF00, 0);
+		let layer =
+			Layer::Cells(CellLayer { x: 3 * CELL.width, padding: [2; 4], padding_background, outline, ..white });
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");
 			return;
 		};
 		let at = |x: u32| pixels[(9 * WIDTH + x) as usize];
 		let left = 3 * cell.width;
-		// The cell, its padding in its background, then the outline around the padding, then nothing
-		let white = [255, 255, 255, 255];
-		assert_eq!((at(left), at(left - 1), at(left - 2)), (white, white, white));
+		// The cell, its padding in the window's background, not the cell's, then the outline around it, then nothing
+		let (white, green) = ([255, 255, 255, 255], [0, 255, 0, 255]);
+		assert_eq!((at(left), at(left - 1), at(left - 2)), (white, green, green));
 		assert_eq!((at(left - 3), at(left - 4)), ([255, 0, 0, 255], [0, 0, 0, 255]));
-		assert_eq!(at(left + cell.width + 1), white);
+		assert_eq!(at(left + cell.width + 1), green);
 	}
 
 	#[test]

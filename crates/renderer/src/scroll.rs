@@ -186,6 +186,7 @@ impl Animation {
 			shadow: None,
 			outline: None,
 			padding: [0; 4],
+			padding_background: (0, 0),
 			corner_radius: 0.0,
 		};
 		let (offset, height) = (first as f32 + offset, self.height() as u32);
@@ -264,6 +265,7 @@ mod tests {
 			shadow: None,
 			outline: None,
 			padding: [0; 4],
+			padding_background: (0, 0),
 			corner_radius: 0.0,
 		})
 	}

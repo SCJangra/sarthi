@@ -48,6 +48,7 @@ pub fn cell_layer(
 		shadow: None,
 		outline: None,
 		padding: [0; 4],
+		padding_background: (highlights.defaults().background, 0),
 		corner_radius: 0.0,
 	};
 	if let Some(style) = cursor {

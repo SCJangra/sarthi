@@ -48,6 +48,10 @@ pub struct CellLayer {
 	/// rounded corners and the shadow go around it.
 	pub padding: [u32; 4],
 
+	/// The background around its cells, the window's own as `0xRRGGBB`, and how see-through it is, like a cell's `blend`:
+	/// its padding's, whatever the cells next to it are highlighted with
+	pub padding_background: (u32, u8),
+
 	/// Radius of its rounded corners, in pixels; 0 for square ones. What's drawn in its cells is cut to them, except text.
 	pub corner_radius: f32,
 }

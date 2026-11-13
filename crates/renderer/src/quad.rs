@@ -455,13 +455,13 @@ pub(crate) fn cursor_quad(quads: &mut Vec<Quad>, layer: &CellLayer, thickness: f
 	quads.push(Quad::fill(rect.map(|value| value as f32), rgba(cursor.color, srgb_surface)));
 }
 
-/// The quads of `layer`'s padding: its background around its cells, in the background of its first cell, which a
-/// floating window's usually has throughout, as see-through as that cell. Only the bands around the cells, one a side:
-/// under a see-through window, the color would show twice. They're cut to the layer's rounded corners.
+/// The quads of `layer`'s padding: its background around its cells, the window's own (`padding_background`). Only the
+/// bands around the cells, one a side: under a see-through window, the color would show twice. They're cut to the
+/// layer's rounded corners.
 pub(crate) fn padding_quads(quads: &mut Vec<Quad>, layer: &CellLayer, srgb_surface: bool) {
-	let Some(cell) = layer.cells.first() else { return };
-	let [r, g, b, _] = rgba(cell.background, srgb_surface);
-	let color = [r, g, b, 1.0 - f32::from(cell.blend.min(100)) / 100.0];
+	let (background, blend) = layer.padding_background;
+	let [r, g, b, _] = rgba(background, srgb_surface);
+	let color = [r, g, b, 1.0 - f32::from(blend.min(100)) / 100.0];
 	let outer = layer.outer_rect();
 	let [left, top, width, _] = outer;
 	let [x, y, cells_width, cells_height] = layer.rect().map(|value| value as f32);
@@ -585,7 +585,10 @@ fn background_runs(cells: &[RenderCell]) -> impl Iterator<Item = (u32, u32, u32,
 mod tests {
 	use arrayvec::ArrayString;
 
-	use super::{DASHES, DOTS, Quad, QuadPipeline, WAVE, background_runs, cell_decorations, cursor_quad, disjoint};
+	use super::{
+		DASHES, DOTS, Quad, QuadPipeline, WAVE, background_runs, cell_decorations, cursor_quad, disjoint, padding_quads,
+	};
+	use crate::color::rgba;
 	use crate::font::LineMetrics;
 	use crate::{
 		BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, RenderCell, TextStyle, Underline,
@@ -649,6 +652,7 @@ mod tests {
 			shadow: None,
 			outline: None,
 			padding: [0; 4],
+			padding_background: (0, 0),
 			corner_radius: 0.0,
 		};
 		let mut quads = Vec::new();
@@ -686,6 +690,7 @@ mod tests {
 			shadow: None,
 			outline: None,
 			padding: [0; 4],
+			padding_background: (0, 0),
 			corner_radius: 0.0,
 		};
 		let lines = LineMetrics {
@@ -705,6 +710,41 @@ mod tests {
 
 	fn underline(style: Underline) -> Decoration {
 		Decoration { underline: Some(style), underline_color: GREEN, ..Decoration::default() }
+	}
+
+	#[test]
+	fn padding_is_the_window_s_background() {
+		// A window whose first cell is highlighted, like a search match or a menu's selected item
+		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
+		let cell = |background| RenderCell {
+			text: ArrayString::from(" ").unwrap(),
+			style,
+			background,
+			blend: 0,
+			decoration: Decoration::default(),
+		};
+		let layer = CellLayer {
+			id: 1,
+			x: 4,
+			y: 4,
+			cell: CellSize { width: 8, height: 19 },
+			font: crate::FontId::MAIN,
+			width: 2,
+			height: 1,
+			cells: vec![cell(0xFF0000), cell(0x202020)],
+			cursor: None,
+			scroll: None,
+			shadow: None,
+			outline: None,
+			padding: [4; 4],
+			padding_background: (0x202020, 20),
+			corner_radius: 0.0,
+		};
+		let mut quads = Vec::new();
+		padding_quads(&mut quads, &layer, false);
+		assert_eq!(quads.len(), 4);
+		let [r, g, b, _] = rgba(0x202020, false);
+		assert!(quads.iter().all(|quad| quad.color == [r, g, b, 0.8]), "{:?}", quads[0].color);
 	}
 
 	#[test]

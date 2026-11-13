@@ -489,6 +489,7 @@ mod tests {
 			shadow: None,
 			outline: None,
 			padding: [0; 4],
+			padding_background: (0, 0),
 			corner_radius: 0.0,
 		}
 	}

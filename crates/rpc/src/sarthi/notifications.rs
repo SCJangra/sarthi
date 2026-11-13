@@ -56,6 +56,11 @@ pub struct FloatWindow {
 	#[serde(default)]
 	pub outline_color: Option<u32>,
 
+	/// The window's background, as `0xRRGGBB`, if its highlight group has one: `NormalFloat` for a floating window,
+	/// `Normal` for an external one, or what its 'winhighlight' maps them to
+	#[serde(default)]
+	pub background: Option<u32>,
+
 	/// The floating window it's attached to (`relative = 'win'`), like a scrollbar to its menu
 	#[serde(default, deserialize_with = "optional_window_number")]
 	pub parent: Option<Window>,
@@ -157,6 +162,7 @@ mod tests {
 			sarthi,
 			winblend: 0,
 			outline_color: None,
+			background: None,
 			parent: None,
 		};
 		let expected = vec![

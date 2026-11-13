@@ -1,7 +1,7 @@
 -- Tells sarthi about floating windows, and external ones, before Neovim draws them, so sarthi can decide how each
 -- looks, e.g. whether it casts a shadow: it knows the settings, and Neovim knows each window's filetype, `w:sarthi` (its
--- own values of the settings), `winblend`, its outline's color, and the floating window it's attached to, if any.
--- Sends a window again only when these change.
+-- own values of the settings), `winblend`, its outline's color and background, and the floating window it's attached
+-- to, if any. Sends a window again only when these change.
 local rpc = require('sarthi.rpc')
 
 local M = {}
@@ -27,6 +27,32 @@ local function outline_color(win)
   return vim.api.nvim_get_hl(0, { name = name, link = false }).fg
 end
 
+--- `win`'s background, as Neovim picks it: a floating window's `NormalFloat`, or an external one's `Normal`, or what
+--- its 'winhighlight' maps them to, from its highlight namespace if it has one; `nil` for the default background
+local function background(win, external)
+  local map = {}
+  for _, item in ipairs(vim.split(vim.wo[win].winhighlight, ',', { trimempty = true })) do
+    local from, to = item:match('^([^:]+):(.+)$')
+    if from then
+      map[from] = to
+    end
+  end
+  local ns = math.max(vim.api.nvim_get_hl_ns({ winid = win }), 0)
+  local function color(name)
+    local bg = vim.api.nvim_get_hl(ns, { name = name, link = false }).bg
+    if bg == nil and ns ~= 0 then
+      bg = vim.api.nvim_get_hl(0, { name = name, link = false }).bg
+    end
+    return bg
+  end
+  if not external and map.NormalFloat then
+    return color(map.NormalFloat)
+  elseif map.Normal then
+    return color(map.Normal)
+  end
+  return color(external and 'Normal' or 'NormalFloat')
+end
+
 --- What's sent about `win`, if it's a floating or external window
 local function facts(win)
   local config = vim.api.nvim_win_get_config(win)
@@ -39,6 +65,7 @@ local function facts(win)
     sarthi = vim.w[win].sarthi,
     winblend = vim.wo[win].winblend,
     outline_color = outline_color(win),
+    background = background(win, config.external),
     parent = config.relative == 'win' and is_float(config.win) and config.win or nil,
   }
 end

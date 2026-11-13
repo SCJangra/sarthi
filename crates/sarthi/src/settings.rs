@@ -62,7 +62,9 @@ pub fn float_style(settings: &Settings, window: &FloatWindow, options: &WindowOp
 	if let Some(outline) = &mut style.outline {
 		outline.color = window.outline_color;
 	}
-	FloatStyle { parent: window.parent, ..style }
+	// Its background around its cells, whatever they're highlighted with
+	let blend = window.winblend.min(100) as u8;
+	FloatStyle { parent: window.parent, background: window.background, blend, ..style }
 }
 
 /// How floating and external windows look until sarthi learns about them: as one with no `w:sarthi`
@@ -92,7 +94,7 @@ fn style(settings: &Settings, filetype: &str, winblend: u32) -> FloatStyle {
 	let corners = shows(corners.enabled, &corners.exclude_filetypes).then_some(corners.radius);
 	let padding = &settings.padding;
 	let padding = shows(padding.enabled, &padding.exclude_filetypes).then_some(padding.size.sides());
-	FloatStyle { shadow, outline, corners, padding, parent: None }
+	FloatStyle { shadow, outline, corners, padding, ..FloatStyle::default() }
 }
 
 /// How the renderer draws underlines, in logical pixels
@@ -123,6 +125,7 @@ mod tests {
 			sarthi: WindowVariable::default(),
 			winblend: 0,
 			outline_color: None,
+			background: None,
 			parent: None,
 		}
 	}
@@ -250,6 +253,16 @@ mod tests {
 		assert_eq!(super::float_style(&settings, &float("satellite"), &padding(None, on)).padding, None);
 		let off = padding(Some(true), PaddingOptions { enabled: Some(false), ..Default::default() });
 		assert_eq!(super::float_style(&settings, &float("lua"), &off).padding, None);
+	}
+
+	#[test]
+	fn the_background_is_the_window_s() {
+		let none = WindowOptions::default();
+		let style = super::float_style(&Settings::default(), &float("lua"), &none);
+		assert_eq!((style.background, style.blend), (None, 0));
+		let window = FloatWindow { background: Some(0x202020), winblend: 30, ..float("lua") };
+		let style = super::float_style(&Settings::default(), &window, &none);
+		assert_eq!((style.background, style.blend), (Some(0x202020), 30));
 	}
 
 	#[test]
