@@ -18,9 +18,9 @@ use rpc::neovim::{
 	UiTryResizeParams,
 };
 use rpc::sarthi::{
-	ChangeFontSizeArgs, CheckWindowOptionsArgs, Copied, FloatsChangedArgs, GetClipboardArgs, HELP, MODULES,
-	PlaceWindowArgs, Request, ResetFontSizeArgs, STARTUP, SetClipboardArgs, SetFontSizeArgs, Settings, SetupArgs,
-	WinScrolledArgs, WindowFont, WindowFontArgs, WindowOptions, WindowVariable,
+	ChangeFontSizeArgs, CheckWindowOptionsArgs, CmdheightChangedArgs, Copied, FloatsChangedArgs, GetClipboardArgs,
+	HELP, MODULES, PlaceWindowArgs, Request, ResetFontSizeArgs, STARTUP, SetClipboardArgs, SetFontSizeArgs, Settings,
+	SetupArgs, WinScrolledArgs, WindowFont, WindowFontArgs, WindowOptions, WindowVariable,
 };
 
 use crate::blur::Blur;
@@ -310,6 +310,7 @@ impl App {
 				// E.g. a float made transparent: Neovim drew it already, and won't again for this.
 				self.refresh();
 			},
+			Notification::CmdheightChanged(CmdheightChangedArgs { rows }) => self.editor.set_command_rows(rows),
 			Notification::Other { .. } => (),
 		}
 	}

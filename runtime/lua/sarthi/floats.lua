@@ -116,4 +116,18 @@ vim.api.nvim_create_autocmd({ 'WinNew', 'BufWinEnter', 'FileType', 'ColorScheme'
   callback = forward,
 })
 
+-- 'cmdheight', which external windows stay above, like Neovim keeps floating windows; it's per tab page.
+local function send_cmdheight()
+  rpc.notify('cmdheight_changed', vim.o.cmdheight)
+end
+send_cmdheight()
+vim.api.nvim_create_autocmd({ 'OptionSet', 'TabEnter' }, {
+  group = vim.api.nvim_create_augroup('sarthi.cmdheight', {}),
+  callback = function(args)
+    if args.event == 'TabEnter' or args.match == 'cmdheight' then
+      send_cmdheight()
+    end
+  end,
+})
+
 return M

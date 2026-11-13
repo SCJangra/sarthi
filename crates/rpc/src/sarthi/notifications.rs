@@ -6,6 +6,13 @@ use serde::{Deserialize, Deserializer};
 
 use crate::{Window, WindowOptions};
 
+/// How many rows the command line takes (`'cmdheight'`), sent as it starts and whenever it changes
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct CmdheightChangedArgs {
+	pub rows: u32,
+}
+
 /// Windows that scrolled (`WinScrolled`), sent before Neovim redraws them
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -128,6 +135,10 @@ mod tests {
 			],
 		};
 		assert_eq!(decode("win_scrolled", windows), Notification::WinScrolled(expected));
+
+		let rows = Value::Array(vec![Value::from("cmdheight_changed"), Value::Array(vec![Value::from(2)])]);
+		let decoded: Notification = rmp_serde::from_slice(&rmp_serde::to_vec(&rows).unwrap()).unwrap();
+		assert_eq!(decoded, Notification::CmdheightChanged(super::CmdheightChangedArgs { rows: 2 }));
 	}
 
 	#[test]

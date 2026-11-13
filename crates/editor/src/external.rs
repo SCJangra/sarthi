@@ -9,9 +9,10 @@ pub enum Place {
 	/// Centered over the screen, until placed otherwise
 	Center,
 
-	/// Like a floating window (`nvim_open_win()`'s `relative`, `anchor`, `row` and `col`): its `anchor` corner at `row`,
-	/// `col` from what it's relative to, moved further by `offset` (right and down, in logical pixels), kept on the screen
-	Relative { relative: Relative, anchor: Anchor, row: f64, col: f64, offset: [f64; 2] },
+	/// Like a floating window (`nvim_open_win()`'s `relative`, `anchor`, `row`, `col` and `fixed`): its frame's
+	/// `anchor` corner at `row`, `col` (whole cells) from what it's relative to, moved further by `offset` (right and
+	/// down, in logical pixels), kept on the screen; `fixed`, not moved sideways for it unless anchored on the right
+	Relative { relative: Relative, anchor: Anchor, row: f64, col: f64, offset: [f64; 2], fixed: bool },
 }
 
 /// What a [`Place::Relative`] window's `row` and `col` count from
@@ -20,7 +21,8 @@ pub enum Relative {
 	/// The screen's top-left corner
 	Editor,
 
-	/// Window `win`'s top-left corner, wherever the window is. While it isn't shown, the external window is centered.
+	/// Window `win`'s text's top-left corner, inside its frame, border and winbar, wherever the window is. While it
+	/// isn't shown, the external window is centered.
 	Win(Window),
 
 	/// The cursor, where it was when placed: the window doesn't follow it, like a floating window doesn't
@@ -49,10 +51,11 @@ impl Anchor {
 	}
 }
 
-/// The top-left corner, in pixels, of a window `size` pixels large (width, height) placed by `place` on a screen
-/// `screen` pixels large, whose cells are `cell`. `origin` gives a window's top-left corner in pixels, if it's shown, and
-/// its cells, which `row` and `col` relative to it count in. `scale` physical pixels make a logical one, which the
-/// offset is in. A [`Relative::Cursor`] place must be made relative to the editor before (see [`at_cursor`]).
+/// The top-left corner, in pixels, of a window `size` pixels large (width, height, with its frame) placed by `place` on
+/// a screen `screen` pixels large, whose cells are `cell`. `origin` gives a window's text's top-left corner in pixels,
+/// if it's shown, and its cells, which `row` and `col` relative to it count in. `scale` physical pixels make a logical
+/// one, which the offset is in. A [`Relative::Cursor`] place must be made relative to the editor before (see
+/// [`at_cursor`]).
 pub(crate) fn position(
 	place: Place,
 	size: [u32; 2],
@@ -62,7 +65,7 @@ pub(crate) fn position(
 	origin: impl Fn(Window) -> Option<([u32; 2], CellSize)>,
 ) -> [u32; 2] {
 	let centered = [0, 1].map(|axis| screen[axis].saturating_sub(size[axis]) / 2);
-	let Place::Relative { relative, anchor, row, col, offset } = place else { return centered };
+	let Place::Relative { relative, anchor, row, col, offset, fixed } = place else { return centered };
 	let ([base_x, base_y], cell) = match relative {
 		Relative::Editor | Relative::Cursor => ([0, 0], cell),
 		Relative::Win(win) => {
@@ -71,9 +74,9 @@ pub(crate) fn position(
 		},
 	};
 
-	// The anchor corner, in pixels
-	let x = f64::from(base_x) + col * f64::from(cell.width) + offset[0] * scale;
-	let y = f64::from(base_y) + row * f64::from(cell.height) + offset[1] * scale;
+	// The anchor corner, in pixels: at whole cells, like Neovim, which drops a fraction
+	let x = f64::from(base_x) + col.trunc() * f64::from(cell.width) + offset[0] * scale;
+	let y = f64::from(base_y) + row.trunc() * f64::from(cell.height) + offset[1] * scale;
 	let (east, south) = anchor.sides();
 	let left = if east { x - f64::from(size[0]) } else { x };
 	let top = if south { y - f64::from(size[1]) } else { y };
@@ -81,17 +84,20 @@ pub(crate) fn position(
 	// On the screen as far as it fits, like Neovim keeps floating windows on it
 	let keep =
 		|start: f64, size: u32, screen: u32| start.round().clamp(0.0, f64::from(screen.saturating_sub(size))) as u32;
-	[keep(left, size[0], screen[0]), keep(top, size[1], screen[1])]
+	// `fixed`: not moved sideways, unless anchored on the right
+	let left = if fixed && !east { left.round().max(0.0) as u32 } else { keep(left, size[0], screen[0]) };
+	[left, keep(top, size[1], screen[1])]
 }
 
 /// `place` with a [`Relative::Cursor`] made relative to the editor, for the cursor at `cursor` (row, column of the
 /// screen): where it is when placed
 pub(crate) fn at_cursor(place: Place, cursor: (u32, u32)) -> Place {
 	match place {
-		Place::Relative { relative: Relative::Cursor, anchor, row, col, offset } => Place::Relative {
+		Place::Relative { relative: Relative::Cursor, anchor, row, col, offset, fixed } => Place::Relative {
 			relative: Relative::Editor,
 			anchor,
 			offset,
+			fixed,
 			row: f64::from(cursor.0) + row,
 			col: f64::from(cursor.1) + col,
 		},
@@ -119,7 +125,7 @@ mod tests {
 	}
 
 	fn relative(relative: Relative, anchor: Anchor, row: f64, col: f64) -> Place {
-		Place::Relative { relative, anchor, row, col, offset: [0.0; 2] }
+		Place::Relative { relative, anchor, row, col, offset: [0.0; 2], fixed: false }
 	}
 
 	#[test]
@@ -137,8 +143,8 @@ mod tests {
 		assert_eq!(at(Anchor::NorthEast), [40, 100]);
 		assert_eq!(at(Anchor::SouthWest), [60, 60]);
 		assert_eq!(at(Anchor::SouthEast), [40, 60]);
-		// Fractional cells, rounded to whole pixels
-		assert_eq!(placed(relative(Relative::Editor, Anchor::NorthWest, 0.5, 0.25), [20, 40]), [3, 10]);
+		// Fractional cells: whole ones, like Neovim, which drops the fraction
+		assert_eq!(placed(relative(Relative::Editor, Anchor::NorthWest, 1.5, 2.75), [20, 40]), [20, 20]);
 	}
 
 	#[test]
@@ -157,6 +163,7 @@ mod tests {
 			row: 1.0,
 			col: 2.0,
 			offset: [3.0, 5.0],
+			fixed: false,
 		};
 		assert_eq!(placed(offset, [20, 40]), [2 * 10 + 6, 20 + 10]);
 		// Still kept on the screen
@@ -166,6 +173,7 @@ mod tests {
 			row: 0.0,
 			col: 0.0,
 			offset: [-50.0, 0.0],
+			fixed: false,
 		};
 		assert_eq!(placed(far, [20, 40]), [0, 0]);
 	}

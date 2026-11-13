@@ -77,6 +77,10 @@ pub struct Editor {
 	/// Where external windows go, by window; centered unless placed (see [`Editor::set_external_place`])
 	places: HashMap<Window, Place>,
 
+	/// Rows of the command line at the bottom of the screen (`'cmdheight'`), which external windows stay above: none
+	/// until Lua says
+	command_rows: u32,
+
 	/// The fonts of external windows that have their own, and the size of their cells, by window (see
 	/// [`Editor::set_external_font`])
 	external_fonts: HashMap<Window, (FontId, CellSize)>,
@@ -226,6 +230,7 @@ impl Editor {
 			cell: CellSize { width: 1, height: 1 },
 			external_order: 0,
 			places: HashMap::new(),
+			command_rows: 0,
 			external_fonts: HashMap::new(),
 			stale: false,
 		}
@@ -329,6 +334,12 @@ impl Editor {
 		self.stale |= self.places.insert(win, place) != Some(place);
 	}
 
+	/// Sets how many rows the command line takes at the bottom of the screen (`'cmdheight'`)
+	pub fn set_command_rows(&mut self, rows: u32) {
+		self.stale |= self.command_rows != rows;
+		self.command_rows = rows;
+	}
+
 	/// How floating or external window `win` looks besides its cells, until it closes
 	pub fn set_float_style(&mut self, win: Window, style: FloatStyle) {
 		self.stale |= self.floats.get(&win) != Some(&style);
@@ -377,15 +388,6 @@ impl Editor {
 	fn frame_of(&self, win: Window) -> [u32; 4] {
 		let outline = self.outline_width(win);
 		self.padding_of(win).map(|padding| padding + outline)
-	}
-
-	/// How far external window `win`'s cells go from where they're placed by `anchor`, in pixels: as far as
-	/// its frame (padding and outline) is wide, away from the anchor, so the frame doesn't cover what it's placed by,
-	/// e.g. the cursor
-	fn frame_offset(&self, win: Window, anchor: Anchor) -> [i64; 2] {
-		let [top, right, bottom, left] = self.frame_of(win).map(i64::from);
-		let (east, south) = anchor.sides();
-		[if east { -right } else { left }, if south { -bottom } else { top }]
 	}
 
 	/// What casts external window `win`'s shadow, from its cells at `rect` (left, top, width, height in
@@ -996,43 +998,43 @@ impl Editor {
 	/// [`Editor::external_rect`], `depth` external windows away from the one asked for: windows placed relative to one
 	/// another can't go round in a loop.
 	fn external_rect_within(&self, id: u32, win: Window, depth: u32) -> [u32; 4] {
-		let ([left, top], size) = self.external_place(id, win, depth);
-		// Its frame away from what it's placed by
-		let [x, y] = match self.places.get(&win).copied().unwrap_or(Place::Center) {
-			Place::Relative { anchor, .. } => self.frame_offset(win, anchor),
-			Place::Center => [0, 0],
-		};
-		let moved = |at: u32, by: i64| (i64::from(at) + by).max(0) as u32;
-		[moved(left, x), moved(top, y), size[0], size[1]]
-	}
-
-	/// Where external window `win`, grid `id`, is placed, before its frame moves its cells away from what it's placed by:
-	/// like where Neovim places a float, where its frame starts. And its size, in pixels. A window placed relative to it
-	/// counts from there, like from a float, so windows put together line up in whole cells whatever their frames.
-	fn external_place(&self, id: u32, win: Window, depth: u32) -> ([u32; 2], [u32; 2]) {
 		let (grid, cell) = (&self.grids[&id], self.cell_of(id));
 		let size = [grid.width as u32 * cell.width, grid.height as u32 * cell.height];
-		let screen = self
-			.grids
-			.get(&1)
-			.map_or([0, 0], |grid| [grid.width as u32 * self.cell.width, grid.height as u32 * self.cell.height]);
+		// Placed with its frame, like Neovim places a floating window with its border: its cells inside it
+		let [top, right, bottom, left] = self.frame_of(win);
+		let outer = [size[0] + left + right, size[1] + top + bottom];
+		let [x, y] = self.external_place(win, outer, depth);
+		[x + left, y + top, size[0], size[1]]
+	}
+
+	/// Where external window `win`, `outer` pixels with its frame, is placed: its frame's top-left corner. A window
+	/// it's placed relative to counts from that window's text, inside its frame, border and winbar, like Neovim's
+	/// floats do.
+	fn external_place(&self, win: Window, outer: [u32; 2], depth: u32) -> [u32; 2] {
+		// Above the command line, like Neovim keeps floating windows
+		let screen = self.grids.get(&1).map_or([0, 0], |grid| {
+			let rows = (grid.height as u32).saturating_sub(self.command_rows);
+			[grid.width as u32 * self.cell.width, rows * self.cell.height]
+		});
 		let place = self.places.get(&win).copied().unwrap_or(Place::Center);
-		// A window's top-left corner and cells, by its grid: every window has a viewport.
+		// A window's text's top-left corner and cells, by its grid: every window has a viewport.
 		let origin = |win: Window| {
-			let (&grid, _) = self.viewports.iter().find(|(_, viewport)| viewport.win == Some(win))?;
-			match self.placements.get(&grid) {
+			let (&grid, viewport) = self.viewports.iter().find(|(_, viewport)| viewport.win == Some(win))?;
+			let [top, _, left, _] = viewport.margins;
+			let (corner, cell) = match self.placements.get(&grid) {
 				// In its own cells, where it's placed; past a few in a row, as if not shown
-				Some(Placement::External { win, .. }) => (depth < 8).then(|| {
-					let (corner, _) = self.external_place(grid, *win, depth + 1);
-					(corner, self.cell_of(grid))
-				}),
+				Some(Placement::External { win, .. }) => {
+					let [x, y, ..] = (depth < 8).then(|| self.external_rect_within(grid, *win, depth + 1))?;
+					([x, y], self.cell_of(grid))
+				},
 				_ => {
 					let (row, col) = self.grid_origin(grid)?;
-					Some(([col * self.cell.width, row * self.cell.height], self.cell))
+					([col * self.cell.width, row * self.cell.height], self.cell)
 				},
-			}
+			};
+			Some(([corner[0] + left * cell.width, corner[1] + top * cell.height], cell))
 		};
-		(external::position(place, size, screen, self.cell, f64::from(self.scale), origin), size)
+		external::position(place, outer, screen, self.cell, f64::from(self.scale), origin)
 	}
 
 	/// How the text of grid `id`, `width` × `height` cells, scrolled since the last `flush`, if it did
@@ -1513,6 +1515,7 @@ mod tests {
 			row: 1.0,
 			col: 0.0,
 			offset: [0.0; 2],
+			fixed: false,
 		};
 		editor.set_external_place(win_of(4), below);
 		assert_eq!(at(&editor.refresh().expect("placed")), (6 * 8, 2 * 16));
@@ -1528,6 +1531,7 @@ mod tests {
 			row: 1.0,
 			col: 0.0,
 			offset: [0.0; 2],
+			fixed: false,
 		};
 		editor.set_external_place(win_of(4), cursor);
 		assert_eq!(at(&editor.refresh().expect("placed")), (4 * 8, 4 * 16));
@@ -1543,6 +1547,7 @@ mod tests {
 			row: 0.0,
 			col: 0.0,
 			offset: [0.0; 2],
+			fixed: false,
 		};
 		editor.set_external_place(win_of(5), top_left);
 		let below = Place::Relative {
@@ -1551,12 +1556,13 @@ mod tests {
 			row: 1.0,
 			col: 2.0,
 			offset: [0.0; 2],
+			fixed: false,
 		};
 		editor.set_external_place(win_of(4), below);
 		assert_eq!(at(&editor.refresh().expect("placed")), (2 * 10, 20));
-		// Counted from where 5's frame starts: its padding moves its cells, not what's placed relative to it
+		// Counted from 5's text, inside its padding, like from inside a float's border
 		editor.set_float_style(win_of(5), FloatStyle { padding: Some([4.0; 4]), ..FloatStyle::default() });
-		assert_eq!(at(&editor.refresh().expect("padded")), (2 * 10, 20));
+		assert_eq!(at(&editor.refresh().expect("padded")), (2 * 10 + 4, 20 + 4));
 
 		// Placed relative to each other: no loop, centered past a few
 		editor.set_external_place(
@@ -1567,6 +1573,7 @@ mod tests {
 				row: 0.0,
 				col: 0.0,
 				offset: [0.0; 2],
+				fixed: false,
 			},
 		);
 		let _ = editor.refresh();
@@ -1742,6 +1749,7 @@ mod tests {
 			row: 0.0,
 			col: 0.0,
 			offset: [0.0; 2],
+			fixed: false,
 		};
 		editor.set_external_place(win_of(4), place);
 		let redraw = editor.refresh().expect("placed");
@@ -1787,6 +1795,48 @@ mod tests {
 	}
 
 	#[test]
+	fn external_windows_are_laid_out_like_floats_with_a_border() {
+		let mut editor = screen();
+		// Window 2 at row 1 with a winbar, and a 2×1 external window with 4 pixels of padding, on the 80×80 pixel
+		// screen
+		let margins = WinViewportMarginsEvent { grid: 2, win: IgnoredAny, top: 1, bottom: 0, left: 0, right: 0 };
+		let events = vec![
+			resize(2, 10, 3),
+			win_pos(2, 1, 0),
+			viewport(2, 9, 0),
+			RedrawNotification::WinViewportMargins(vec![margins]),
+			resize(4, 2, 1),
+			external(4),
+		];
+		flush(&mut editor, events);
+		editor.set_float_style(win_of(4), FloatStyle { padding: Some([4.0; 4]), ..FloatStyle::default() });
+		let at = |editor: &mut Editor, place| {
+			editor.set_external_place(win_of(4), place);
+			let redraw = editor.refresh().expect("placed");
+			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 4).unwrap();
+			(layer.x, layer.y)
+		};
+		let place = |relative, row, col, fixed| Place::Relative {
+			relative,
+			anchor: Anchor::NorthWest,
+			row,
+			col,
+			offset: [0.0; 2],
+			fixed,
+		};
+
+		// From window 2's text, below its winbar; its frame there, its cells inside it
+		assert_eq!(at(&mut editor, place(Relative::Win(win_of(2)), 0.0, 0.0, false)), (4, 2 * 16 + 4));
+		// Kept on the screen with its frame: 24×24 pixels at most at 56, 56
+		assert_eq!(at(&mut editor, place(Relative::Editor, 4.0, 9.0, false)), (60, 60));
+		// Above the command line
+		editor.set_command_rows(1);
+		assert_eq!(at(&mut editor, place(Relative::Editor, 4.0, 9.0, false)), (60, 44));
+		// `fixed`: not moved sideways, so cut off on the right
+		assert_eq!(at(&mut editor, place(Relative::Editor, 4.0, 9.0, true)), (9 * 8 + 4, 44));
+	}
+
+	#[test]
 	fn external_windows_placed_together_share_a_shadow() {
 		let mut editor = screen();
 		let shadow = Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 };
@@ -1797,8 +1847,14 @@ mod tests {
 			events.extend([viewport(id, 10, 0), resize(id, 2, 1), external(id)]);
 		}
 		flush(&mut editor, events);
-		let at =
-			|relative, row| Place::Relative { relative, anchor: Anchor::NorthWest, row, col: 0.0, offset: [0.0; 2] };
+		let at = |relative, row| Place::Relative {
+			relative,
+			anchor: Anchor::NorthWest,
+			row,
+			col: 0.0,
+			offset: [0.0; 2],
+			fixed: false,
+		};
 		editor.set_external_place(win_of(4), at(Relative::Editor, 0.0));
 		editor.set_external_place(win_of(5), at(Relative::Win(win_of(4)), 1.0));
 		let redraw = editor.refresh().expect("placed");
@@ -1843,6 +1899,7 @@ mod tests {
 			row: 1.0,
 			col: 1.0,
 			offset: [0.0; 2],
+			fixed: false,
 		};
 		editor.set_external_place(win_of(3), place);
 		let redraw = editor.refresh().expect("placed");

@@ -24,6 +24,9 @@ pub struct WindowPlace {
 
 	/// Moves it further, in logical pixels, e.g. past another window's padding: `{ x = …, y = … }`
 	pub offset: Option<PlaceOffset>,
+
+	/// Not moved sideways to stay on the screen, unless anchored on the right, like a float's `fixed`
+	pub fixed: Option<bool>,
 }
 
 /// `sarthi.place.offset`, right and down in logical pixels, or left and up if negative; either left out is 0

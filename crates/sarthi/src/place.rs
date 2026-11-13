@@ -6,8 +6,9 @@ use rpc::sarthi::{PlaceAnchor, PlaceRelative, WindowPlace};
 /// Where `place` puts an external window, or what's wrong with it. No place puts it back in the middle.
 pub fn place(place: Option<&WindowPlace>) -> Result<Place, String> {
 	let Some(place) = place else { return Ok(Place::Center) };
-	let WindowPlace { center, relative, win, anchor, row, col, offset } = place;
-	let relative_keys = win.is_some() || anchor.is_some() || row.is_some() || col.is_some() || offset.is_some();
+	let WindowPlace { center, relative, win, anchor, row, col, offset, fixed } = place;
+	let relative_keys =
+		win.is_some() || anchor.is_some() || row.is_some() || col.is_some() || offset.is_some() || fixed.is_some();
 
 	match (center, relative) {
 		(Some(true), None) if !relative_keys => Ok(Place::Center),
@@ -34,10 +35,10 @@ pub fn place(place: Option<&WindowPlace>) -> Result<Place, String> {
 				PlaceAnchor::SouthWest => Anchor::SouthWest,
 				PlaceAnchor::SouthEast => Anchor::SouthEast,
 			};
-			Ok(Place::Relative { relative, anchor, row, col, offset })
+			Ok(Place::Relative { relative, anchor, row, col, offset, fixed: fixed.unwrap_or(false) })
 		},
 		(Some(_) | None, None) if relative_keys => {
-			Err(String::from("`win`, `anchor`, `row`, `col` and `offset` go with `relative`"))
+			Err(String::from("`win`, `anchor`, `row`, `col`, `offset` and `fixed` go with `relative`"))
 		},
 		_ => Err(String::from("`sarthi.place` takes one of `center` or `relative`")),
 	}
@@ -65,6 +66,7 @@ mod tests {
 			row: 0.0,
 			col: 0.0,
 			offset: [0.0; 2],
+			fixed: false,
 		};
 		assert_eq!(place(Some(&editor)), Ok(expected));
 		let below = WindowPlace {
@@ -73,6 +75,7 @@ mod tests {
 			anchor: Some(PlaceAnchor::SouthEast),
 			row: Some(2.0),
 			col: Some(1.5),
+			fixed: Some(true),
 			..WindowPlace::default()
 		};
 		let expected = Place::Relative {
@@ -81,6 +84,7 @@ mod tests {
 			row: 2.0,
 			col: 1.5,
 			offset: [0.0; 2],
+			fixed: true,
 		};
 		assert_eq!(place(Some(&below)), Ok(expected));
 	}
