@@ -65,8 +65,8 @@ fn write_section(out: &mut String, section: &SectionDoc, values: &Value) {
 			.collect::<Vec<_>>()
 			.join(", ");
 		let text = format!(
-			"Per window too, in `w:sarthi.{0}` or `sarthi.{0}` (|sarthi.api|): {keys}. Each replaces the setting for \
-			 that window, and a window's `enabled` wins over `exclude_filetypes`.",
+			"Per window too, in `w:sarthi.{0}` or `sarthi.{0}` (|sarthi.api|): {keys}. Each is the window's, whatever \
+			 the setting's, but `exclude_filetypes` wins over a window's `enabled`.",
 			section.name
 		);
 		paragraph(out, &text, "");

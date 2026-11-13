@@ -160,8 +160,8 @@ section! {
 		animation: Animation = Animation::default(),
 
 		/// Windows showing these filetypes jump to their new place, e.g. menus whose selected line is highlighted text,
-		/// unless their `w:sarthi` gives `scroll.enabled`
-		exclude_filetypes: Vec<String> = Vec::new(),
+		/// whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
+		exclude_filetypes: Filetypes as "string[]" = Filetypes::default(),
 	}
 }
 
@@ -296,14 +296,15 @@ section! {
 		/// From 0, invisible, to 1, black where fully shadowed
 		opacity: f32 = 0.3,
 
-		/// Windows showing these filetypes have no shadow, e.g. scrollbars, unless their `w:sarthi` gives
-		/// `shadow.enabled`
-		exclude_filetypes: Vec<String> = Vec::new(),
+		/// Windows showing these filetypes have no shadow, e.g. scrollbars, whatever their `w:sarthi` gives. Glob
+		/// patterns, e.g. `cmp_*`.
+		exclude_filetypes: Filetypes as "string[]" = Filetypes::default(),
 	}
 }
 
 section! {
-	/// A line around floating and external windows, just outside them, in logical pixels
+	/// A line around floating and external windows, just outside them, in logical pixels. For windows whose
+	/// `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have one only if their `w:sarthi` turns it on.
 	OutlineSettings, window OutlineOptions { enabled: bool, width: f32, highlight: String } {
 		/// Whether windows have one. Off by default: a window with a border of its own (`nvim_open_win()`'s `border`)
 		/// would have two.
@@ -315,26 +316,30 @@ section! {
 		/// The highlight group whose text color the line has
 		highlight: String = String::from("FloatBorder"),
 
-		/// Windows showing these filetypes have no outline, unless their `w:sarthi` gives `outline.enabled`
-		exclude_filetypes: Vec<String> = Vec::new(),
+		/// Windows showing these filetypes have no outline, whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
+		exclude_filetypes: Filetypes as "string[]" = Filetypes::default(),
 	}
 }
 
 section! {
-	/// Rounded corners of floating and external windows, in logical pixels. The outline follows them.
+	/// Rounded corners of floating and external windows, in logical pixels. The outline follows them. For windows
+	/// whose `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have them only if their `w:sarthi` turns
+	/// them on.
 	CornerSettings, window CornerOptions { enabled: bool, radius: f32 } {
 		/// Whether windows have them. Off by default: a window's text in its corner cells isn't cut to them.
 		enabled: bool = false,
 
 		radius: f32 = 8.0,
 
-		/// Windows showing these filetypes keep square corners, unless their `w:sarthi` gives `corners.enabled`
-		exclude_filetypes: Vec<String> = Vec::new(),
+		/// Windows showing these filetypes keep square corners, whatever their `w:sarthi` gives. Glob patterns, e.g.
+		/// `cmp_*`.
+		exclude_filetypes: Filetypes as "string[]" = Filetypes::default(),
 	}
 }
 
 section! {
-	/// Space around floating and external windows' cells, in their background, in logical pixels
+	/// Space around floating and external windows' cells, in their background, in logical pixels. For windows whose
+	/// `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have it only if their `w:sarthi` turns it on.
 	PaddingSettings, window PaddingOptions { enabled: bool, size: PaddingSize } {
 		/// Whether windows have it
 		enabled: bool = false,
@@ -343,8 +348,8 @@ section! {
 		/// `{ top = 2, left = 8, right = 8 }`
 		size: PaddingSize as "number|{ top?, right?, bottom?, left? }" = PaddingSize::All(4.0),
 
-		/// Windows showing these filetypes have no padding, unless their `w:sarthi` gives `padding.enabled`
-		exclude_filetypes: Vec<String> = Vec::new(),
+		/// Windows showing these filetypes have no padding, whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
+		exclude_filetypes: Filetypes as "string[]" = Filetypes::default(),
 	}
 }
 
@@ -459,12 +464,51 @@ impl<'de> Deserialize<'de> for PaddingSize {
 	}
 }
 
+/// Filetypes a setting excludes, as glob patterns, e.g. `{ 'help', 'cmp_*' }`: compiled as the settings are decoded, so
+/// a pattern that isn't one is a mistake in them
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Filetypes(Vec<glob::Pattern>);
+
+impl Filetypes {
+	pub fn new<'a>(patterns: impl IntoIterator<Item = &'a str>) -> Result<Self, String> {
+		patterns
+			.into_iter()
+			.map(|pattern| {
+				glob::Pattern::new(pattern).map_err(|error| format!("`{pattern}` isn't a glob pattern: {error}"))
+			})
+			.collect::<Result<_, _>>()
+			.map(Self)
+	}
+
+	/// Whether one of the patterns matches `filetype`
+	pub fn matches(&self, filetype: &str) -> bool {
+		self.0.iter().any(|pattern| pattern.matches(filetype))
+	}
+}
+
+impl<'de> Deserialize<'de> for Filetypes {
+	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		let patterns = Vec::<String>::deserialize(deserializer)?;
+		Self::new(patterns.iter().map(String::as_str)).map_err(serde::de::Error::custom)
+	}
+}
+
+impl Serialize for Filetypes {
+	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		serializer.collect_seq(self.0.iter().map(glob::Pattern::as_str))
+	}
+}
+
 /// What a window's `w:sarthi` sets for it: the sections of the settings about a window, with the same keys. Each value
-/// given replaces the setting's for this window. `exclude_filetypes` is only in the settings: the window gives
-/// `enabled` itself.
+/// given is the window's, whatever the settings say; but a window whose filetype a section's `exclude_filetypes`
+/// matches never has that section's effect. `exclude_filetypes` itself is only in the settings.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WindowOptions {
+	/// Whether the settings' `outline`, `corners` and `padding` apply to the window, under its own values, as to one
+	/// opened with `require('sarthi').api`, which sets it. Without it, the window has only what it gives of those; the
+	/// settings' `scroll` and `shadow` apply to every window.
+	pub managed: Option<bool>,
 	pub scroll: ScrollOptions,
 	pub shadow: ShadowOptions,
 	pub outline: OutlineOptions,
@@ -473,14 +517,32 @@ pub struct WindowOptions {
 }
 
 impl Settings {
-	/// These settings with what `options` gives a window in their place, e.g. to validate them
+	/// The settings a window has with `options` from its `w:sarthi`: its own values, and for those it doesn't give, the
+	/// settings' `scroll` and `shadow`, and their `outline`, `corners` and `padding` if it's managed, or else those
+	/// sections' defaults. The filetypes each excludes are the settings'.
 	pub fn for_window(&self, options: &WindowOptions) -> Self {
+		let managed = options.managed.unwrap_or(false);
+		let outline = if managed {
+			self.outline.clone()
+		} else {
+			OutlineSettings { exclude_filetypes: self.outline.exclude_filetypes.clone(), ..Default::default() }
+		};
+		let corners = if managed {
+			self.corners.clone()
+		} else {
+			CornerSettings { exclude_filetypes: self.corners.exclude_filetypes.clone(), ..Default::default() }
+		};
+		let padding = if managed {
+			self.padding.clone()
+		} else {
+			PaddingSettings { exclude_filetypes: self.padding.exclude_filetypes.clone(), ..Default::default() }
+		};
 		Self {
 			scroll: self.scroll.with(&options.scroll),
 			shadow: self.shadow.with(&options.shadow),
-			outline: self.outline.with(&options.outline),
-			corners: self.corners.with(&options.corners),
-			padding: self.padding.with(&options.padding),
+			outline: outline.with(&options.outline),
+			corners: corners.with(&options.corners),
+			padding: padding.with(&options.padding),
 			..self.clone()
 		}
 	}
@@ -579,7 +641,7 @@ mod number_or_false {
 mod tests {
 	use rmpv::Value;
 
-	use super::{Animation, Settings, WindowOptions};
+	use super::{Animation, CornerOptions, Filetypes, Settings, WindowOptions};
 
 	/// A Lua table as Neovim sends it: a map, or an array when empty
 	fn table(pairs: Vec<(&str, Value)>) -> Value {
@@ -741,7 +803,7 @@ mod tests {
 		assert!(settings.shadow.enabled && !settings.scroll.enabled);
 		assert_eq!(rmpv::ext::from_value::<WindowOptions>(table(vec![])).unwrap(), WindowOptions::default());
 
-		// Only the sections about a window, without their filetypes: the window gives `enabled` itself
+		// Only the sections about a window, without their filetypes: those are only the settings'
 		let filetypes = table(vec![("exclude_filetypes", Value::Array(vec![]))]);
 		assert!(rmpv::ext::from_value::<WindowOptions>(table(vec![("shadow", filetypes)])).is_err());
 		assert!(rmpv::ext::from_value::<WindowOptions>(table(vec![("cursor", table(vec![]))])).is_err());
@@ -757,6 +819,61 @@ mod tests {
 		assert_eq!(
 			(settings.outline.enabled, settings.outline.width, settings.outline.highlight.as_str()),
 			(false, 3.0, "Comment")
+		);
+	}
+
+	#[test]
+	fn managed_windows_have_the_settings_frames() {
+		let mut settings = Settings::default();
+		settings.shadow.opacity = 0.5;
+		settings.outline.enabled = true;
+		settings.outline.width = 2.0;
+		settings.corners.enabled = true;
+		settings.padding.enabled = true;
+		settings.padding.exclude_filetypes = Filetypes::new(["help"]).unwrap();
+		let radius =
+			WindowOptions { corners: CornerOptions { radius: Some(3.0), ..Default::default() }, ..Default::default() };
+
+		// Not managed: the settings' shadow, but only the window's own outline, corners and padding over the defaults
+		let window = settings.for_window(&radius);
+		assert_eq!(window.shadow.opacity, 0.5);
+		assert_eq!((window.outline.enabled, window.outline.width), (false, 1.0));
+		assert_eq!((window.corners.enabled, window.corners.radius), (false, 3.0));
+		assert!(!window.padding.enabled);
+		// The settings' filetypes, whichever
+		assert!(window.padding.exclude_filetypes.matches("help"));
+
+		// Managed: the settings', under the window's own
+		let managed = WindowOptions { managed: Some(true), ..radius };
+		let window = settings.for_window(&managed);
+		assert_eq!((window.outline.enabled, window.outline.width), (true, 2.0));
+		assert_eq!((window.corners.enabled, window.corners.radius), (true, 3.0));
+		assert!(window.padding.enabled && window.padding.exclude_filetypes.matches("help"));
+
+		let options: WindowOptions = rmpv::ext::from_value(table(vec![("managed", Value::from(true))])).unwrap();
+		assert_eq!(options.managed, Some(true));
+	}
+
+	#[test]
+	fn filetypes_are_glob_patterns() {
+		let shadow = |filetypes: Vec<&str>| {
+			let filetypes = Value::Array(filetypes.into_iter().map(Value::from).collect());
+			parse(table(vec![("shadow", table(vec![("exclude_filetypes", filetypes)]))]))
+		};
+		let filetypes = shadow(vec!["help", "cmp_*", "dap-repl?"]).unwrap().shadow.exclude_filetypes;
+		assert!(filetypes.matches("help") && filetypes.matches("cmp_menu") && filetypes.matches("dap-repl2"));
+		assert!(!filetypes.matches("helpx") && !filetypes.matches("lua") && !filetypes.matches("cmp"));
+		assert!(!Filetypes::default().matches(""));
+		assert_eq!(shadow(vec![]).unwrap().shadow.exclude_filetypes, Filetypes::default());
+
+		let error = shadow(vec!["[help"]).unwrap_err();
+		assert!(error.contains("`[help` isn't a glob pattern"), "{error}");
+
+		// Back to Lua as given
+		let encoded = rmp_serde::to_vec_named(&shadow(vec!["cmp_*"]).unwrap()).unwrap();
+		assert_eq!(
+			rmp_serde::from_slice::<Settings>(&encoded).unwrap().shadow.exclude_filetypes,
+			Filetypes::new(["cmp_*"]).unwrap()
 		);
 	}
 

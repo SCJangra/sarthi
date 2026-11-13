@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use editor::{FloatStyle, OutlineStyle};
 use renderer::{CursorMotion, Easing, Motion, Shadow, UnderlineSize};
-use rpc::sarthi::{Animation, FloatWindow, ScrolledWindow, Settings, WindowOptions, WindowVariable};
+use rpc::sarthi::{Animation, Filetypes, FloatWindow, ScrolledWindow, Settings, WindowOptions, WindowVariable};
 
 /// How the renderer moves scrolled text
 pub fn scroll_motion(settings: &Settings) -> Motion {
@@ -46,19 +46,18 @@ pub fn window_options(settings: &Settings, variable: &WindowVariable) -> Result<
 }
 
 /// How `window`'s text moves when it scrolls, with `options` from its `w:sarthi`: slides as its scroll settings say,
-/// or jumps to its new place for `None`. It slides if `options` say so, or else if sliding is enabled and its filetype
+/// or jumps to its new place for `None`. It slides if its `w:sarthi`, or else the settings, enable it, and its filetype
 /// isn't excluded.
 pub fn window_scroll(settings: &Settings, window: &ScrolledWindow, options: &WindowOptions) -> Option<Motion> {
-	let excluded = settings.scroll.exclude_filetypes.contains(&window.filetype);
 	let scroll = settings.scroll.with(&options.scroll);
-	let enabled = options.scroll.enabled.unwrap_or(scroll.enabled && !excluded);
+	let enabled = scroll.enabled && !scroll.exclude_filetypes.matches(&window.filetype);
 	enabled.then(|| motion(scroll.animation))
 }
 
 /// How floating or external window `window` looks besides its cells, with `options` from its `w:sarthi`, in logical
 /// pixels (see [`style`])
 pub fn float_style(settings: &Settings, window: &FloatWindow, options: &WindowOptions) -> FloatStyle {
-	let mut style = style(settings, options, &window.filetype, window.winblend);
+	let mut style = style(&settings.for_window(options), &window.filetype, window.winblend);
 	// In the color Neovim has for its highlight group, which sarthi may not know
 	if let Some(outline) = &mut style.outline {
 		outline.color = window.outline_color;
@@ -66,36 +65,33 @@ pub fn float_style(settings: &Settings, window: &FloatWindow, options: &WindowOp
 	FloatStyle { parent: window.parent, ..style }
 }
 
-/// How floating and external windows look until sarthi learns about them
+/// How floating and external windows look until sarthi learns about them: as one with no `w:sarthi`
 pub fn default_float_style(settings: &Settings) -> FloatStyle {
-	style(settings, &WindowOptions::default(), "", 0)
+	style(&settings.for_window(&WindowOptions::default()), "", 0)
 }
 
-/// How a floating or external window showing `filetype`, `winblend` transparent, looks besides its cells: the settings,
-/// with what `options` gives in their place. Each part shows if `options` say so, or else if it's enabled and
-/// `filetype` isn't excluded; none around a fully transparent window.
-fn style(settings: &Settings, options: &WindowOptions, filetype: &str, winblend: u32) -> FloatStyle {
-	let shows = |enabled: Option<bool>, default: bool, excluded: &[String]| {
-		winblend < 100 && enabled.unwrap_or(default && !excluded.iter().any(|excluded| excluded == filetype))
-	};
-	let shadow = settings.shadow.with(&options.shadow);
-	let shadow = shows(options.shadow.enabled, shadow.enabled, &shadow.exclude_filetypes).then_some(Shadow {
+/// How a floating or external window showing `filetype`, `winblend` transparent, looks besides its cells, with
+/// `settings` for it (see [`Settings::for_window`]). Each part shows if it's enabled and `filetype` isn't excluded; none
+/// around a fully transparent window.
+fn style(settings: &Settings, filetype: &str, winblend: u32) -> FloatStyle {
+	let shows = |enabled: bool, excluded: &Filetypes| winblend < 100 && enabled && !excluded.matches(filetype);
+	let shadow = &settings.shadow;
+	let shadow = shows(shadow.enabled, &shadow.exclude_filetypes).then_some(Shadow {
 		blur: shadow.blur,
 		offset: shadow.offset,
 		color: 0x000000,
 		opacity: shadow.opacity,
 	});
-	let outline = settings.outline.with(&options.outline);
-	let outline = shows(options.outline.enabled, outline.enabled, &outline.exclude_filetypes).then_some(OutlineStyle {
+	let outline = &settings.outline;
+	let outline = shows(outline.enabled, &outline.exclude_filetypes).then(|| OutlineStyle {
 		width: outline.width,
-		highlight: outline.highlight,
+		highlight: outline.highlight.clone(),
 		color: None,
 	});
-	let corners = settings.corners.with(&options.corners);
-	let corners = shows(options.corners.enabled, corners.enabled, &corners.exclude_filetypes).then_some(corners.radius);
-	let padding = settings.padding.with(&options.padding);
-	let padding =
-		shows(options.padding.enabled, padding.enabled, &padding.exclude_filetypes).then_some(padding.size.sides());
+	let corners = &settings.corners;
+	let corners = shows(corners.enabled, &corners.exclude_filetypes).then_some(corners.radius);
+	let padding = &settings.padding;
+	let padding = shows(padding.enabled, &padding.exclude_filetypes).then_some(padding.size.sides());
 	FloatStyle { shadow, outline, corners, padding, parent: None }
 }
 
@@ -115,7 +111,7 @@ mod tests {
 	use renderer::Motion;
 	use rpc::neovim::Window;
 	use rpc::sarthi::{
-		Animation, CornerOptions, FloatWindow, OutlineOptions, PaddingOptions, PaddingSides, PaddingSize,
+		Animation, CornerOptions, Filetypes, FloatWindow, OutlineOptions, PaddingOptions, PaddingSides, PaddingSize,
 		ScrollOptions, ScrolledWindow, Settings, ShadowOptions, WindowOptions, WindowVariable,
 	};
 	use serde::de::IgnoredAny;
@@ -139,6 +135,7 @@ mod tests {
 	fn shadows() {
 		let mut settings = Settings::default();
 		let none = WindowOptions::default();
+		// Every float casts the settings' shadow.
 		let style = super::float_style(&settings, &float("lua"), &none);
 		let cast = style.shadow.unwrap();
 		assert_eq!((cast.blur, cast.offset, cast.opacity), (16.0, [0.0, 4.0], 0.3));
@@ -149,13 +146,14 @@ mod tests {
 		let cast = super::float_style(&settings, &float("lua"), &own).shadow.unwrap();
 		assert_eq!((cast.blur, cast.offset, cast.opacity), (16.0, [1.0, 2.0], 0.6));
 
-		settings.shadow.exclude_filetypes = vec![String::from("satellite")];
-		assert!(super::float_style(&settings, &float("satellite"), &none).shadow.is_none());
-		// The window's `enabled` wins, over excluded filetypes and the setting.
+		// Excluded filetypes win, over the window's `enabled` too.
+		settings.shadow.exclude_filetypes = Filetypes::new(["satellite", "cmp_*"]).unwrap();
 		let on = shadow(ShadowOptions { enabled: Some(true), ..Default::default() });
 		let off = shadow(ShadowOptions { enabled: Some(false), ..Default::default() });
-		assert!(super::float_style(&settings, &float("satellite"), &on).shadow.is_some());
+		assert!(super::float_style(&settings, &float("satellite"), &none).shadow.is_none());
+		assert!(super::float_style(&settings, &float("cmp_menu"), &on).shadow.is_none());
 		assert!(super::float_style(&settings, &float("lua"), &off).shadow.is_none());
+		// The window's `enabled` wins over the setting's.
 		settings.shadow.enabled = false;
 		assert!(super::float_style(&settings, &float("lua"), &none).shadow.is_none());
 		assert!(super::float_style(&settings, &float("lua"), &on).shadow.is_some());
@@ -167,73 +165,90 @@ mod tests {
 	#[test]
 	fn outlines() {
 		let mut settings = Settings::default();
+		settings.outline.enabled = true;
+		settings.outline.width = 2.0;
+		settings.outline.exclude_filetypes = Filetypes::new(["satellite"]).unwrap();
 		let outline = |options: OutlineOptions| WindowOptions { outline: options, ..Default::default() };
 		let none = WindowOptions::default();
-		// Off by default, unless the window says so, with the settings' values where it gives none
-		assert_eq!(super::float_style(&settings, &float("lua"), &none).outline, None);
-		let on = outline(OutlineOptions { enabled: Some(true), width: Some(2.5), ..Default::default() });
-		let style = super::float_style(&settings, &float("lua"), &on).outline.unwrap();
-		assert_eq!((style.width, style.highlight.as_str()), (2.5, "FloatBorder"));
+		let managed = WindowOptions { managed: Some(true), ..Default::default() };
 
-		settings.outline.enabled = true;
-		settings.outline.exclude_filetypes = vec![String::from("satellite")];
-		let style = super::float_style(&settings, &float("lua"), &none).outline.unwrap();
-		assert_eq!(style.width, 1.0);
-		assert_eq!(super::default_float_style(&settings).outline, Some(style));
-		assert_eq!(super::float_style(&settings, &float("satellite"), &none).outline, None);
-		let off = outline(OutlineOptions { enabled: Some(false), ..Default::default() });
-		assert_eq!(super::float_style(&settings, &float("lua"), &off).outline, None);
-		// Its own color, still on as the settings say
-		let comment = outline(OutlineOptions { highlight: Some(String::from("Comment")), ..Default::default() });
+		// Only a managed window has the settings' outline; others none, as before sarthi learns about them.
+		assert_eq!(super::float_style(&settings, &float("lua"), &none).outline, None);
+		assert_eq!(super::default_float_style(&settings).outline, None);
+		let style = super::float_style(&settings, &float("lua"), &managed).outline.unwrap();
+		assert_eq!((style.width, style.highlight.as_str()), (2.0, "FloatBorder"));
+		// Or one a window turns on itself, with the defaults where it gives no values
+		let on = outline(OutlineOptions { enabled: Some(true), ..Default::default() });
+		assert_eq!(super::float_style(&settings, &float("lua"), &on).outline.unwrap().width, 1.0);
+
+		// Its own values over the settings'
+		let comment = WindowOptions {
+			outline: OutlineOptions { highlight: Some(String::from("Comment")), ..Default::default() },
+			..managed.clone()
+		};
 		let style = super::float_style(&settings, &float("lua"), &comment).outline.unwrap();
-		assert_eq!((style.width, style.highlight.as_str()), (1.0, "Comment"));
+		assert_eq!((style.width, style.highlight.as_str()), (2.0, "Comment"));
+		let off = WindowOptions { outline: OutlineOptions { enabled: Some(false), ..Default::default() }, ..managed };
+		assert_eq!(super::float_style(&settings, &float("lua"), &off).outline, None);
+		// Excluded filetypes win.
+		assert_eq!(super::float_style(&settings, &float("satellite"), &on).outline, None);
 		let transparent = FloatWindow { winblend: 100, ..float("lua") };
 		assert_eq!(super::float_style(&settings, &transparent, &on).outline, None);
 
 		// In the color Neovim has for the group, if it has one
 		let colored = FloatWindow { outline_color: Some(0xFF0000), ..float("lua") };
-		assert_eq!(super::float_style(&settings, &colored, &none).outline.unwrap().color, Some(0xFF0000));
+		assert_eq!(super::float_style(&settings, &colored, &on).outline.unwrap().color, Some(0xFF0000));
 	}
 
 	#[test]
 	fn corners() {
 		let mut settings = Settings::default();
-		let corners = |options: CornerOptions| WindowOptions { corners: options, ..Default::default() };
-		let none = WindowOptions::default();
-		// Square by default, unless the window says so, at the settings' radius or its own
-		assert_eq!(super::float_style(&settings, &float("lua"), &none).corners, None);
-		let on = corners(CornerOptions { enabled: Some(true), ..Default::default() });
-		assert_eq!(super::float_style(&settings, &float("lua"), &on).corners, Some(8.0));
-
 		settings.corners.enabled = true;
-		settings.corners.exclude_filetypes = vec![String::from("satellite")];
-		let radius = corners(CornerOptions { radius: Some(4.0), ..Default::default() });
+		settings.corners.radius = 6.0;
+		settings.corners.exclude_filetypes = Filetypes::new(["satellite"]).unwrap();
+		let corners =
+			|managed, options: CornerOptions| WindowOptions { managed, corners: options, ..Default::default() };
+		let none = WindowOptions::default();
+
+		// Square, unless managed or the window turns them on, at the settings' radius or the default
+		assert_eq!(super::float_style(&settings, &float("lua"), &none).corners, None);
+		assert_eq!(
+			super::float_style(&settings, &float("lua"), &corners(Some(true), Default::default())).corners,
+			Some(6.0)
+		);
+		let on = CornerOptions { enabled: Some(true), ..Default::default() };
+		assert_eq!(super::float_style(&settings, &float("lua"), &corners(None, on.clone())).corners, Some(8.0));
+
+		let radius = corners(Some(true), CornerOptions { radius: Some(4.0), ..Default::default() });
 		assert_eq!(super::float_style(&settings, &float("lua"), &radius).corners, Some(4.0));
-		assert_eq!(super::float_style(&settings, &float("satellite"), &radius).corners, None);
-		let off = corners(CornerOptions { enabled: Some(false), ..Default::default() });
+		assert_eq!(super::float_style(&settings, &float("satellite"), &corners(None, on)).corners, None);
+		let off = corners(Some(true), CornerOptions { enabled: Some(false), ..Default::default() });
 		assert_eq!(super::float_style(&settings, &float("lua"), &off).corners, None);
 	}
 
 	#[test]
 	fn padding() {
 		let mut settings = Settings::default();
-		let padding = |options: PaddingOptions| WindowOptions { padding: options, ..Default::default() };
-		let none = WindowOptions::default();
-		// None by default, unless the window says so, at the settings' size or its own
-		assert_eq!(super::float_style(&settings, &float("lua"), &none).padding, None);
-		let on = padding(PaddingOptions { enabled: Some(true), ..Default::default() });
-		assert_eq!(super::float_style(&settings, &float("lua"), &on).padding, Some([4.0; 4]));
-
 		settings.padding.enabled = true;
-		settings.padding.exclude_filetypes = vec![String::from("satellite")];
-		let size = padding(PaddingOptions { size: Some(PaddingSize::All(2.0)), ..Default::default() });
-		assert_eq!(super::float_style(&settings, &float("lua"), &size).padding, Some([2.0; 4]));
+		settings.padding.size = PaddingSize::All(6.0);
+		settings.padding.exclude_filetypes = Filetypes::new(["satellite"]).unwrap();
+		let padding =
+			|managed, options: PaddingOptions| WindowOptions { managed, padding: options, ..Default::default() };
+		let none = WindowOptions::default();
+
+		// None, unless managed or the window turns it on, at the settings' size or the default
+		assert_eq!(super::float_style(&settings, &float("lua"), &none).padding, None);
+		let managed = padding(Some(true), Default::default());
+		assert_eq!(super::float_style(&settings, &float("lua"), &managed).padding, Some([6.0; 4]));
+		let on = PaddingOptions { enabled: Some(true), ..Default::default() };
+		assert_eq!(super::float_style(&settings, &float("lua"), &padding(None, on.clone())).padding, Some([4.0; 4]));
+
 		// Each side its own
 		let sides = PaddingSize::Sides(PaddingSides { top: 1.0, left: 3.0, ..Default::default() });
-		let own = padding(PaddingOptions { size: Some(sides), ..Default::default() });
+		let own = padding(Some(true), PaddingOptions { size: Some(sides), ..Default::default() });
 		assert_eq!(super::float_style(&settings, &float("lua"), &own).padding, Some([1.0, 0.0, 0.0, 3.0]));
-		assert_eq!(super::float_style(&settings, &float("satellite"), &size).padding, None);
-		let off = padding(PaddingOptions { enabled: Some(false), ..Default::default() });
+		assert_eq!(super::float_style(&settings, &float("satellite"), &padding(None, on)).padding, None);
+		let off = padding(Some(true), PaddingOptions { enabled: Some(false), ..Default::default() });
 		assert_eq!(super::float_style(&settings, &float("lua"), &off).padding, None);
 	}
 
@@ -250,7 +265,7 @@ mod tests {
 	#[test]
 	fn which_windows_slide() {
 		let mut settings = Settings::default();
-		settings.scroll.exclude_filetypes = vec![String::from("cmp_menu")];
+		settings.scroll.exclude_filetypes = Filetypes::new(["cmp_*"]).unwrap();
 		let window = |filetype: &str| ScrolledWindow {
 			win: Window(1000),
 			filetype: filetype.into(),
@@ -267,8 +282,8 @@ mod tests {
 
 		assert!(slides(&settings, "lua", &none).is_some());
 		assert!(slides(&settings, "cmp_menu", &none).is_none());
-		// The window's `enabled` wins.
-		assert!(slides(&settings, "cmp_menu", &on).is_some());
+		// Excluded filetypes win, over the window's `enabled` too.
+		assert!(slides(&settings, "cmp_menu", &on).is_none());
 		assert!(slides(&settings, "lua", &off).is_none());
 		// Nothing is excluded by default, and nothing slides with sliding off, unless the window says so.
 		assert!(slides(&Settings::default(), "cmp_menu", &none).is_some());

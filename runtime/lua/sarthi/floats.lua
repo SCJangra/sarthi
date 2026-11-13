@@ -9,7 +9,7 @@ local M = {}
 -- What was last sent for each window, by handle
 local sent = {}
 
--- The outline's highlight group in the settings, for windows that don't give their own
+-- The outline's highlight group in the settings, for managed windows that don't give their own
 local highlight = 'FloatBorder'
 
 --- Whether `win` is a floating window
@@ -18,11 +18,13 @@ local function is_float(win)
 end
 
 --- The text color of `win`'s outline's highlight group, if it has one: sarthi only learns the colors of Neovim's UI
---- groups from Neovim
+--- groups from Neovim. Its own group, or the settings' if it's managed, or else the default.
 local function outline_color(win)
   local sarthi = vim.w[win].sarthi
   local own = type(sarthi) == 'table' and type(sarthi.outline) == 'table' and sarthi.outline.highlight
-  return vim.api.nvim_get_hl(0, { name = type(own) == 'string' and own or highlight, link = false }).fg
+  local managed = type(sarthi) == 'table' and sarthi.managed == true
+  local name = type(own) == 'string' and own or managed and highlight or 'FloatBorder'
+  return vim.api.nvim_get_hl(0, { name = name, link = false }).fg
 end
 
 --- What's sent about `win`, if it's a floating or external window
