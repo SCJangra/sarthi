@@ -20,11 +20,17 @@
       rustToolchain = fenixLib.stable.toolchain;
       rustPlatform = pkgs.makeRustPlatform { cargo = rustToolchain; rustc = rustToolchain; };
 
-      # Loaded at runtime by winit and wgpu, not linked
+      # Loaded at runtime by winit and wgpu, not linked: X11's for winit's X11 backend, libGL for wgpu's OpenGL
+      # backend where Vulkan isn't available
       runtimeLibraries = with pkgs; [
         wayland
         libxkbcommon
         vulkan-loader
+        libGL
+        xorg.libX11
+        xorg.libXcursor
+        xorg.libXrandr
+        xorg.libXi
       ];
     in
     {
