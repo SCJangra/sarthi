@@ -9,6 +9,8 @@ use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::event_loop::EventLoopProxy;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
+use winit::platform::wayland::WindowAttributesExtWayland;
+use winit::platform::x11::WindowAttributesExtX11;
 use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
 use editor::{Editor, Pointer, Redraw};
@@ -34,6 +36,9 @@ use crate::place;
 use crate::settings;
 use crate::startup::{self, StartError};
 use crate::windows::{GridSize, WindowConfig};
+
+/// Sarthi's app ID (Wayland) and window class (X11), the name of its desktop file
+const APP_ID: &str = "sarthi";
 
 pub struct App {
 	pub config: WindowConfig,
@@ -154,12 +159,15 @@ impl App {
 	}
 
 	fn window_attributes(config: &WindowConfig) -> WindowAttributes {
-		Window::default_attributes()
+		let attributes = Window::default_attributes()
 			.with_title(config.title.clone())
 			.with_inner_size(LogicalSize::new(f64::from(config.width), f64::from(config.height)))
 			.with_resizable(config.resizable)
 			// So `window.opacity` can make the background see-through: decided here, before the user's config runs
-			.with_transparent(true)
+			.with_transparent(true);
+		// Its app ID on Wayland and its class on X11, which desktops match to `sarthi.desktop` and its icon
+		let attributes = WindowAttributesExtWayland::with_name(attributes, APP_ID, "");
+		WindowAttributesExtX11::with_name(attributes, APP_ID, APP_ID)
 	}
 
 	fn create_window(&mut self, event_loop: &ActiveEventLoop) -> Result<Arc<Window>, Error> {
