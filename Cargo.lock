@@ -2109,6 +2109,7 @@ name = "sarthi"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "flume",
  "rmpv",
  "sarthi-editor",
  "sarthi-renderer",

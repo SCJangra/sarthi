@@ -8,7 +8,7 @@ use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::event_loop::EventLoopProxy;
-use winit::keyboard::ModifiersState;
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
 use editor::{Editor, Pointer, Redraw};
@@ -32,6 +32,7 @@ use crate::input::neovim_keys;
 use crate::mouse::Mouse;
 use crate::place;
 use crate::settings;
+use crate::startup::{self, StartError};
 use crate::windows::{GridSize, WindowConfig};
 
 pub struct App {
@@ -55,7 +56,8 @@ pub struct App {
 	/// The `linespace` value last applied, in logical pixels
 	pub linespace: i64,
 
-	pub nvim: Nvim,
+	/// Neovim, or why it didn't start, which the window shows instead
+	pub nvim: Result<Nvim, StartError>,
 
 	/// Grid size last sent to Neovim, so resizes that don't change it aren't sent again
 	pub ui_size: GridSize,
@@ -113,17 +115,21 @@ impl App {
 		args: &[OsString],
 		proxy: EventLoopProxy<AppEvent>,
 	) -> Result<Self, Error> {
-		let (nvim, messages) = Nvim::start(nvim, args)?;
-		let proxy = proxy.clone();
+		let env = startup::login_environment();
+		let nvim = startup::start(nvim, args, env.as_deref()).map(|(nvim, messages)| {
+			thread::spawn(move || {
+				for message in messages.iter() {
+					let _ = proxy.send_event(AppEvent::Nvim(message));
+				}
 
-		thread::spawn(move || {
-			for message in messages.iter() {
-				let _ = proxy.send_event(AppEvent::Nvim(message));
-			}
-
-			// The message stream only ends once the connection to Neovim is closed.
-			let _ = proxy.send_event(AppEvent::NvimExited);
+				// The message stream only ends once the connection to Neovim is closed.
+				let _ = proxy.send_event(AppEvent::NvimExited);
+			});
+			nvim
 		});
+		if let Err(error) = &nvim {
+			eprintln!("sarthi: {error}");
+		}
 
 		Ok(Self {
 			font_size: config.font_size,
@@ -263,22 +269,31 @@ impl App {
 
 	fn attach_ui(&mut self, window: &Window) -> Result<(), Error> {
 		let size = self.grid_size(window);
+		let nvim = match &self.nvim {
+			Ok(nvim) => nvim,
+			// No Neovim to attach to: the window shows why.
+			Err(error) => {
+				startup::show(&mut self.editor, error, size.width, size.height);
+				self.ui_size = size;
+				return Ok(());
+			},
+		};
 
 		// With multigrid, Neovim draws each window to its own grid, and sarthi places and stacks them.
 		let options = UiOptions::all();
 		let params = UiAttachParams { width: size.width, height: size.height, options };
 
 		// Names sarthi's channel, so plugins can tell it's sarthi.
-		self.nvim.set_client_info(client_info())?;
+		nvim.set_client_info(client_info())?;
 
 		// All before attaching, so before the user's config, which Neovim sources once a UI attached. A config can then
 		// check for sarthi (`if vim.g.sarthi then … end`) and use `require("sarthi")`.
-		self.nvim.set_var("sarthi", true)?;
-		let channel = self.nvim.channel()?;
-		if let Err(error) = self.nvim.exec_lua::<()>(STARTUP, (channel, MODULES, HELP)) {
+		nvim.set_var("sarthi", true)?;
+		let channel = nvim.channel()?;
+		if let Err(error) = nvim.exec_lua::<()>(STARTUP, (channel, MODULES, HELP)) {
 			tracing::warn!("Couldn't set up sarthi's Lua: {error}");
 		}
-		self.nvim.ui_attach(params)?;
+		nvim.ui_attach(params)?;
 		self.ui_size = size;
 		Ok(())
 	}
@@ -290,8 +305,11 @@ impl App {
 		}
 
 		let params = UiTryResizeParams { width: size.width, height: size.height };
-
-		self.nvim.ui_try_resize(params)?;
+		match &self.nvim {
+			Ok(nvim) => nvim.ui_try_resize(params)?,
+			// Why it didn't start, on the new screen
+			Err(error) => startup::show(&mut self.editor, error, size.width, size.height),
+		}
 		self.ui_size = size;
 		Ok(())
 	}
@@ -356,7 +374,9 @@ impl App {
 			Err(mistake) => {
 				if self.window_mistakes.get(&win) != Some(&mistake) {
 					let message = format!("sarthi: w:sarthi of window {}: {mistake}", win.0);
-					if let Err(error) = self.nvim.show_error(&message) {
+					if let Ok(nvim) = &self.nvim
+						&& let Err(error) = nvim.show_error(&message)
+					{
 						tracing::warn!("Couldn't report a mistake in w:sarthi to Neovim: {error}");
 					}
 					self.window_mistakes.insert(win, mistake);
@@ -418,7 +438,9 @@ impl App {
 		match applied {
 			Ok(pixels) => self.font_size = pixels.unwrap_or(self.config.font_size),
 			Err(error) => {
-				if let Err(error) = self.nvim.show_error(&format!("guifont: {error}")) {
+				if let Ok(nvim) = &self.nvim
+					&& let Err(error) = nvim.show_error(&format!("guifont: {error}"))
+				{
 					tracing::warn!("Couldn't report a guifont error to Neovim: {error}");
 				}
 			},
@@ -542,7 +564,9 @@ impl App {
 	/// Sends mouse events to Neovim. Errors mean the connection closed, after which the app exits anyway.
 	fn send_mouse(&self, events: impl IntoIterator<Item = InputMouseParams>) {
 		for event in events {
-			if let Err(error) = self.nvim.input_mouse(event) {
+			if let Ok(nvim) = &self.nvim
+				&& let Err(error) = nvim.input_mouse(event)
+			{
 				tracing::warn!("Couldn't send a mouse event to Neovim: {error}");
 			}
 		}
@@ -556,7 +580,9 @@ impl App {
 		let Some(keys) = neovim_keys(&event.logical_key, event.text.as_deref(), event.location, self.modifiers) else {
 			return;
 		};
-		if let Err(error) = self.nvim.input(&keys) {
+		if let Ok(nvim) = &self.nvim
+			&& let Err(error) = nvim.input(&keys)
+		{
 			tracing::warn!("Couldn't send {keys} to Neovim: {error}");
 		}
 	}
@@ -603,9 +629,13 @@ impl ApplicationHandler<AppEvent> for App {
 
 		match event {
 			// Neovim quits, asking about unsaved changes first, and sarthi exits when it does (`AppEvent::NvimExited`).
+			// Without Neovim, it closes at once.
 			WindowEvent::CloseRequested => {
-				if let Err(error) = self.nvim.ask_to_quit() {
+				let asked = self.nvim.as_ref().map(Nvim::ask_to_quit);
+				if let Ok(Err(error)) = &asked {
 					tracing::warn!("Couldn't ask Neovim to quit: {error}");
+				}
+				if !matches!(asked, Ok(Ok(()))) {
 					self.window = None;
 					event_loop.exit();
 				}
@@ -646,12 +676,24 @@ impl ApplicationHandler<AppEvent> for App {
 				self.send_mouse(events);
 			},
 			// Synthetic presses are keys already held when the window gained focus.
+			// Without Neovim, Enter, Esc and q close the window.
+			WindowEvent::KeyboardInput { event, is_synthetic: false, .. } if self.nvim.is_err() => {
+				let closes = matches!(
+					event.logical_key.as_ref(),
+					Key::Named(NamedKey::Enter | NamedKey::Escape) | Key::Character("q")
+				);
+				if event.state == ElementState::Pressed && closes {
+					event_loop.exit();
+				}
+			},
 			WindowEvent::KeyboardInput { event, is_synthetic: false, .. } => self.send_key(&event),
 			WindowEvent::Focused(focused) => {
 				// The cursor shows whether keys go here.
 				self.editor.set_focused(focused);
 				self.refresh();
-				if let Err(error) = self.nvim.ui_set_focus(focused) {
+				if let Ok(nvim) = &self.nvim
+					&& let Err(error) = nvim.ui_set_focus(focused)
+				{
 					tracing::warn!("Couldn't tell Neovim about focus: {error}");
 				}
 			},

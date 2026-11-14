@@ -16,7 +16,7 @@ pub struct HlAttrDefineEvent {
 	pub info: Vec<HlAttrInfo>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct HlAttrs {
 	/// Foreground color.

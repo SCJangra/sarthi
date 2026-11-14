@@ -8,6 +8,7 @@ mod input;
 mod mouse;
 mod place;
 mod settings;
+mod startup;
 mod windows;
 
 use app::{App, AppEvent};
@@ -28,6 +29,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut app = App::new(WindowConfig::default(), &nvim, &args, proxy)?;
 
 	event_loop.run_app(&mut app)?;
+
+	// Neovim didn't start: the window said why, and stderr did too.
+	if app.nvim.is_err() {
+		std::process::exit(1);
+	}
 
 	if let Some(error) = app.error.take() {
 		return Err(Box::new(error));
