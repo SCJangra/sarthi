@@ -80,7 +80,16 @@ impl Nvim {
 
 	/// Shows `message` as an error in Neovim (`vim.notify()` at ERROR level), without waiting for it
 	pub fn show_error(&self, message: &str) -> Result<(), Error> {
-		let code = String::from("vim.notify(..., vim.log.levels.ERROR)");
+		self.show("ERROR", message)
+	}
+
+	/// Shows `message` as a warning in Neovim (`vim.notify()` at WARN level), without waiting for it
+	pub fn show_warning(&self, message: &str) -> Result<(), Error> {
+		self.show("WARN", message)
+	}
+
+	fn show(&self, level: &str, message: &str) -> Result<(), Error> {
+		let code = format!("vim.notify(..., vim.log.levels.{level})");
 		self.rpc.notify::<ExecLua>((code, vec![message.into()])).map_err(Error::Rpc)
 	}
 

@@ -11,6 +11,7 @@ use winit::event_loop::EventLoopProxy;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::platform::x11::WindowAttributesExtX11;
+use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
 use editor::{Editor, Pointer, Redraw};
@@ -101,6 +102,44 @@ pub struct WindowState {
 
 	pub window: Arc<Window>,
 	pub renderer: Renderer,
+
+	/// Settings this display can't show that the user was told about, each told once: `window.opacity`, `window.blur`
+	pub unsupported_told: (bool, bool),
+}
+
+impl WindowState {
+	/// Logs what draws the window and which of its effects work, for bug reports
+	fn log_display(&self) {
+		let backend = match self.window.display_handle().map(|display| display.as_raw()) {
+			Ok(RawDisplayHandle::Wayland(_)) => "Wayland",
+			Ok(RawDisplayHandle::Xlib(_) | RawDisplayHandle::Xcb(_)) => "X11",
+			_ => "another display",
+		};
+		let adapter = self.renderer.adapter();
+		tracing::info!(
+			"{backend}, drawn by {} through {:?} ({}); see-through: {}; blur: {}",
+			adapter.name,
+			adapter.backend,
+			adapter.driver_info,
+			if self.renderer.is_see_through() { "yes" } else { "no" },
+			self.blur.method().unwrap_or("none"),
+		);
+	}
+
+	/// What `settings` ask for that this display can't show, each only the first time
+	fn unsupported(&mut self, settings: &Settings) -> Vec<&'static str> {
+		let mut messages = Vec::new();
+		let (opacity, blur) = &mut self.unsupported_told;
+		if settings.window.opacity < 1.0 && !*opacity && !self.renderer.is_see_through() {
+			messages.push("sarthi: window.opacity: this display can't show see-through windows");
+			*opacity = true;
+		}
+		if settings.window.blur && !*blur && self.blur.method().is_none() {
+			messages.push("sarthi: window.blur: this display (X11) can't blur behind windows");
+			*blur = true;
+		}
+		messages
+	}
 }
 
 #[derive(Debug)]
@@ -178,7 +217,10 @@ impl App {
 			.ok();
 		let mut blur = Blur::new(window.clone());
 		blur.set(self.settings.window.blur);
-		self.window = Some(WindowState { clipboard, blur, window: window.clone(), renderer });
+		let state = WindowState { clipboard, blur, window: window.clone(), renderer, unsupported_told: (false, false) };
+		state.log_display();
+		self.window = Some(state);
+		self.tell_unsupported();
 		self.update_float_styles();
 		self.update_text_size();
 		Ok(window)
@@ -513,6 +555,18 @@ impl App {
 		clipboard.ok_or_else(|| String::from("no clipboard"))
 	}
 
+	/// Warns in Neovim about the settings this display can't show, which would otherwise seem to do nothing
+	fn tell_unsupported(&mut self) {
+		let Some(state) = &mut self.window else { return };
+		for message in state.unsupported(&self.settings) {
+			if let Ok(nvim) = &self.nvim
+				&& let Err(error) = nvim.show_warning(message)
+			{
+				tracing::warn!("Couldn't warn Neovim about a setting: {error}");
+			}
+		}
+	}
+
 	/// Uses `settings` from now on, if their values make sense. Text drawn with other underlines is laid out again.
 	fn apply_settings(&mut self, settings: Settings) -> Result<(), String> {
 		settings.validate()?;
@@ -529,6 +583,7 @@ impl App {
 			state.window.request_redraw();
 		}
 		self.settings = settings;
+		self.tell_unsupported();
 		self.update_float_styles();
 		// The underlines' sizes are the text's.
 		self.update_text_size();

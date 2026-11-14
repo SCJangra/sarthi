@@ -386,11 +386,12 @@ section! {
 	/// The OS window: how see-through its background is, and whether the desktop behind it is blurred
 	WindowSettings {
 		/// How opaque the editor's background is, from 0 to 1. Text, highlighted backgrounds and floating windows
-		/// stay opaque. Needs a compositor that shows windows' transparency.
+		/// stay opaque. Needs a compositor that shows windows' transparency; on X11, a compositing window manager, and
+		/// even then some GPU drivers can't. Sarthi warns when it can't show it.
 		opacity: f32 = 1.0,
 
 		/// Whether the desktop behind a see-through background is blurred. The compositor does it, where it can (e.g.
-		/// KDE Plasma, macOS); elsewhere the background is only see-through.
+		/// KDE Plasma, macOS); elsewhere the background is only see-through. Never on X11, where Sarthi warns about it.
 		blur: bool = false,
 	}
 }

@@ -25,6 +25,7 @@ pub struct Renderer {
 	device: wgpu::Device,
 	queue: wgpu::Queue,
 	config: wgpu::SurfaceConfiguration,
+	adapter: wgpu::AdapterInfo,
 	/// The window's background, `0xRRGGBB` in sRGB, and how opaque it is, from 0 to 1: what the window is cleared to
 	background: u32,
 	opacity: f32,
@@ -149,6 +150,7 @@ impl Renderer {
 			device,
 			queue,
 			config,
+			adapter: adapter.get_info(),
 			background: renderer_config.background,
 			opacity: renderer_config.opacity,
 			quads,
@@ -179,6 +181,17 @@ impl Renderer {
 	/// should show it draw no background of their own (a `blend` of 100).
 	pub fn set_opacity(&mut self, opacity: f32) {
 		self.opacity = opacity.clamp(0.0, 1.0);
+	}
+
+	/// The GPU and graphics API drawing the window
+	pub fn adapter(&self) -> &wgpu::AdapterInfo {
+		&self.adapter
+	}
+
+	/// Whether the window can show what's behind it: only where the surface takes premultiplied alpha; elsewhere
+	/// `set_opacity` changes nothing visible
+	pub fn is_see_through(&self) -> bool {
+		self.config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied
 	}
 
 	/// The color the window is cleared to: the background at its opacity, premultiplied like everything drawn

@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use winit::window::Window;
 
 /// Blur behind a window: through `ext-background-effect` where the compositor offers it, otherwise winit's `set_blur`
@@ -24,6 +25,19 @@ impl Blur {
 			#[cfg(all(unix, not(target_os = "macos")))]
 			effect,
 			window,
+		}
+	}
+
+	/// How the window is blurred, or `None` where it can't be: X11, which winit can't blur on
+	pub fn method(&self) -> Option<&'static str> {
+		#[cfg(all(unix, not(target_os = "macos")))]
+		if self.effect.is_some() {
+			return Some("ext-background-effect");
+		}
+		match self.window.display_handle().map(|display| display.as_raw()) {
+			Ok(RawDisplayHandle::Wayland(_)) => Some("KDE's blur protocol, if the compositor offers it"),
+			Ok(RawDisplayHandle::Xlib(_) | RawDisplayHandle::Xcb(_)) => None,
+			_ => Some("winit"),
 		}
 	}
 
