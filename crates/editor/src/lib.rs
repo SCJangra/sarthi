@@ -5,6 +5,7 @@ pub mod cursor;
 pub mod external;
 pub mod grid;
 pub mod highlight;
+pub mod preedit;
 
 use std::collections::HashMap;
 
@@ -19,6 +20,7 @@ use crate::external::at_cursor;
 pub use crate::external::{Anchor, Place, Relative};
 use crate::grid::Grid;
 use crate::highlight::HighlightState;
+use crate::preedit::{Preedit, preedit_layer};
 
 /// Neovim's UI state, kept up to date from its redraw events (`:help ui-events`)
 #[derive(Debug)]
@@ -84,6 +86,9 @@ pub struct Editor {
 	/// The fonts of external windows that have their own, and the size of their cells, by window (see
 	/// [`Editor::set_external_font`])
 	external_fonts: HashMap<Window, (FontId, CellSize)>,
+
+	/// The text an input method is composing, shown at the cursor
+	preedit: Option<Preedit>,
 
 	/// Whether anything changed since the last `flush`, so it's drawn on the next one
 	stale: bool,
@@ -232,6 +237,7 @@ impl Editor {
 			places: HashMap::new(),
 			command_rows: 0,
 			external_fonts: HashMap::new(),
+			preedit: None,
 			stale: false,
 		}
 	}
@@ -280,6 +286,19 @@ impl Editor {
 	/// without waiting for Neovim's next redraw. Call it between Neovim's redraws, as sarthi's Lua and settings arrive.
 	pub fn refresh(&mut self) -> Option<Redraw> {
 		self.flush()
+	}
+
+	/// Shows `preedit`, the text an input method is composing, at the cursor from the next redraw on; `None` once it's
+	/// committed or abandoned
+	pub fn set_preedit(&mut self, preedit: Option<Preedit>) {
+		let preedit = preedit.filter(|preedit| !preedit.text.is_empty());
+		self.stale |= self.preedit != preedit;
+		self.preedit = preedit;
+	}
+
+	/// Whether an input method is composing text, whose keys are its own
+	pub fn is_composing(&self) -> bool {
+		self.preedit.is_some()
 	}
 
 	/// Physical pixels in a logical one, which the float styles are drawn in
@@ -832,6 +851,11 @@ impl Editor {
 				Placement::Hidden => (),
 			}
 		}
+		if let Some(preedit) = &self.preedit
+			&& let Some(layer) = preedit_layer(&mut layers, preedit)
+		{
+			layers.push(layer);
+		}
 		layers
 	}
 
@@ -1102,7 +1126,7 @@ mod tests {
 	};
 	use serde::de::IgnoredAny;
 
-	use super::{Anchor, Editor, FloatStyle, GridPosition, OutlineStyle, Place, Pointer, Redraw, Relative};
+	use super::{Anchor, Editor, FloatStyle, GridPosition, OutlineStyle, Place, Pointer, Preedit, Redraw, Relative};
 
 	const FG: u32 = 0xC7C7C7;
 	const BG: u32 = 0x1C1C1C;
@@ -1189,6 +1213,26 @@ mod tests {
 
 		// Moving the cursor is a change to draw.
 		assert!(editor.apply(vec![goto(1, 0, 0), RedrawNotification::Flush]).is_some());
+	}
+
+	#[test]
+	fn an_input_methods_text_is_drawn_over_the_cursor_until_committed() {
+		let mut editor = Editor::new();
+		editor.apply(vec![colors(), resize(1, 4, 1), line(1, 0, "abcd"), goto(1, 0, 1), RedrawNotification::Flush]);
+
+		editor.set_preedit(Some(Preedit { text: String::from("xy"), caret: None }));
+		let redraw = editor.refresh().unwrap();
+		let [Layer::Cells(grid), Layer::Cells(preedit)] = redraw.layers.as_slice() else {
+			panic!("expected two layers")
+		};
+		assert_eq!((grid.cursor, preedit.x, preedit.width), (None, grid.cell.width, 2));
+
+		// The same text again changes nothing; none, once committed, leaves the grid as it was.
+		editor.set_preedit(Some(Preedit { text: String::from("xy"), caret: None }));
+		assert_eq!(editor.refresh(), None);
+		editor.set_preedit(None);
+		let redraw = editor.refresh().unwrap();
+		assert_eq!(redraw.layers.len(), 1);
 	}
 
 	fn win_pos(grid: u32, row: u32, col: u32) -> RedrawNotification {

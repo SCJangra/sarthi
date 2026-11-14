@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::thread;
 
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
-use winit::event::{ElementState, KeyEvent, WindowEvent};
+use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
+use winit::event::{ElementState, Ime, KeyEvent, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::event_loop::EventLoopProxy;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
@@ -14,6 +14,7 @@ use winit::platform::x11::WindowAttributesExtX11;
 use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
+use editor::preedit::{Preedit, cursor_rect};
 use editor::{Editor, Pointer, Redraw};
 use renderer::{CellSize, FontChoice, FontId, Fonts, Frame, Renderer, RendererConfig, RendererError, TextSize};
 use rpc::client::{IncomingRequest, Message, Nvim};
@@ -31,7 +32,7 @@ use crate::blur::Blur;
 use crate::clipboard::Clipboard;
 use crate::error::Error;
 use crate::guifont::{self, FontSizes, GuiFont};
-use crate::input::neovim_keys;
+use crate::input::{committed_text, neovim_keys};
 use crate::mouse::Mouse;
 use crate::place;
 use crate::settings;
@@ -105,6 +106,10 @@ pub struct WindowState {
 
 	/// Settings this display can't show that the user was told about, each told once: `window.opacity`, `window.blur`
 	pub unsupported_told: (bool, bool),
+
+	/// Where the input method was last told the cursor is, so it puts its candidates by it: left, top, width, height in
+	/// pixels
+	pub ime_area: Option<[u32; 4]>,
 }
 
 impl WindowState {
@@ -124,6 +129,18 @@ impl WindowState {
 			if self.renderer.is_see_through() { "yes" } else { "no" },
 			self.blur.method().unwrap_or("none"),
 		);
+	}
+
+	/// Tells the input method where the cursor is, its `area` in pixels, so its candidates go by it; where it isn't drawn, they
+	/// stay where they were
+	fn place_ime(&mut self, area: Option<[u32; 4]>) {
+		if let Some(area @ [x, y, width, height]) = area
+			&& self.ime_area != Some(area)
+		{
+			self.window
+				.set_ime_cursor_area(PhysicalPosition::new(x, y), PhysicalSize::new(width, height));
+			self.ime_area = Some(area);
+		}
 	}
 
 	/// What `settings` ask for that this display can't show, each only the first time
@@ -217,7 +234,15 @@ impl App {
 			.ok();
 		let mut blur = Blur::new(window.clone());
 		blur.set(self.settings.window.blur);
-		let state = WindowState { clipboard, blur, window: window.clone(), renderer, unsupported_told: (false, false) };
+		window.set_ime_allowed(self.settings.ime.enabled);
+		let state = WindowState {
+			clipboard,
+			blur,
+			window: window.clone(),
+			renderer,
+			unsupported_told: (false, false),
+			ime_area: None,
+		};
 		state.log_display();
 		self.window = Some(state);
 		self.tell_unsupported();
@@ -469,6 +494,7 @@ impl App {
 	fn show(&mut self, redraw: Redraw) {
 		let Some(state) = &mut self.window else { return };
 		state.renderer.set_clear_color(redraw.background);
+		state.place_ime(cursor_rect(&redraw.layers));
 		state.renderer.set_layers(redraw.layers);
 		state.window.request_redraw();
 	}
@@ -578,6 +604,7 @@ impl App {
 			state.renderer.set_scroll_motion(settings::scroll_motion(&settings));
 			state.renderer.set_cursor_motion(settings::cursor_motion(&settings));
 			state.renderer.set_opacity(settings.window.opacity);
+			state.window.set_ime_allowed(settings.ime.enabled);
 			// The compositor blurs the desktop behind the window, where it can.
 			state.blur.set(settings.window.blur);
 			state.window.request_redraw();
@@ -648,6 +675,37 @@ impl App {
 		{
 			tracing::warn!("Couldn't send {keys} to Neovim: {error}");
 		}
+	}
+
+	/// Shows the text the input method is composing at the cursor, and types what it commits
+	fn input_method(&mut self, ime: Ime) {
+		match ime {
+			Ime::Preedit(text, caret) => {
+				// X11 gives a caret, Wayland a range it highlights, whose end is where typing goes on
+				let caret = caret.map(|(_, end)| end);
+				self.editor.set_preedit(Some(Preedit { text, caret }));
+			},
+			Ime::Commit(text) => {
+				self.editor.set_preedit(None);
+				let keys = committed_text(&text);
+				if let Ok(nvim) = &self.nvim
+					&& let Err(error) = nvim.input(&keys)
+				{
+					tracing::warn!("Couldn't send {keys} to Neovim: {error}");
+				}
+			},
+			Ime::Enabled => {
+				self.editor.set_preedit(None);
+				// On Wayland, the input method only learns the area once enabled, e.g. each time the window gets the
+				// focus, and the cursor may not have moved since.
+				if let Some(state) = &mut self.window {
+					state.ime_area = None;
+					state.place_ime(cursor_rect(state.renderer.layers()));
+				}
+			},
+			Ime::Disabled => self.editor.set_preedit(None),
+		}
+		self.refresh();
 	}
 
 	/// Records `error` and exits. Only the first error is kept, so a later failure can't hide the
@@ -749,7 +807,11 @@ impl ApplicationHandler<AppEvent> for App {
 					event_loop.exit();
 				}
 			},
+			// While an input method composes text, keys like Backspace and Enter edit it, and aren't Neovim's. X11 holds
+			// them back itself; Wayland leaves it to the compositor and the input method.
+			WindowEvent::KeyboardInput { is_synthetic: false, .. } if self.editor.is_composing() => (),
 			WindowEvent::KeyboardInput { event, is_synthetic: false, .. } => self.send_key(&event),
+			WindowEvent::Ime(ime) => self.input_method(ime),
 			WindowEvent::Focused(focused) => {
 				// The cursor shows whether keys go here.
 				self.editor.set_focused(focused);

@@ -30,6 +30,8 @@ wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wgpu = "30"
 glyphon = "0.12"
+# The cells the input method's text takes (`editor::preedit`); the version the fonts already use
+unicode-width = "0.1"
 rustc-hash = "2"
 bytemuck = { version = "1", features = ["derive"] }
 # Path rasterizer swash uses; draws the characters sarthi shapes itself (box drawing, blocks, powerline)

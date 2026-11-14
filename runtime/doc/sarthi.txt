@@ -306,6 +306,20 @@ window.blur                                               *sarthi-window.blur*
     background is only see-through. Never on X11, where Sarthi warns about it.
 
 ------------------------------------------------------------------------------
+IME                                                               *sarthi-ime*
+
+Typing through an input method (IME), e.g. fcitx5 or IBus, for languages a
+keyboard can't type directly: the text it composes shows underlined at the
+cursor until it's committed
+
+ime.enabled                                               *sarthi-ime.enabled*
+    Type: boolean
+    Default: `true`
+    Whether text can be typed through an input method. Turned off, keys go to
+    Neovim as typed: e.g. from an autocommand while in Normal mode, so the
+    input method doesn't take its keys.
+
+------------------------------------------------------------------------------
 ANIMATIONS                                                  *sarthi-animation*
 
 An animation is a table with its `curve` and that curve's values, in

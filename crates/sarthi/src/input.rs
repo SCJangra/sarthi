@@ -1,5 +1,10 @@
 use winit::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 
+/// Text an input method committed, for `nvim_input`: typed as it is, but for `<`, which would start a key's name
+pub fn committed_text(text: &str) -> String {
+	text.replace('<', "<lt>")
+}
+
 /// Translates a key press into Neovim's key notation (`:help key-notation`) for `nvim_input`, or `None` for keys
 /// without one, e.g. a modifier on its own, or a dead key, whose character arrives with the next key press.
 ///
@@ -150,7 +155,7 @@ fn function_key(key: &NamedKey) -> Option<&'static str> {
 mod tests {
 	use winit::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 
-	use super::neovim_keys;
+	use super::{committed_text, neovim_keys};
 
 	const NONE: ModifiersState = ModifiersState::empty();
 	const SHIFT: ModifiersState = ModifiersState::SHIFT;
@@ -259,5 +264,11 @@ mod tests {
 		assert_eq!(neovim_keys(&Key::Dead(Some('´')), None, KeyLocation::Standard, NONE), None);
 		assert_eq!(named(NamedKey::CapsLock, None, NONE), None);
 		assert_eq!(text("\u{1}", NONE), None);
+	}
+
+	#[test]
+	fn committed_text_is_typed_as_it_is() {
+		assert_eq!(committed_text("日本語"), "日本語");
+		assert_eq!(committed_text("<C-a>"), "<lt>C-a>");
 	}
 }

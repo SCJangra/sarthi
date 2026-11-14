@@ -7,6 +7,7 @@ edition = { workspace = true }
 rpc = { workspace = true }
 renderer = { workspace = true }
 tracing = { workspace = true }
+unicode-width = { workspace = true }
 
 [dev-dependencies]
 serde = { workspace = true }

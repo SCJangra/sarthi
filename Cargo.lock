@@ -2149,6 +2149,7 @@ dependencies = [
  "sarthi-rpc",
  "serde",
  "tracing",
+ "unicode-width",
 ]
 
 [[package]]

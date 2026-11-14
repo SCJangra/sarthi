@@ -148,6 +148,7 @@ settings! {
 	underline: UnderlineSettings,
 	touchpad: TouchpadSettings,
 	window: WindowSettings,
+	ime: ImeSettings,
 }
 
 section! {
@@ -379,6 +380,16 @@ section! {
 	TouchpadSettings {
 		/// Lines scrolled per row of finger movement: 1 follows the fingers, more scrolls faster
 		scroll_speed: f64 = 3.0,
+	}
+}
+
+section! {
+	/// Typing through an input method (IME), e.g. fcitx5 or IBus, for languages a keyboard can't type directly: the
+	/// text it composes shows underlined at the cursor until it's committed
+	ImeSettings {
+		/// Whether text can be typed through an input method. Turned off, keys go to Neovim as typed: e.g. from an
+		/// autocommand while in Normal mode, so the input method doesn't take its keys.
+		enabled: bool = true,
 	}
 }
 
