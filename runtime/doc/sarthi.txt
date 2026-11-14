@@ -105,7 +105,7 @@ cursor.short_animation                         *sarthi-cursor.short_animation*
 
 cursor.trail                                             *sarthi-cursor.trail*
     Type: number
-    Default: `0.7`
+    Default: `1`
     How much the trailing corners lag behind the leading ones: from 0, where
     the cursor moves as it is, to 1, where its leading edge is there at once
 
@@ -135,18 +135,18 @@ shadow.enabled                                         *sarthi-shadow.enabled*
 
 shadow.blur                                               *sarthi-shadow.blur*
     Type: number
-    Default: `16`
+    Default: `8`
     How far the edge fades out, like CSS's blur radius
 
 shadow.offset                                           *sarthi-shadow.offset*
     Type: { number, number }
-    Default: `{ 0, 4 }`
+    Default: `{ 0, 2 }`
     How far the shadow is moved from the window: right and down, or left and
     up if negative
 
 shadow.opacity                                         *sarthi-shadow.opacity*
     Type: number
-    Default: `0.3`
+    Default: `1`
     From 0, invisible, to 1, black where fully shadowed
 
 shadow.exclude_filetypes                     *sarthi-shadow.exclude_filetypes*

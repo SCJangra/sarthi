@@ -141,13 +141,13 @@ mod tests {
 		// Every float casts the settings' shadow.
 		let style = super::float_style(&settings, &float("lua"), &none);
 		let cast = style.shadow.unwrap();
-		assert_eq!((cast.blur, cast.offset, cast.opacity), (16.0, [0.0, 4.0], 0.3));
+		assert_eq!((cast.blur, cast.offset, cast.opacity), (8.0, [0.0, 2.0], 1.0));
 		assert_eq!(super::default_float_style(&settings).shadow, Some(cast));
 
 		// The window's own values, each in place of the setting's
 		let own = shadow(ShadowOptions { opacity: Some(0.6), offset: Some([1.0, 2.0]), ..Default::default() });
 		let cast = super::float_style(&settings, &float("lua"), &own).shadow.unwrap();
-		assert_eq!((cast.blur, cast.offset, cast.opacity), (16.0, [1.0, 2.0], 0.6));
+		assert_eq!((cast.blur, cast.offset, cast.opacity), (8.0, [1.0, 2.0], 0.6));
 
 		// Excluded filetypes win, over the window's `enabled` too.
 		settings.shadow.exclude_filetypes = Filetypes::new(["satellite", "cmp_*"]).unwrap();

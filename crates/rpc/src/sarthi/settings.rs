@@ -271,7 +271,7 @@ section! {
 
 		/// How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1,
 		/// where its leading edge is there at once
-		trail: f32 = 0.7,
+		trail: f32 = 1.0,
 
 		/// Whether moves in insert and replace mode animate, e.g. while typing
 		animate_insert_mode: bool = true,
@@ -288,13 +288,13 @@ section! {
 		enabled: bool = true,
 
 		/// How far the edge fades out, like CSS's blur radius
-		blur: f32 = 16.0,
+		blur: f32 = 8.0,
 
 		/// How far the shadow is moved from the window: right and down, or left and up if negative
-		offset: [f32; 2] = [0.0, 4.0],
+		offset: [f32; 2] = [0.0, 2.0],
 
 		/// From 0, invisible, to 1, black where fully shadowed
-		opacity: f32 = 0.3,
+		opacity: f32 = 1.0,
 
 		/// Windows showing these filetypes have no shadow, e.g. scrollbars, whatever their `w:sarthi` gives. Glob
 		/// patterns, e.g. `cmp_*`.
@@ -729,7 +729,7 @@ mod tests {
 		let settings = shadow(vec![("offset", offset), ("enabled", Value::from(false))])
 			.unwrap()
 			.shadow;
-		assert_eq!((settings.offset, settings.enabled, settings.blur), ([2.0, 6.0], false, 16.0));
+		assert_eq!((settings.offset, settings.enabled, settings.blur), ([2.0, 6.0], false, 8.0));
 
 		let error = shadow(vec![("opacity", Value::from(1.5))]).unwrap_err();
 		assert_eq!(error, "shadow.opacity must be from 0 to 1");
@@ -801,7 +801,7 @@ mod tests {
 		let options: WindowOptions =
 			rmpv::ext::from_value(table(vec![("shadow", shadow), ("scroll", scroll)])).unwrap();
 		let settings = Settings::default().for_window(&options);
-		assert_eq!((settings.shadow.opacity, settings.shadow.offset, settings.shadow.blur), (0.6, [1.0, 2.0], 16.0));
+		assert_eq!((settings.shadow.opacity, settings.shadow.offset, settings.shadow.blur), (0.6, [1.0, 2.0], 8.0));
 		assert!(settings.shadow.enabled && !settings.scroll.enabled);
 		assert_eq!(rmpv::ext::from_value::<WindowOptions>(table(vec![])).unwrap(), WindowOptions::default());
 
