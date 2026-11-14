@@ -40,6 +40,11 @@
         postFixup = ''
           patchelf --add-rpath ${pkgs.lib.makeLibraryPath runtimeLibraries} $out/bin/sarthi
         '';
+
+        # The launcher entry, for desktops to list Sarthi and open files with it
+        postInstall = ''
+          install -Dm644 extra/linux/sarthi.desktop -t $out/share/applications
+        '';
       };
 
       devShells.default = pkgs.mkShell {
