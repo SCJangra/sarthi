@@ -38,6 +38,8 @@ zeno = "0.3"
 cosmic-text = { version = "0.19", features = ["shape-run-cache"] }
 smol = "2"
 tracing = "0.1"
+# sarthi's command line
+clap = { version = "4", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Clipboard access through the window's display: on Wayland it uses the window's connection, which works on every
 # compositor

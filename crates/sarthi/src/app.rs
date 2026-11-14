@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::{OsStr, OsString};
 use std::sync::Arc;
 use std::thread;
 
@@ -105,8 +106,14 @@ pub enum AppEvent {
 }
 
 impl App {
-	pub fn new(config: WindowConfig, proxy: EventLoopProxy<AppEvent>) -> Result<Self, Error> {
-		let (nvim, messages) = Nvim::start()?;
+	/// Runs Neovim, `nvim`, with `args` from the command line, e.g. files to edit
+	pub fn new(
+		config: WindowConfig,
+		nvim: &OsStr,
+		args: &[OsString],
+		proxy: EventLoopProxy<AppEvent>,
+	) -> Result<Self, Error> {
+		let (nvim, messages) = Nvim::start(nvim, args)?;
 		let proxy = proxy.clone();
 
 		thread::spawn(move || {

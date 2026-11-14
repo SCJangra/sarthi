@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::time::{Duration, Instant};
 use std::{process, thread};
 
@@ -24,15 +25,18 @@ pub struct Nvim {
 }
 
 impl Nvim {
-	/// Starts Neovim, embedded. Returns it and what it sends unasked (notifications, and requests from sarthi's Lua),
-	/// which ends once Neovim exits.
-	pub fn start() -> Result<(Self, Receiver<Message>), Error> {
-		Self::spawn(&["--embed"])
+	/// Starts Neovim, `program`, embedded, with `args` too, e.g. files to edit. Returns it and what it sends unasked
+	/// (notifications, and requests from sarthi's Lua), which ends once Neovim exits.
+	pub fn start(program: &OsStr, args: &[impl AsRef<OsStr>]) -> Result<(Self, Receiver<Message>), Error> {
+		Self::spawn(program, [OsStr::new("--embed")].into_iter().chain(args.iter().map(AsRef::as_ref)))
 	}
 
-	/// Starts Neovim with `args`, which must include `--embed`
-	fn spawn(args: &[&str]) -> Result<(Self, Receiver<Message>), Error> {
-		let mut nvim = process::Command::new("nvim")
+	/// Starts Neovim, `program`, with `args`, which must include `--embed`
+	fn spawn<'a>(
+		program: &OsStr,
+		args: impl IntoIterator<Item = &'a OsStr>,
+	) -> Result<(Self, Receiver<Message>), Error> {
+		let mut nvim = process::Command::new(program)
 			.args(args)
 			.stdin(process::Stdio::piped())
 			.stdout(process::Stdio::piped())
@@ -142,12 +146,14 @@ mod tests {
 	use std::path::Path;
 	use std::time::Instant;
 
+	use std::ffi::OsStr;
+
 	use super::{EXIT_TIMEOUT, Nvim};
 
 	#[test]
 	fn drop_waits_for_neovim_to_exit() {
 		// Isolated from the user's config and ShaDa.
-		let (nvim, _messages) = Nvim::spawn(&["--embed", "--clean", "-i", "NONE", "-n"]).unwrap();
+		let (nvim, _messages) = Nvim::start(OsStr::new("nvim"), &["--clean", "-i", "NONE", "-n"]).unwrap();
 		let pid = nvim.process.0.id();
 
 		let start = Instant::now();
@@ -160,7 +166,7 @@ mod tests {
 
 	#[test]
 	fn show_error() {
-		let (nvim, _messages) = Nvim::spawn(&["--embed", "--clean", "-i", "NONE", "-n"]).unwrap();
+		let (nvim, _messages) = Nvim::start(OsStr::new("nvim"), &["--clean", "-i", "NONE", "-n"]).unwrap();
 		nvim.show_error("guifont: font not found: X").unwrap();
 		// Neovim handles the notification first, then this call.
 		let error: String = nvim.exec_lua("return vim.v.errmsg", ()).unwrap();
@@ -172,7 +178,7 @@ mod tests {
 
 	#[test]
 	fn channel_and_set_var() {
-		let (nvim, _messages) = Nvim::spawn(&["--embed", "--clean", "-i", "NONE", "-n"]).unwrap();
+		let (nvim, _messages) = Nvim::start(OsStr::new("nvim"), &["--clean", "-i", "NONE", "-n"]).unwrap();
 		// The channel Neovim says we're on is the one Lua sees for us.
 		let channel = nvim.channel().unwrap();
 		let listed: u64 = nvim
@@ -195,7 +201,7 @@ mod tests {
 		use crate::{UiAttachParams, UiOptions};
 
 		// With a UI, as sarthi is: without one, Neovim answers its own question.
-		let (mut nvim, _messages) = Nvim::spawn(&["--embed", "--clean", "-i", "NONE", "-n"]).unwrap();
+		let (mut nvim, _messages) = Nvim::start(OsStr::new("nvim"), &["--clean", "-i", "NONE", "-n"]).unwrap();
 		let options = UiOptions { ext_linegrid: true, ..UiOptions::default() };
 		nvim.ui_attach(UiAttachParams { width: 40, height: 10, options }).unwrap();
 		nvim.exec_lua::<()>("vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'unsaved' })", ())

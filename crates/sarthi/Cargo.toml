@@ -4,6 +4,7 @@ version = { workspace = true }
 edition = { workspace = true }
 
 [dependencies]
+clap = { workspace = true }
 editor = { workspace = true }
 renderer = { workspace = true }
 rpc = { workspace = true }
