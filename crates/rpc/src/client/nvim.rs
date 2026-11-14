@@ -99,6 +99,12 @@ impl Nvim {
 		self.rpc.notify::<Input>([keys.to_owned()]).map_err(Error::Rpc)
 	}
 
+	/// Asks Neovim to quit as `:confirm qa` does, like gVim's close button: it asks about unsaved changes first, and
+	/// may not quit. Typed as keys, so Neovim takes it in any mode, without waiting for it.
+	pub fn ask_to_quit(&self) -> Result<(), Error> {
+		self.input("<Cmd>confirm qa<CR>")
+	}
+
 	/// Sends a mouse event, without waiting for Neovim to process it
 	pub fn input_mouse(&self, params: InputMouseParams) -> Result<(), Error> {
 		self.rpc.notify::<InputMouse>(params).map_err(Error::Rpc)
@@ -180,5 +186,36 @@ mod tests {
 		nvim.set_var("sarthi_test", (true, 3)).unwrap();
 		let value: (bool, u32) = nvim.exec_lua("return vim.g.sarthi_test", ()).unwrap();
 		assert_eq!(value, (true, 3));
+	}
+
+	#[test]
+	fn asking_to_quit_asks_about_unsaved_changes() {
+		use std::{thread, time::Duration};
+
+		use crate::{UiAttachParams, UiOptions};
+
+		// With a UI, as sarthi is: without one, Neovim answers its own question.
+		let (mut nvim, _messages) = Nvim::spawn(&["--embed", "--clean", "-i", "NONE", "-n"]).unwrap();
+		let options = UiOptions { ext_linegrid: true, ..UiOptions::default() };
+		nvim.ui_attach(UiAttachParams { width: 40, height: 10, options }).unwrap();
+		nvim.exec_lua::<()>("vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'unsaved' })", ())
+			.unwrap();
+
+		// It asks instead of quitting, and stays after "Cancel".
+		nvim.ask_to_quit().unwrap();
+		thread::sleep(Duration::from_millis(300));
+		assert!(nvim.process.0.try_wait().unwrap().is_none(), "Neovim quit with unsaved changes");
+		nvim.input("c").unwrap();
+		thread::sleep(Duration::from_millis(100));
+		assert!(nvim.process.0.try_wait().unwrap().is_none());
+
+		// Nothing unsaved: it quits.
+		nvim.exec_lua::<()>("vim.bo.modified = false", ()).unwrap();
+		nvim.ask_to_quit().unwrap();
+		let start = Instant::now();
+		while nvim.process.0.try_wait().unwrap().is_none() {
+			assert!(start.elapsed() < Duration::from_secs(2), "Neovim didn't quit");
+			thread::sleep(Duration::from_millis(20));
+		}
 	}
 }

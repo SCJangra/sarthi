@@ -595,9 +595,13 @@ impl ApplicationHandler<AppEvent> for App {
 		}
 
 		match event {
+			// Neovim quits, asking about unsaved changes first, and sarthi exits when it does (`AppEvent::NvimExited`).
 			WindowEvent::CloseRequested => {
-				self.window = None;
-				event_loop.exit();
+				if let Err(error) = self.nvim.ask_to_quit() {
+					tracing::warn!("Couldn't ask Neovim to quit: {error}");
+					self.window = None;
+					event_loop.exit();
+				}
 			},
 			WindowEvent::Resized(_) => {
 				self.resize_renderer();
