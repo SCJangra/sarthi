@@ -294,7 +294,7 @@ pub(crate) fn cell_backgrounds(quads: &mut Vec<Quad>, layer: &Layer, srgb_surfac
 	let (width, height) = (layer.cell.width as f32, layer.cell.height as f32);
 	let (left, top) = (layer.x as f32, layer.y as f32);
 
-	for (row, cells) in (0..).zip(layer.cells.chunks_exact((layer.width as usize).max(1))) {
+	for (row, cells) in (0..).zip(layer.rows()) {
 		for (col, len, color, blend) in background_runs(cells) {
 			let rect = [left + col as f32 * width, top + row as f32 * height, len as f32 * width, height];
 			let [r, g, b, _] = rgba(color, srgb_surface);
@@ -318,7 +318,7 @@ pub(crate) fn cell_decorations<'a>(
 	ink: impl Fn(usize) -> &'a [Range<f32>],
 ) {
 	let cell = layer.cell;
-	let rows = layer.cells.chunks_exact((layer.width as usize).max(1));
+	let rows = layer.rows();
 	for (row, cells) in (0..).zip(rows) {
 		// In surface pixels, like the quads
 		let (left, top) = (layer.x as f32, (layer.y + row * cell.height) as f32);

@@ -203,11 +203,9 @@ fn blank(cells: &[RenderCell]) -> Vec<RenderCell> {
 
 /// The rows of `layer` in the scrolling region of `scroll`
 fn region_rows<'a>(layer: &'a Layer, scroll: &Scroll) -> impl Iterator<Item = &'a [RenderCell]> {
-	let width = layer.width as usize;
 	let (left, right) = (scroll.left as usize, scroll.right as usize);
 	layer
-		.cells
-		.chunks_exact(width.max(1))
+		.rows()
 		.take(scroll.bottom as usize)
 		.skip(scroll.top as usize)
 		.map(move |row| &row[left..right])

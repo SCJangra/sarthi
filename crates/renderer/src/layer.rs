@@ -63,6 +63,16 @@ impl Layer {
 		let [top, right, bottom, left] = self.padding.map(|padding| padding as f32);
 		[x - left, y - top, width + left + right, height + top + bottom]
 	}
+
+	/// Where the cell at `row`, `col` is in [`Layer::cells`]
+	pub fn index(&self, row: u32, col: u32) -> usize {
+		row as usize * self.width as usize + col as usize
+	}
+
+	/// The cells, a row at a time
+	pub fn rows(&self) -> std::slice::ChunksExact<'_, RenderCell> {
+		self.cells.chunks_exact((self.width as usize).max(1))
+	}
 }
 
 /// A line around a [`Layer`], in physical pixels

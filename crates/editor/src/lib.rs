@@ -345,7 +345,7 @@ impl Editor {
 	pub fn set_external_place(&mut self, win: Window, place: Place) {
 		let cursor = self.grids.get(&self.cursor_grid).and_then(|grid| {
 			let (row, col) = self.grid_origin(self.cursor_grid)?;
-			Some((row + grid.cursor_row as u32, col + grid.cursor_col as u32))
+			Some((row + grid.cursor_row, col + grid.cursor_col))
 		});
 		let place = at_cursor(place, cursor.unwrap_or((0, 0)));
 		self.stale |= self.places.insert(win, place) != Some(place);
@@ -454,17 +454,17 @@ impl Editor {
 	/// The grid shown at cell `row`, `col` of the screen, and that cell in it, among the grids on the screen's cells (not
 	/// the external windows)
 	fn grid_at_cell(&self, row: u32, col: u32) -> Option<GridPosition> {
-		let screen_height = self.grids.get(&1).map_or(0, |grid| grid.height as u32);
+		let screen_height = self.grids.get(&1).map_or(0, |grid| grid.height);
 		let covers = |id: u32, top: u32, left: u32, bottom: u32| {
 			let grid = &self.grids[&id];
-			let right = left + grid.width as u32;
+			let right = left + grid.width;
 			(top..bottom).contains(&row) && (left..right).contains(&col)
 		};
 
 		let over = self.stacked().into_iter().rev().find_map(|(id, placement)| {
 			let (top, left, bottom) = match placement {
-				Placement::Tiled { row, col } => (*row, *col, row + self.grids[&id].height as u32),
-				Placement::Float { row, col, mouse: true, .. } => (*row, *col, row + self.grids[&id].height as u32),
+				Placement::Tiled { row, col } => (*row, *col, row + self.grids[&id].height),
+				Placement::Float { row, col, mouse: true, .. } => (*row, *col, row + self.grids[&id].height),
 				// Only its rows from `row` down show.
 				Placement::Message { row, .. } => (*row, 0, screen_height),
 				// An external window isn't on the screen's cells.
@@ -533,7 +533,7 @@ impl Editor {
 		});
 		let mut pointer = Pointer::Arrow;
 		for (top, left, grid) in windows {
-			let (bottom, right) = (top + grid.height as u32, left + grid.width as u32);
+			let (bottom, right) = (top + grid.height, left + grid.width);
 			// A status line wins where it meets a separator.
 			if row == bottom && (left..=right).contains(&col) {
 				return Pointer::ResizeRows;
@@ -574,7 +574,7 @@ impl Editor {
 			RedrawNotification::GridResize(resizes) => {
 				for resize in resizes {
 					let grid = self.grids.entry(resize.grid).or_insert_with(|| Grid::new(0, 0));
-					grid.resize(resize.width as usize, resize.height as usize);
+					grid.resize(resize.width, resize.height);
 					self.stale = true;
 				}
 			},
@@ -603,22 +603,21 @@ impl Editor {
 			RedrawNotification::GridLine(lines) => {
 				for line in lines {
 					self.update_grid(line.grid, "grid_line", |grid| {
-						grid.set_line(line.row as usize, line.col_start as usize, &line.cells);
+						grid.set_line(line.row, line.col_start, &line.cells);
 					});
 				}
 			},
 			RedrawNotification::GridScroll(scrolls) => {
 				for scroll in scrolls {
 					self.update_grid(scroll.grid, "grid_scroll", |grid| {
-						let (top, bot) = (scroll.top as usize, scroll.bot as usize);
-						grid.scroll(top, bot, scroll.left as usize, scroll.right as usize, scroll.rows as isize);
+						grid.scroll(scroll.top, scroll.bot, scroll.left, scroll.right, scroll.rows);
 					});
 				}
 			},
 			RedrawNotification::GridCursorGoto(gotos) => {
 				for goto in gotos {
 					self.update_grid(goto.grid, "grid_cursor_goto", |grid| {
-						grid.set_cursor(goto.row as usize, goto.col as usize);
+						grid.set_cursor(goto.row, goto.col);
 					});
 					self.cursor_grid = goto.grid;
 				}
@@ -792,18 +791,18 @@ impl Editor {
 
 	/// The layers in drawing order: grid 1, then the grids shown over it (see [`Editor::stacked`])
 	fn layers(&self) -> Vec<Layer> {
-		let screen_height = self.grids.get(&1).map_or(0, |grid| grid.height as u32);
+		let screen_height = self.grids.get(&1).map_or(0, |grid| grid.height);
 		let placed = self.stacked();
 
 		let mut shadows = self.float_shadows(&placed);
 		shadows.extend(self.external_shadows(&placed));
 		// What covers grid 1, and what covers the tiled windows: column, row, width, height in cells
-		let screen_width = self.grids.get(&1).map_or(0, |grid| grid.width as u32);
+		let screen_width = self.grids.get(&1).map_or(0, |grid| grid.width);
 		let area_of = |kind: fn(&Placement) -> Option<[u32; 2]>| -> Vec<[u32; 4]> {
 			placed
 				.iter()
 				.filter_map(|(id, placement)| Some((self.grids.get(id)?, kind(placement)?)))
-				.map(|(grid, [col, row])| [col, row, grid.width as u32, grid.height as u32])
+				.map(|(grid, [col, row])| [col, row, grid.width, grid.height])
 				.collect()
 		};
 		let tiled = area_of(|placement| match placement {
@@ -881,8 +880,8 @@ impl Editor {
 			let right = (col + cover_width).saturating_sub(origin_col).clamp(left, width);
 			let bottom = (row + cover_height).saturating_sub(origin_row).min(height);
 			for layer_row in top..bottom {
-				let start = layer_row * width;
-				for cell in &mut layer.cells[(start + left) as usize..(start + right) as usize] {
+				let start = layer.index(layer_row, 0);
+				for cell in &mut layer.cells[start + left as usize..start + right as usize] {
 					*cell = RenderCell { text: blank, blend: 100, decoration: Decoration::default(), ..*cell };
 				}
 			}
@@ -926,7 +925,7 @@ impl Editor {
 			let first = *first_of_level.entry(level).or_insert(id);
 			let Some(shadow) = self.shadow_of(win) else { continue };
 			let (grid, cell) = (&self.grids[&id], self.cell);
-			let [width, height] = [grid.width as u32 * cell.width, grid.height as u32 * cell.height];
+			let [width, height] = [grid.width * cell.width, grid.height * cell.height];
 			// Its cells': a float has no frame
 			let rect = [col * cell.width, row * cell.height, width, height];
 			let same = groups
@@ -1019,7 +1018,7 @@ impl Editor {
 	/// another can't go round in a loop.
 	fn external_rect_within(&self, id: u32, win: Window, depth: u32) -> [u32; 4] {
 		let (grid, cell) = (&self.grids[&id], self.cell_of(id));
-		let size = [grid.width as u32 * cell.width, grid.height as u32 * cell.height];
+		let size = [grid.width * cell.width, grid.height * cell.height];
 		// Placed with its frame, like Neovim places a floating window with its border: its cells inside it
 		let [top, right, bottom, left] = self.frame_of(win);
 		let outer = [size[0] + left + right, size[1] + top + bottom];
@@ -1033,8 +1032,8 @@ impl Editor {
 	fn external_place(&self, win: Window, outer: [u32; 2], depth: u32) -> [u32; 2] {
 		// Above the command line, like Neovim keeps floating windows
 		let screen = self.grids.get(&1).map_or([0, 0], |grid| {
-			let rows = (grid.height as u32).saturating_sub(self.command_rows);
-			[grid.width as u32 * self.cell.width, rows * self.cell.height]
+			let rows = (grid.height).saturating_sub(self.command_rows);
+			[grid.width * self.cell.width, rows * self.cell.height]
 		});
 		let place = self.places.get(&win).copied().unwrap_or(Place::Center);
 		// A window's text's top-left corner and cells, by its grid: every window has a viewport.
@@ -1082,7 +1081,7 @@ impl Editor {
 		let width = self.grids.get(&1).map_or(0, |grid| grid.width);
 		let mut line = Grid::new(width, 1);
 		let hl_id = Some(self.highlights.group("MsgSeparator"));
-		line.set_line(0, 0, &[NvimGridCell { text: separator, hl_id, repeat: Some(width as u32) }]);
+		line.set_line(0, 0, &[NvimGridCell { text: separator, hl_id, repeat: Some(width) }]);
 
 		let mut layer = cell_layer(0, &line, &self.highlights, None, self.cell);
 		// An id no grid has: Neovim's grid ids are 32-bit.

@@ -40,8 +40,8 @@ pub fn cell_layer(
 		y: 0,
 		font: FontId::MAIN,
 		cell,
-		width: grid.width as u32,
-		height: grid.height as u32,
+		width: grid.width,
+		height: grid.height,
 		cells,
 		cursor: None,
 		scroll: None,
@@ -59,9 +59,9 @@ pub fn cell_layer(
 
 /// Gives `layer` its cursor, at `row`, `col`, in `style`. The colors come from the cursor's highlight, or are the
 /// cell's swapped when it has none (`:help ui-event-mode_info_set`).
-fn draw_cursor(layer: &mut Layer, row: usize, col: usize, style: CursorStyle, highlights: &HighlightState) {
-	let width = layer.width as usize;
-	let index = row * width + col;
+fn draw_cursor(layer: &mut Layer, row: u32, col: u32, style: CursorStyle, highlights: &HighlightState) {
+	let width = layer.width;
+	let index = layer.index(row, col);
 	let Some(&cell) = layer.cells.get(index).filter(|_| col < width) else { return };
 
 	// A double-width character also covers the next cell, which is empty.
@@ -82,7 +82,7 @@ fn draw_cursor(layer: &mut Layer, row: usize, col: usize, style: CursorStyle, hi
 		CursorShape::Horizontal => bar(BarOrientation::Horizontal),
 	};
 
-	let (row, col, width) = (row as u32, col as u32, if double_width { 2 } else { 1 });
+	let width = if double_width { 2 } else { 1 };
 	layer.cursor = Some(Cursor { row, col, width, shape, color, text_color, animate: style.animate });
 }
 
@@ -156,7 +156,7 @@ mod tests {
 	}
 
 	/// A 4×1 grid "ab漢" (the last cell is the right half of 漢) with the cursor at `col`
-	fn grid_with_cursor(col: usize) -> Grid {
+	fn grid_with_cursor(col: u32) -> Grid {
 		let mut grid = Grid::new(4, 1);
 		grid.set_line(0, 0, &[cell("a", None), cell("b", Some(1)), cell("漢", Some(0)), cell("", None)]);
 		grid.set_cursor(0, col);

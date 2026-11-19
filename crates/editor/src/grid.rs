@@ -16,15 +16,15 @@ impl GridCell {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Grid {
-	pub width: usize,
-	pub height: usize,
+	pub width: u32,
+	pub height: u32,
 	pub cells: Vec<GridCell>,
-	pub cursor_row: usize,
-	pub cursor_col: usize,
+	pub cursor_row: u32,
+	pub cursor_col: u32,
 }
 
 impl Grid {
-	pub fn new(width: usize, height: usize) -> Self {
+	pub fn new(width: u32, height: u32) -> Self {
 		let mut grid = Self { width: 0, height: 0, cells: Vec::new(), cursor_row: 0, cursor_col: 0 };
 		grid.resize(width, height);
 		grid
@@ -32,12 +32,12 @@ impl Grid {
 
 	/// Resizes the grid, keeping the cells that still fit; new cells are blank. Neovim only redraws what changed
 	/// afterwards, e.g. after a split shrinks a window, so the rest must stay.
-	pub fn resize(&mut self, width: usize, height: usize) {
-		let mut cells = vec![GridCell::blank(); width * height];
-		let kept = self.width.min(width);
+	pub fn resize(&mut self, width: u32, height: u32) {
+		let mut cells = vec![GridCell::blank(); width as usize * height as usize];
+		let kept = self.width.min(width) as usize;
 		for row in 0..self.height.min(height) {
-			let old = row * self.width;
-			cells[row * width..row * width + kept].copy_from_slice(&self.cells[old..old + kept]);
+			let (old, new) = (self.cell_index(row, 0), row as usize * width as usize);
+			cells[new..new + kept].copy_from_slice(&self.cells[old..old + kept]);
 		}
 
 		self.cells = cells;
@@ -53,7 +53,7 @@ impl Grid {
 		self.cursor_col = 0;
 	}
 
-	pub fn set_line(&mut self, row: usize, col_start: usize, cells: &[NvimGridCell]) {
+	pub fn set_line(&mut self, row: u32, col_start: u32, cells: &[NvimGridCell]) {
 		if row >= self.height || self.width == 0 {
 			return;
 		}
@@ -66,8 +66,7 @@ impl Grid {
 		for cell in cells {
 			hl_id = cell.hl_id.unwrap_or(hl_id);
 
-			let repeat = cell.repeat.unwrap_or(1) as usize;
-			for _ in 0..repeat {
+			for _ in 0..cell.repeat.unwrap_or(1) {
 				if col >= self.width {
 					return;
 				}
@@ -80,17 +79,17 @@ impl Grid {
 
 	/// Moves the cells in rows `top..bot` and columns `left..right` up by `rows`, or down if `rows` is negative
 	/// (`grid_scroll`). The rows that open up keep their old cells: Neovim redraws them right after.
-	pub fn scroll(&mut self, top: usize, bot: usize, left: usize, right: usize, rows: isize) {
+	pub fn scroll(&mut self, top: u32, bot: u32, left: u32, right: u32, rows: i32) {
 		let (bot, right) = (bot.min(self.height), right.min(self.width));
 		if rows == 0 || left >= right {
 			return;
 		}
 
 		let distance = rows.unsigned_abs();
-		let copy_row = |grid: &mut Self, dst: usize| {
+		let copy_row = |grid: &mut Self, dst: u32| {
 			let src = if rows > 0 { dst + distance } else { dst - distance };
 			let (start, dst) = (grid.cell_index(src, left), grid.cell_index(dst, left));
-			grid.cells.copy_within(start..start + (right - left), dst);
+			grid.cells.copy_within(start..start + (right - left) as usize, dst);
 		};
 
 		// Each row is read before it's overwritten: moving up copies top to bottom, moving down bottom to top.
@@ -101,7 +100,7 @@ impl Grid {
 		}
 	}
 
-	pub fn set_cursor(&mut self, row: usize, col: usize) {
+	pub fn set_cursor(&mut self, row: u32, col: u32) {
 		if row >= self.height || col >= self.width {
 			return;
 		}
@@ -109,8 +108,8 @@ impl Grid {
 		self.cursor_col = col;
 	}
 
-	fn cell_index(&self, row: usize, col: usize) -> usize {
-		(row * self.width) + col
+	fn cell_index(&self, row: u32, col: u32) -> usize {
+		row as usize * self.width as usize + col as usize
 	}
 }
 
@@ -200,8 +199,8 @@ mod tests {
 
 	/// A grid with one row per string, one character per cell
 	fn grid_of(rows: &[&str]) -> Grid {
-		let mut grid = Grid::new(rows[0].len(), rows.len());
-		for (row, text) in rows.iter().enumerate() {
+		let mut grid = Grid::new(rows[0].len() as u32, rows.len() as u32);
+		for (row, text) in (0..).zip(rows) {
 			let cells: Vec<_> = text
 				.chars()
 				.map(|c| NvimGridCell { text: CellText::from(&c.to_string()).unwrap(), hl_id: None, repeat: None })
@@ -213,7 +212,7 @@ mod tests {
 
 	fn rows_of(grid: &Grid) -> Vec<String> {
 		grid.cells
-			.chunks(grid.width)
+			.chunks(grid.width as usize)
 			.map(|row| row.iter().map(|cell| cell.text.as_str()).collect())
 			.collect()
 	}

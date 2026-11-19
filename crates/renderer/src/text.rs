@@ -196,9 +196,8 @@ fn update_rows(rows: &mut Vec<Row>, layer: &Layer, fonts: &mut Fonts, swash_cach
 	let font = layer.font;
 	let (cell, lines) = (fonts.cell_size(font), fonts.line_metrics(font));
 	rows.resize_with(layer.height as usize, Row::default);
-	let width = (layer.width as usize).max(1);
 	let changed: Vec<usize> = (0..rows.len())
-		.zip(layer.cells.chunks_exact(width))
+		.zip(layer.rows())
 		.filter(|&(index, cells)| rows[index].cells != cells)
 		.map(|(index, _)| index)
 		.collect();
@@ -212,7 +211,7 @@ fn update_rows(rows: &mut Vec<Row>, layer: &Layer, fonts: &mut Fonts, swash_cach
 	}
 
 	for index in changed {
-		let cells = &layer.cells[index * width..(index + 1) * width];
+		let cells = layer.rows().nth(index).unwrap_or_default();
 		let layout = moved.get_mut(cells).and_then(Vec::pop).unwrap_or_else(|| {
 			let buffers: Vec<(u32, Buffer)> = segments(cells, |text| fonts.run_of(font, text))
 				.iter()

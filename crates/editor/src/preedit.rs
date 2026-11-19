@@ -29,10 +29,7 @@ pub fn cursor_rect(layers: &[Layer]) -> Option<[u32; 4]> {
 pub fn preedit_layer(layers: &mut [Layer], preedit: &Preedit) -> Option<Layer> {
 	let cursor_layer = layers.iter_mut().rev().find(|layer| layer.cursor.is_some())?;
 	let cursor = cursor_layer.cursor.take()?;
-	let under = cursor_layer
-		.cells
-		.get((cursor.row * cursor_layer.width + cursor.col) as usize)
-		.copied()?;
+	let under = cursor_layer.cells.get(cursor_layer.index(cursor.row, cursor.col)).copied()?;
 	let style = RenderCell { blend: 0, ..under };
 	let mut decoration = style.decoration;
 	decoration.underline = Some(Underline::Single);

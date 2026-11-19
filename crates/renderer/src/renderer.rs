@@ -447,7 +447,7 @@ fn without(layer: &Layer, region: &SlidingRegion) -> Layer {
 	let blank = RenderCell { text, blend: 100, decoration: Decoration::default(), ..first };
 	let mut cells = layer.cells.clone();
 	for row in top..(top + region.height).min(layer.height) {
-		let start = (row * layer.width + left) as usize;
+		let start = layer.index(row, left);
 		cells[start..start + region.layer.width as usize].fill(blank);
 	}
 	Layer { cells, cursor: None, scroll: None, shadow: layer.shadow.clone(), ..*layer }
@@ -463,7 +463,7 @@ fn cursor_layer(layer: &Layer, cursor: Cursor) -> Layer {
 		return Layer { x: layer.x, y: layer.y, cursor: Some(cursor), ..empty };
 	}
 
-	let start = (cursor.row * layer.width + cursor.col) as usize;
+	let start = layer.index(cursor.row, cursor.col);
 	let Some(cells) = layer.cells.get(start..start + cursor.width as usize) else { return empty };
 	let cells = cells
 		.iter()
