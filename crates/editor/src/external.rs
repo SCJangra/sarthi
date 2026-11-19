@@ -1,7 +1,9 @@
 //! Where external windows go: sarthi places them itself, since Neovim leaves that to the UI (`:help ui-multigrid`)
 
-use renderer::CellSize;
-use rpc::neovim::Window;
+use renderer::{CellSize, Edges, Rect};
+use rpc::neovim::{Grid, Window};
+
+use crate::{Editor, Placement};
 
 /// Where an external window goes. Rows and columns are in cells of the screen (grid 1).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -102,6 +104,55 @@ pub(crate) fn at_cursor(place: Place, cursor: (u32, u32)) -> Place {
 			col: f64::from(cursor.1) + col,
 		},
 		place => place,
+	}
+}
+
+impl Editor {
+	/// Where external window `win`, grid `id`, is, in pixels
+	pub(crate) fn external_rect(&self, id: Grid, win: Window) -> Rect<u32> {
+		self.external_rect_within(id, win, 0)
+	}
+
+	/// [`Editor::external_rect`], `depth` external windows away from the one asked for: windows placed relative to one
+	/// another can't go round in a loop.
+	fn external_rect_within(&self, id: Grid, win: Window, depth: u32) -> Rect<u32> {
+		let (grid, cell) = (&self.grids[&id], self.cell_of(id));
+		let size = [grid.width * cell.width, grid.height * cell.height];
+		// Placed with its frame, like Neovim places a floating window with its border: its cells inside it
+		let frame = self.frame_of(win);
+		let outer = [size[0] + frame.left + frame.right, size[1] + frame.top + frame.bottom];
+		let [x, y] = self.external_place(win, outer, depth);
+		Rect::new(x + frame.left, y + frame.top, size[0], size[1])
+	}
+
+	/// Where external window `win`, `outer` pixels with its frame, is placed: its frame's top-left corner. A window
+	/// it's placed relative to counts from that window's text, inside its frame, border and winbar, like Neovim's
+	/// floats do.
+	fn external_place(&self, win: Window, outer: [u32; 2], depth: u32) -> [u32; 2] {
+		// Above the command line, like Neovim keeps floating windows
+		let screen = self.grids.get(&Grid::GLOBAL).map_or([0, 0], |grid| {
+			let rows = (grid.height).saturating_sub(self.command_rows);
+			[grid.width * self.cell.width, rows * self.cell.height]
+		});
+		let place = self.places.get(&win).copied().unwrap_or(Place::Center);
+		// A window's text's top-left corner and cells, by its grid: every window has a viewport.
+		let origin = |win: Window| {
+			let (&grid, viewport) = self.viewports.iter().find(|(_, viewport)| viewport.win == Some(win))?;
+			let Edges { top, left, .. } = viewport.margins;
+			let (corner, cell) = match self.placements.get(&grid) {
+				// In its own cells, where it's placed; past a few in a row, as if not shown
+				Some(Placement::External { win, .. }) => {
+					let rect = (depth < 8).then(|| self.external_rect_within(grid, *win, depth + 1))?;
+					([rect.x, rect.y], self.cell_of(grid))
+				},
+				_ => {
+					let (row, col) = self.grid_origin(grid)?;
+					([col * self.cell.width, row * self.cell.height], self.cell)
+				},
+			};
+			Some(([corner[0] + left * cell.width, corner[1] + top * cell.height], cell))
+		};
+		position(place, outer, screen, self.cell, f64::from(self.scale), origin)
 	}
 }
 
