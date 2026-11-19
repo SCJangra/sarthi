@@ -1,3 +1,4 @@
+use crate::Grid;
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
@@ -7,7 +8,7 @@ use crate::Window;
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinViewportEvent {
-	pub grid: u32,
+	pub grid: Grid,
 
 	pub win: Window,
 
@@ -30,7 +31,7 @@ pub struct WinViewportEvent {
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinViewportMarginsEvent {
-	pub grid: u32,
+	pub grid: Grid,
 
 	/// The window handle, unused
 	pub win: IgnoredAny,
@@ -66,7 +67,7 @@ mod tests {
 		let args = [2, 16, 3, 0, 500, -1].into_iter().map(Value::from);
 		let event = decode("win_viewport", [2.into(), win()].into_iter().chain(args).collect());
 		let expected = WinViewportEvent {
-			grid: 2,
+			grid: crate::Grid(2),
 			win: Window(1000),
 			topline: 2,
 			botline: 16,
@@ -89,7 +90,8 @@ mod tests {
 		// From Neovim 0.12, with a winbar
 		let args = [1, 0, 0, 0].into_iter().map(Value::from);
 		let event = decode("win_viewport_margins", [2.into(), win()].into_iter().chain(args).collect());
-		let expected = WinViewportMarginsEvent { grid: 2, win: IgnoredAny, top: 1, bottom: 0, left: 0, right: 0 };
+		let expected =
+			WinViewportMarginsEvent { grid: crate::Grid(2), win: IgnoredAny, top: 1, bottom: 0, left: 0, right: 0 };
 		assert_eq!(event, RedrawNotification::WinViewportMargins(vec![expected]));
 	}
 }

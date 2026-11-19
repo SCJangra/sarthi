@@ -462,7 +462,7 @@ mod tests {
 		assert_eq!(response.unwrap(), rmpv::Value::from(2));
 
 		let expected = Notification::Redraw(vec![RedrawNotification::GridCursorGoto(vec![GridCursorGotoEvent {
-			grid: 1,
+			grid: crate::Grid(1),
 			row: 2,
 			col: 3,
 		}])]);

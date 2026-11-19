@@ -1,3 +1,4 @@
+use crate::Grid;
 use serde::Deserialize;
 
 /// Moves the cells in rows `top..bot` and columns `left..right` of `grid` up by `rows` (down if negative). The
@@ -5,7 +6,7 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct GridScrollEvent {
-	pub grid: u32,
+	pub grid: Grid,
 	pub top: u32,
 	pub bot: u32,
 	pub left: u32,
@@ -24,8 +25,8 @@ mod tests {
 	#[test]
 	fn de_grid_scroll() {
 		let expected = RedrawNotification::GridScroll(vec![
-			GridScrollEvent { grid: 1, top: 0, bot: 10, left: 0, right: 80, rows: 2, cols: 0 },
-			GridScrollEvent { grid: 2, top: 1, bot: 5, left: 0, right: 40, rows: -3, cols: 0 },
+			GridScrollEvent { grid: crate::Grid(1), top: 0, bot: 10, left: 0, right: 80, rows: 2, cols: 0 },
+			GridScrollEvent { grid: crate::Grid(2), top: 1, bot: 5, left: 0, right: 40, rows: -3, cols: 0 },
 		]);
 
 		// ["grid_scroll", [1, 0, 10, 0, 80, 2, 0], [2, 1, 5, 0, 40, -3, 0]]

@@ -1,9 +1,10 @@
+use crate::Grid;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct GridCursorGotoEvent {
-	pub grid: u32,
+	pub grid: Grid,
 	pub row: u32,
 	pub col: u32,
 }
@@ -16,8 +17,8 @@ mod tests {
 	#[test]
 	fn de_grid_cursor_goto() {
 		let expected = RedrawNotification::GridCursorGoto(vec![
-			GridCursorGotoEvent { grid: 1, row: 5, col: 9 },
-			GridCursorGotoEvent { grid: 2, row: 7, col: 3 },
+			GridCursorGotoEvent { grid: crate::Grid(1), row: 5, col: 9 },
+			GridCursorGotoEvent { grid: crate::Grid(2), row: 7, col: 3 },
 		]);
 
 		let event = vec![

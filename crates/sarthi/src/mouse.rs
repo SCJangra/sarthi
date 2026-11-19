@@ -3,7 +3,7 @@
 
 use editor::{Editor, Pointer};
 use renderer::CellSize;
-use rpc::neovim::{InputMouseParams, MouseButton, MouseInput, WheelDirection};
+use rpc::neovim::{Grid, InputMouseParams, MouseButton, MouseInput, WheelDirection};
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, MouseButton as WinitButton, MouseScrollDelta};
 use winit::keyboard::ModifiersState;
@@ -21,10 +21,10 @@ pub struct Mouse {
 	position: Option<PhysicalPosition<f64>>,
 
 	/// The button held, and the grid it was pressed on, which gets the drags and the release
-	held: Option<(MouseButton, u32)>,
+	held: Option<(MouseButton, Grid)>,
 
 	/// The grid and cell of the last press, drag or move sent, so moving within a cell sends nothing
-	last: Option<(u32, i64, i64)>,
+	last: Option<(Grid, i64, i64)>,
 
 	/// Wheel turns not sent yet, in notches: across (right is positive) and down (up is positive)
 	wheel: (f64, f64),
@@ -196,8 +196,8 @@ mod tests {
 	use editor::Editor;
 	use renderer::CellSize;
 	use rpc::neovim::{
-		GridResizeEvent, InputMouseParams, MouseButton, MouseInput, OptionSetEvent, OptionValue, RedrawNotification,
-		WheelDirection, WinExternalPosEvent, WinPosEvent, Window,
+		Grid, GridResizeEvent, InputMouseParams, MouseButton, MouseInput, OptionSetEvent, OptionValue,
+		RedrawNotification, WheelDirection, WinExternalPosEvent, WinPosEvent, Window,
 	};
 	use serde::de::IgnoredAny;
 	use winit::dpi::PhysicalPosition;
@@ -212,9 +212,10 @@ mod tests {
 	fn editor() -> Editor {
 		let mut editor = Editor::new();
 		editor.set_cell_size(CELL);
-		let resize =
-			|grid, width, height| RedrawNotification::GridResize(vec![GridResizeEvent { grid, width, height }]);
-		let position = WinPosEvent { grid: 2, win: IgnoredAny, start_row: 2, start_col: 4, width: 10, height: 5 };
+		let resize = |grid, width, height| {
+			RedrawNotification::GridResize(vec![GridResizeEvent { grid: Grid(grid), width, height }])
+		};
+		let position = WinPosEvent { grid: Grid(2), win: IgnoredAny, start_row: 2, start_col: 4, width: 10, height: 5 };
 		editor.apply(vec![
 			resize(1, 20, 10),
 			resize(2, 10, 5),
@@ -231,7 +232,7 @@ mod tests {
 	}
 
 	fn event(input: MouseInput, grid: u32, row: i64, col: i64) -> Option<InputMouseParams> {
-		Some(InputMouseParams { input, modifiers: String::new(), grid, row, col })
+		Some(InputMouseParams { input, modifiers: String::new(), grid: Grid(grid), row, col })
 	}
 
 	const NONE: ModifiersState = ModifiersState::empty();
@@ -262,8 +263,9 @@ mod tests {
 	fn an_external_window_gets_its_own_clicks() {
 		let (mut editor, mut mouse) = (editor(), Mouse::new(3.0));
 		// A 4×2 external window: 32×40 pixels, centered on the 160×200 pixel screen at (64, 80)
-		let resize = RedrawNotification::GridResize(vec![GridResizeEvent { grid: 4, width: 4, height: 2 }]);
-		let external = RedrawNotification::WinExternalPos(vec![WinExternalPosEvent { grid: 4, win: Window(1004) }]);
+		let resize = RedrawNotification::GridResize(vec![GridResizeEvent { grid: Grid(4), width: 4, height: 2 }]);
+		let external =
+			RedrawNotification::WinExternalPos(vec![WinExternalPosEvent { grid: Grid(4), win: Window(1004) }]);
 		editor.apply(vec![resize, external, RedrawNotification::Flush]);
 
 		mouse.moved(PhysicalPosition::new(65.0, 81.0), &editor, NONE);
@@ -283,7 +285,7 @@ mod tests {
 		let expected = InputMouseParams {
 			input: MouseInput::Press(MouseButton::X1),
 			modifiers: String::from("SC"),
-			grid: 1,
+			grid: Grid(1),
 			row: 0,
 			col: 0,
 		};

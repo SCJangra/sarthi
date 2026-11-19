@@ -14,7 +14,7 @@ use editor::Editor;
 use flume::Receiver;
 use rpc::client::{Error as RpcError, Message, Nvim};
 use rpc::neovim::{
-	CellText, DefaultColorsSetEvent, GridCell, GridLineEvent, GridResizeEvent, HlAttrDefineEvent, HlAttrs,
+	CellText, DefaultColorsSetEvent, Grid, GridCell, GridLineEvent, GridResizeEvent, HlAttrDefineEvent, HlAttrs,
 	RedrawNotification, WinExternalPosEvent, Window,
 };
 use rpc::sarthi::{FloatWindow, Settings, WindowOptions, WindowVariable};
@@ -156,7 +156,7 @@ const ERROR_FG: u32 = 0xFFC0B9;
 const COMMENT_FG: u32 = 0x9B9EA4;
 
 /// The grid and window of the error, which no Neovim uses
-const GRID: u32 = 2;
+const GRID: Grid = Grid(2);
 const WIN: Window = Window(1000);
 
 /// Shows `error` on a `width` × `height` cell screen: centered, in an external window framed like Neovim's floats
@@ -201,7 +201,7 @@ pub fn show(editor: &mut Editor, error: &StartError, width: u32, height: u32) {
 			define(3, attrs(COMMENT_FG, false)),
 		]),
 		RedrawNotification::GridResize(vec![
-			GridResizeEvent { grid: 1, width, height },
+			GridResizeEvent { grid: Grid::GLOBAL, width, height },
 			GridResizeEvent { grid: GRID, width: grid_width, height: lines.len() as u32 },
 		]),
 	];

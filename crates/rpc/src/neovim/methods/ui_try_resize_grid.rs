@@ -1,3 +1,4 @@
+use crate::Grid;
 use serde::{Serialize, Serializer};
 
 use crate::RpcMethod;
@@ -16,7 +17,7 @@ impl RpcMethod for UiTryResizeGrid {
 #[derive(Debug)]
 pub struct UiTryResizeGridParams {
 	/// The grid, not its window's handle
-	pub grid: u32,
+	pub grid: Grid,
 	pub width: u32,
 	pub height: u32,
 }
@@ -34,7 +35,7 @@ mod tests {
 
 	#[test]
 	fn positional_arguments() {
-		let params = UiTryResizeGridParams { grid: 4, width: 30, height: 8 };
+		let params = UiTryResizeGridParams { grid: crate::Grid(4), width: 30, height: 8 };
 		// [4, 30, 8]
 		assert_eq!(rmp_serde::to_vec(&params).unwrap(), [0x93, 0x04, 0x1E, 0x08]);
 	}

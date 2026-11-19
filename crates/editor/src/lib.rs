@@ -12,28 +12,28 @@ use std::collections::HashMap;
 use renderer::{
 	CellSize, Decoration, Edges, FontId, Layer, LayerShadow, Motion, Outline, Rect, RenderCell, Scroll, Shadow,
 };
-use rpc::neovim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification, Window};
+use rpc::neovim::{CellText, Grid, GridCell as NvimGridCell, OptionValue, RedrawNotification, Window};
 
 use crate::compositor::cell_layer;
 use crate::cursor::CursorState;
 use crate::external::at_cursor;
 pub use crate::external::{Anchor, Place, Relative};
-use crate::grid::Grid;
+use crate::grid::GridState;
 use crate::highlight::HighlightState;
 use crate::preedit::{Preedit, preedit_layer};
 
 /// Neovim's UI state, kept up to date from its redraw events (`:help ui-events`)
 #[derive(Debug)]
 pub struct Editor {
-	/// Neovim's grids by id (`:help ui-multigrid`). Grid 1 is the screen: it holds what isn't in a window, like
+	/// Neovim's grids (`:help ui-multigrid`). The global grid, [`Grid::GLOBAL`], is the screen: it holds what isn't in a window, like
 	/// window separators, status lines and the command line, and the windows' grids are placed on it.
-	grids: HashMap<u32, Grid>,
+	grids: HashMap<Grid, GridState>,
 
 	/// Where each grid other than grid 1 is shown; grids without one aren't shown yet
-	placements: HashMap<u32, Placement>,
+	placements: HashMap<Grid, Placement>,
 
 	/// How each window's text scrolls, by grid
-	viewports: HashMap<u32, Viewport>,
+	viewports: HashMap<Grid, Viewport>,
 
 	/// How each window's text moves when it scrolls, if not as the renderer's other scrolled text does: with its own
 	/// motion, or jumping to its new place for `None`
@@ -53,7 +53,7 @@ pub struct Editor {
 	cursor: CursorState,
 
 	/// The grid the cursor is in
-	cursor_grid: u32,
+	cursor_grid: Grid,
 
 	/// The `guifont` option, as Neovim sent it, or empty while it's Neovim's default
 	guifont: String,
@@ -191,7 +191,7 @@ pub enum Pointer {
 /// A cell of a grid
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridPosition {
-	pub grid: u32,
+	pub grid: Grid,
 	pub row: u32,
 	pub col: u32,
 }
@@ -225,7 +225,7 @@ impl Editor {
 			see_through: false,
 			highlights: HighlightState::new(),
 			cursor: CursorState::default(),
-			cursor_grid: 1,
+			cursor_grid: Grid::GLOBAL,
 			guifont: String::new(),
 			default_guifont: None,
 			linespace: 0,
@@ -329,7 +329,7 @@ impl Editor {
 	}
 
 	/// The fonts grid `id` is drawn with, and the size of its cells: an external window's own, or the main ones
-	fn font_of(&self, id: u32) -> (FontId, CellSize) {
+	fn font_of(&self, id: Grid) -> (FontId, CellSize) {
 		match self.placements.get(&id) {
 			Some(Placement::External { win, .. }) => self.external_fonts.get(win).copied(),
 			_ => None,
@@ -338,7 +338,7 @@ impl Editor {
 	}
 
 	/// Size of grid `id`'s cells, in pixels (see [`Editor::font_of`])
-	fn cell_of(&self, id: u32) -> CellSize {
+	fn cell_of(&self, id: Grid) -> CellSize {
 		self.font_of(id).1
 	}
 
@@ -455,8 +455,8 @@ impl Editor {
 	/// The grid shown at cell `row`, `col` of the screen, and that cell in it, among the grids on the screen's cells (not
 	/// the external windows)
 	fn grid_at_cell(&self, row: u32, col: u32) -> Option<GridPosition> {
-		let screen_height = self.grids.get(&1).map_or(0, |grid| grid.height);
-		let covers = |id: u32, top: u32, left: u32, bottom: u32| {
+		let screen_height = self.grids.get(&Grid::GLOBAL).map_or(0, |grid| grid.height);
+		let covers = |id: Grid, top: u32, left: u32, bottom: u32| {
 			let grid = &self.grids[&id];
 			let right = left + grid.width;
 			(top..bottom).contains(&row) && (left..right).contains(&col)
@@ -473,12 +473,13 @@ impl Editor {
 			};
 			covers(id, top, left, bottom).then_some((id, top, left))
 		});
-		let (grid, top, left) = over.or_else(|| covers(1, 0, 0, screen_height).then_some((1, 0, 0)))?;
+		let (grid, top, left) =
+			over.or_else(|| covers(Grid::GLOBAL, 0, 0, screen_height).then_some((Grid::GLOBAL, 0, 0)))?;
 		Some(GridPosition { grid, row: row - top, col: col - left })
 	}
 
 	/// The topmost external window at `x`, `y` in pixels, by its grid
-	fn external_at(&self, x: f64, y: f64) -> Option<u32> {
+	fn external_at(&self, x: f64, y: f64) -> Option<Grid> {
 		self.stacked().into_iter().rev().find_map(|(id, placement)| {
 			let Placement::External { win, .. } = placement else { return None };
 			let rect = self.external_rect(id, *win);
@@ -490,7 +491,7 @@ impl Editor {
 
 	/// The cell of grid `id` at `x`, `y` in pixels from the window's top-left corner, as (row, column): negative or past
 	/// the grid's edges when outside it, e.g. while dragging. `None` if the grid isn't shown.
-	pub fn grid_cell(&self, id: u32, x: f64, y: f64) -> Option<(i64, i64)> {
+	pub fn grid_cell(&self, id: Grid, x: f64, y: f64) -> Option<(i64, i64)> {
 		let ([left, top], cell) = match self.placements.get(&id) {
 			Some(Placement::External { win, .. }) => {
 				let rect = self.external_rect(id, *win);
@@ -521,7 +522,7 @@ impl Editor {
 			return Pointer::Arrow;
 		}
 		match self.grid_at(x, y) {
-			Some(GridPosition { grid: 1, row, col }) => self.border_at(row, col),
+			Some(GridPosition { grid: Grid::GLOBAL, row, col }) => self.border_at(row, col),
 			Some(_) => Pointer::Text,
 			None => Pointer::Arrow,
 		}
@@ -549,9 +550,9 @@ impl Editor {
 
 	/// The cell of the screen where grid `id`'s top-left cell is shown, if the grid is shown on the screen's cells (an
 	/// external window isn't)
-	fn grid_origin(&self, id: u32) -> Option<(u32, u32)> {
-		if id == 1 {
-			return self.grids.contains_key(&1).then_some((0, 0));
+	fn grid_origin(&self, id: Grid) -> Option<(u32, u32)> {
+		if id == Grid::GLOBAL {
+			return self.grids.contains_key(&Grid::GLOBAL).then_some((0, 0));
 		}
 		match self.placements.get(&id)? {
 			Placement::Tiled { row, col } | Placement::Float { row, col, .. } => Some((*row, *col)),
@@ -575,7 +576,7 @@ impl Editor {
 			// A grid starts with its first resize.
 			RedrawNotification::GridResize(resizes) => {
 				for resize in resizes {
-					let grid = self.grids.entry(resize.grid).or_insert_with(|| Grid::new(0, 0));
+					let grid = self.grids.entry(resize.grid).or_insert_with(|| GridState::new(0, 0));
 					grid.resize(resize.width, resize.height);
 					self.stale = true;
 				}
@@ -599,7 +600,7 @@ impl Editor {
 			},
 			RedrawNotification::GridClear(clears) => {
 				for clear in clears {
-					self.update_grid(clear.grid, "grid_clear", Grid::clear);
+					self.update_grid(clear.grid, "grid_clear", GridState::clear);
 				}
 			},
 			RedrawNotification::GridLine(lines) => {
@@ -747,7 +748,7 @@ impl Editor {
 
 	/// Applies `change` to grid `id`, to be drawn on the next `flush`. `event` names the event for the warning about
 	/// an unknown grid.
-	fn update_grid(&mut self, id: u32, event: &str, change: impl FnOnce(&mut Grid)) {
+	fn update_grid(&mut self, id: Grid, event: &str, change: impl FnOnce(&mut GridState)) {
 		let Some(grid) = self.grids.get_mut(&id) else {
 			tracing::warn!("{event}: unknown grid {id}");
 			return;
@@ -756,7 +757,7 @@ impl Editor {
 		self.stale = true;
 	}
 
-	fn place(&mut self, grid: u32, placement: Placement) {
+	fn place(&mut self, grid: Grid, placement: Placement) {
 		self.placements.insert(grid, placement);
 		self.stale = true;
 	}
@@ -778,9 +779,9 @@ impl Editor {
 	/// The grids shown over grid 1, in Neovim's drawing order, like its own compositor (`:help
 	/// ui-event-win_float_pos`): the windows, then floating windows and the message grid by `compindex`; and over all of
 	/// them, the external windows in their order. Grids that aren't placed aren't shown.
-	fn stacked(&self) -> Vec<(u32, &Placement)> {
+	fn stacked(&self) -> Vec<(Grid, &Placement)> {
 		// Sort keys: tiled windows, floats and messages, then external windows; within each, by drawing order or grid id
-		let mut placed: Vec<(u32, &Placement)> =
+		let mut placed: Vec<(Grid, &Placement)> =
 			self.placements.iter().map(|(&id, placement)| (id, placement)).collect();
 		placed.retain(|(id, placement)| *placement != &Placement::Hidden && self.grids.contains_key(id));
 		placed.sort_by_key(|&(id, placement)| match placement {
@@ -793,13 +794,13 @@ impl Editor {
 
 	/// The layers in drawing order: grid 1, then the grids shown over it (see [`Editor::stacked`])
 	fn layers(&self) -> Vec<Layer> {
-		let screen_height = self.grids.get(&1).map_or(0, |grid| grid.height);
+		let screen_height = self.grids.get(&Grid::GLOBAL).map_or(0, |grid| grid.height);
 		let placed = self.stacked();
 
 		let mut shadows = self.float_shadows(&placed);
 		shadows.extend(self.external_shadows(&placed));
 		// What covers grid 1, and what covers the tiled windows, in cells
-		let screen_width = self.grids.get(&1).map_or(0, |grid| grid.width);
+		let screen_width = self.grids.get(&Grid::GLOBAL).map_or(0, |grid| grid.width);
 		let area_of = |kind: fn(&Placement) -> Option<[u32; 2]>| -> Vec<Rect<u32>> {
 			placed
 				.iter()
@@ -823,8 +824,8 @@ impl Editor {
 		let under_windows: Vec<Rect<u32>> = tiled.iter().chain(&messages).copied().collect();
 
 		let mut layers = Vec::with_capacity(placed.len() + 2);
-		if self.grids.contains_key(&1) {
-			layers.push(self.see_through_cells(self.layer(1, 0, 0), (0, 0), &under_windows));
+		if self.grids.contains_key(&Grid::GLOBAL) {
+			layers.push(self.see_through_cells(self.layer(Grid::GLOBAL, 0, 0), (0, 0), &under_windows));
 		}
 		for (id, placement) in placed {
 			match placement {
@@ -897,8 +898,8 @@ impl Editor {
 	/// `zindex` with the same shadow share it, so the windows of a plugin's UI read as one; a float attached to another
 	/// counts at that float's level. A level's first shadow is drawn with its first window, under all of them; another,
 	/// for windows with a shadow of their own, with the first window casting it.
-	fn float_shadows(&self, placed: &[(u32, &Placement)]) -> HashMap<u32, LayerShadow> {
-		let floats: Vec<(u32, Window, u32, [u32; 2])> = placed
+	fn float_shadows(&self, placed: &[(Grid, &Placement)]) -> HashMap<Grid, LayerShadow> {
+		let floats: Vec<(Grid, Window, u32, [u32; 2])> = placed
 			.iter()
 			.filter_map(|&(id, placement)| match placement {
 				Placement::Float { win, row, col, zindex, .. } => Some((id, *win, *zindex, [*col, *row])),
@@ -922,8 +923,8 @@ impl Editor {
 		};
 
 		// By level and shadow, in the order of their first windows: the level, the grid it's drawn with, and the shadow
-		let mut groups: Vec<(u32, u32, LayerShadow)> = Vec::new();
-		let mut first_of_level: HashMap<u32, u32> = HashMap::new();
+		let mut groups: Vec<(u32, Grid, LayerShadow)> = Vec::new();
+		let mut first_of_level: HashMap<u32, Grid> = HashMap::new();
 		for &(id, win, _, [col, row]) in &floats {
 			let level = level(win);
 			let first = *first_of_level.entry(level).or_insert(id);
@@ -947,12 +948,13 @@ impl Editor {
 		groups.into_iter().map(|(_, carrier, group)| (carrier, group)).collect()
 	}
 
-	/// Grid `id` as a layer at `row`, `col` of the screen, with the cursor if it's in this grid
-	fn layer(&self, id: u32, row: u32, col: u32) -> Layer {
+	/// GridState `id` as a layer at `row`, `col` of the screen, with the cursor if it's in this grid
+	fn layer(&self, id: Grid, row: u32, col: u32) -> Layer {
 		let cursor = (id == self.cursor_grid).then(|| self.cursor.style()).flatten();
 		let (font, cell) = self.font_of(id);
-		let mut layer = cell_layer(id, &self.grids[&id], &self.highlights, cursor, cell);
-		layer.font = font;
+		let mut layer = cell_layer(&self.grids[&id], &self.highlights, cursor, cell);
+		// The grid's handle identifies its layer.
+		(layer.id, layer.font) = (u64::from(id.0), font);
 		(layer.x, layer.y) = (col * self.cell.width, row * self.cell.height);
 		layer.scroll = self.scroll(id, layer.width, layer.height);
 		layer
@@ -961,7 +963,7 @@ impl Editor {
 	/// The shadows under the external windows among `placed`, by the grid of the window each is drawn with. Like attached
 	/// floats, external windows placed relative to another external window, and so on, share its shadow if it's the same,
 	/// so windows put together read as one; it's drawn with the first of them, under all of them.
-	fn external_shadows(&self, placed: &[(u32, &Placement)]) -> HashMap<u32, LayerShadow> {
+	fn external_shadows(&self, placed: &[(Grid, &Placement)]) -> HashMap<Grid, LayerShadow> {
 		let grid_of = |win: Window| {
 			let (&grid, _) = self.viewports.iter().find(|(_, viewport)| viewport.win == Some(win))?;
 			matches!(self.placements.get(&grid), Some(Placement::External { .. })).then_some(grid)
@@ -979,7 +981,7 @@ impl Editor {
 		};
 
 		// By root and shadow, in the order of their first windows: the root, the grid it's drawn with, and the shadow
-		let mut groups: Vec<(Window, u32, LayerShadow)> = Vec::new();
+		let mut groups: Vec<(Window, Grid, LayerShadow)> = Vec::new();
 		for &(id, placement) in placed {
 			let Placement::External { win, .. } = placement else { continue };
 			let Some(shadow) = self.shadow_of(*win) else { continue };
@@ -1001,7 +1003,7 @@ impl Editor {
 
 	/// External window `win`, grid `id`, as a layer where it's placed (see [`Editor::set_external_place`]), with `shadow`,
 	/// the shadow drawn with it (see [`Editor::external_shadows`])
-	fn external_layer(&self, id: u32, win: Window, shadow: Option<LayerShadow>) -> Layer {
+	fn external_layer(&self, id: Grid, win: Window, shadow: Option<LayerShadow>) -> Layer {
 		let mut layer = self.layer(id, 0, 0);
 		let rect = self.external_rect(id, win);
 		(layer.x, layer.y) = (rect.x, rect.y);
@@ -1015,13 +1017,13 @@ impl Editor {
 	}
 
 	/// Where external window `win`, grid `id`, is, in pixels
-	fn external_rect(&self, id: u32, win: Window) -> Rect<u32> {
+	fn external_rect(&self, id: Grid, win: Window) -> Rect<u32> {
 		self.external_rect_within(id, win, 0)
 	}
 
 	/// [`Editor::external_rect`], `depth` external windows away from the one asked for: windows placed relative to one
 	/// another can't go round in a loop.
-	fn external_rect_within(&self, id: u32, win: Window, depth: u32) -> Rect<u32> {
+	fn external_rect_within(&self, id: Grid, win: Window, depth: u32) -> Rect<u32> {
 		let (grid, cell) = (&self.grids[&id], self.cell_of(id));
 		let size = [grid.width * cell.width, grid.height * cell.height];
 		// Placed with its frame, like Neovim places a floating window with its border: its cells inside it
@@ -1036,7 +1038,7 @@ impl Editor {
 	/// floats do.
 	fn external_place(&self, win: Window, outer: [u32; 2], depth: u32) -> [u32; 2] {
 		// Above the command line, like Neovim keeps floating windows
-		let screen = self.grids.get(&1).map_or([0, 0], |grid| {
+		let screen = self.grids.get(&Grid::GLOBAL).map_or([0, 0], |grid| {
 			let rows = (grid.height).saturating_sub(self.command_rows);
 			[grid.width * self.cell.width, rows * self.cell.height]
 		});
@@ -1062,7 +1064,7 @@ impl Editor {
 	}
 
 	/// How the text of grid `id`, `width` × `height` cells, scrolled since the last `flush`, if it did
-	fn scroll(&self, id: u32, width: u32, height: u32) -> Option<Scroll> {
+	fn scroll(&self, id: Grid, width: u32, height: u32) -> Option<Scroll> {
 		let viewport = self.viewports.get(&id).filter(|viewport| viewport.scrolled != 0)?;
 		let motion = viewport.win.and_then(|win| self.scroll_motions.get(&win).copied());
 		// It jumps.
@@ -1083,12 +1085,12 @@ impl Editor {
 	/// The line the TUI draws above messages that scrolled over the windows: `separator` across the screen at `row`,
 	/// in the `MsgSeparator` highlight
 	fn separator(&self, row: u32, separator: CellText) -> Layer {
-		let width = self.grids.get(&1).map_or(0, |grid| grid.width);
-		let mut line = Grid::new(width, 1);
+		let width = self.grids.get(&Grid::GLOBAL).map_or(0, |grid| grid.width);
+		let mut line = GridState::new(width, 1);
 		let hl_id = Some(self.highlights.group("MsgSeparator"));
 		line.set_line(0, 0, &[NvimGridCell { text: separator, hl_id, repeat: Some(width) }]);
 
-		let mut layer = cell_layer(0, &line, &self.highlights, None, self.cell);
+		let mut layer = cell_layer(&line, &self.highlights, None, self.cell);
 		// An id no grid has: Neovim's grid ids are 32-bit.
 		(layer.id, layer.y) = (u64::from(u32::MAX) + 1, row * self.cell.height);
 		layer
@@ -1112,7 +1114,7 @@ fn clip_rows(layer: &mut Layer, height: u32) {
 mod tests {
 	use renderer::{CellSize, Cursor, CursorShape, Edges, FontId, Layer, Motion, Shadow};
 	use rpc::neovim::{
-		CellText, DefaultColorsSetEvent, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
+		CellText, DefaultColorsSetEvent, Grid, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
 		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, OptionSetEvent, OptionValue,
 		RedrawNotification, WinCloseEvent, WinExternalPosEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent,
 		WinViewportEvent, WinViewportMarginsEvent, Window,
@@ -1126,7 +1128,7 @@ mod tests {
 	const CELL: CellSize = CellSize { width: 8, height: 16 };
 
 	fn resize(grid: u32, width: u32, height: u32) -> RedrawNotification {
-		RedrawNotification::GridResize(vec![GridResizeEvent { grid, width, height }])
+		RedrawNotification::GridResize(vec![GridResizeEvent { grid: Grid(grid), width, height }])
 	}
 
 	fn line(grid: u32, row: u32, text: &str) -> RedrawNotification {
@@ -1134,11 +1136,11 @@ mod tests {
 			.chars()
 			.map(|c| GridCell { text: CellText::from(&c.to_string()).unwrap(), hl_id: None, repeat: None })
 			.collect();
-		RedrawNotification::GridLine(vec![GridLineEvent { grid, row, col_start: 0, cells, wrap: false }])
+		RedrawNotification::GridLine(vec![GridLineEvent { grid: Grid(grid), row, col_start: 0, cells, wrap: false }])
 	}
 
 	fn goto(grid: u32, row: u32, col: u32) -> RedrawNotification {
-		RedrawNotification::GridCursorGoto(vec![GridCursorGotoEvent { grid, row, col }])
+		RedrawNotification::GridCursorGoto(vec![GridCursorGotoEvent { grid: Grid(grid), row, col }])
 	}
 
 	fn colors() -> RedrawNotification {
@@ -1227,12 +1229,13 @@ mod tests {
 	}
 
 	fn win_pos(grid: u32, row: u32, col: u32) -> RedrawNotification {
-		let position = WinPosEvent { grid, win: IgnoredAny, start_row: row, start_col: col, width: 0, height: 0 };
+		let position =
+			WinPosEvent { grid: Grid(grid), win: IgnoredAny, start_row: row, start_col: col, width: 0, height: 0 };
 		RedrawNotification::WinPos(vec![position])
 	}
 
 	fn external(grid: u32) -> RedrawNotification {
-		RedrawNotification::WinExternalPos(vec![WinExternalPosEvent { grid, win: win_of(grid) }])
+		RedrawNotification::WinExternalPos(vec![WinExternalPosEvent { grid: Grid(grid), win: win_of(grid) }])
 	}
 
 	fn float(grid: u32, row: u32, col: u32, compindex: u32) -> RedrawNotification {
@@ -1242,10 +1245,10 @@ mod tests {
 	/// Like [`float`], at `zindex`
 	fn float_at_level(grid: u32, row: u32, col: u32, compindex: u32, zindex: u32) -> RedrawNotification {
 		RedrawNotification::WinFloatPos(vec![WinFloatPosEvent {
-			grid,
+			grid: Grid(grid),
 			win: win_of(grid),
 			anchor: String::from("NW"),
-			anchor_grid: 1,
+			anchor_grid: Grid(1),
 			anchor_row: f64::from(row),
 			anchor_col: f64::from(col),
 			mouse_enabled: true,
@@ -1258,7 +1261,14 @@ mod tests {
 
 	fn messages(row: u32, scrolled: bool, compindex: u32) -> RedrawNotification {
 		let sep_char = String::from("─");
-		RedrawNotification::MsgSetPos(vec![MsgSetPosEvent { grid: 3, row, scrolled, sep_char, zindex: 200, compindex }])
+		RedrawNotification::MsgSetPos(vec![MsgSetPosEvent {
+			grid: Grid(3),
+			row,
+			scrolled,
+			sep_char,
+			zindex: 200,
+			compindex,
+		}])
 	}
 
 	/// The middle of screen cell `row`, `col`, in pixels
@@ -1348,12 +1358,12 @@ mod tests {
 		let mut editor = screen();
 		flush(&mut editor, vec![win_pos(2, 0, 6)]);
 
-		let hide = RedrawNotification::WinHide(vec![WinHideEvent { grid: 2 }]);
+		let hide = RedrawNotification::WinHide(vec![WinHideEvent { grid: Grid(2) }]);
 		assert_eq!(placement(&flush(&mut editor, vec![hide])), [(1, 0, 0, 5)]);
 		assert_eq!(placement(&flush(&mut editor, vec![win_pos(2, 1, 6)])), [(1, 0, 0, 5), (2, 1, 6, 3)]);
 
-		let close = RedrawNotification::WinClose(vec![WinCloseEvent { grid: 2 }]);
-		let destroy = RedrawNotification::GridDestroy(vec![GridDestroyEvent { grid: 2 }]);
+		let close = RedrawNotification::WinClose(vec![WinCloseEvent { grid: Grid(2) }]);
+		let destroy = RedrawNotification::GridDestroy(vec![GridDestroyEvent { grid: Grid(2) }]);
 		assert_eq!(placement(&flush(&mut editor, vec![close, destroy])), [(1, 0, 0, 5)]);
 		// A destroyed grid takes events no more.
 		assert_eq!(editor.apply(vec![line(2, 0, "x"), RedrawNotification::Flush]), None);
@@ -1378,7 +1388,7 @@ mod tests {
 
 	fn viewport(grid: u32, line_count: u32, scroll_delta: i64) -> RedrawNotification {
 		RedrawNotification::WinViewport(vec![WinViewportEvent {
-			grid,
+			grid: Grid(grid),
 			win: win_of(grid),
 			topline: 0,
 			botline: 0,
@@ -1418,7 +1428,7 @@ mod tests {
 	#[test]
 	fn margins_dont_scroll() {
 		let mut editor = screen();
-		let margins = WinViewportMarginsEvent { grid: 2, win: IgnoredAny, top: 1, bottom: 0, left: 1, right: 1 };
+		let margins = WinViewportMarginsEvent { grid: Grid(2), win: IgnoredAny, top: 1, bottom: 0, left: 1, right: 1 };
 		flush(
 			&mut editor,
 			vec![win_pos(2, 0, 0), RedrawNotification::WinViewportMargins(vec![margins]), viewport(2, 9, 0)],
@@ -1451,7 +1461,7 @@ mod tests {
 		let rgb_attr = HlAttrs { background: Some(0x123456), ..attrs() };
 		let colored = HlAttrDefineEvent { id: 1, rgb_attr, cterm_attr: attrs(), info: vec![] };
 		let cell = GridCell { text: CellText::from("a").unwrap(), hl_id: Some(1), repeat: None };
-		let line = GridLineEvent { grid: 2, row: 0, col_start: 0, cells: vec![cell], wrap: false };
+		let line = GridLineEvent { grid: Grid(2), row: 0, col_start: 0, cells: vec![cell], wrap: false };
 		let events = vec![RedrawNotification::HlAttrDefine(vec![colored]), RedrawNotification::GridLine(vec![line])];
 		let redraw = flush(&mut editor, events);
 
@@ -1619,7 +1629,7 @@ mod tests {
 		let mut editor = screen();
 		// A 4×2 external window, centered at (24, 24) on the 80×80 pixel screen, over window grid 2
 		flush(&mut editor, vec![win_pos(2, 0, 0), resize(4, 4, 2), external(4), RedrawNotification::MouseOn]);
-		let cell = |grid, row, col| Some(GridPosition { grid, row, col });
+		let cell = |grid, row, col| Some(GridPosition { grid: Grid(grid), row, col });
 		assert_eq!(editor.grid_at(24.0, 24.0), cell(4, 0, 0));
 		assert_eq!(editor.grid_at(24.0 + 3.0 * 8.0 + 1.0, 24.0 + 16.0 + 1.0), cell(4, 1, 3));
 		assert_eq!(editor.pointer_at(30.0, 30.0), Pointer::Text);
@@ -1627,9 +1637,9 @@ mod tests {
 		assert_eq!(editor.grid_at(23.0, 24.0), cell(2, 1, 2));
 
 		// Its cells reach past it, e.g. for a drag: two rows and three columns before its top-left corner
-		assert_eq!(editor.grid_cell(4, 0.0, 0.0), Some((-2, -3)));
-		assert_eq!(editor.grid_cell(2, 8.0, 16.0), Some((1, 1)));
-		assert_eq!(editor.grid_cell(9, 0.0, 0.0), None);
+		assert_eq!(editor.grid_cell(Grid(4), 0.0, 0.0), Some((-2, -3)));
+		assert_eq!(editor.grid_cell(Grid(2), 8.0, 16.0), Some((1, 1)));
+		assert_eq!(editor.grid_cell(Grid(9), 0.0, 0.0), None);
 	}
 
 	#[test]
@@ -1644,7 +1654,7 @@ mod tests {
 		let window = redraw.layers.iter().find(|layer| layer.id == 4).unwrap();
 		assert_eq!((window.x, window.y, window.cell), (20, 20, cell));
 		// The mouse goes by its cells too.
-		assert_eq!(editor.grid_at(20.0 + 10.0 + 1.0, 20.0 + 1.0), Some(GridPosition { grid: 4, row: 0, col: 1 }));
+		assert_eq!(editor.grid_at(20.0 + 10.0 + 1.0, 20.0 + 1.0), Some(GridPosition { grid: Grid(4), row: 0, col: 1 }));
 
 		// Back to the main fonts
 		editor.set_external_font(win_of(4), None);
@@ -1664,7 +1674,7 @@ mod tests {
 		assert_eq!(ids, [1, 4, 5]);
 
 		// Closed, it's gone.
-		let closed = RedrawNotification::WinClose(vec![WinCloseEvent { grid: 4 }]);
+		let closed = RedrawNotification::WinClose(vec![WinCloseEvent { grid: Grid(4) }]);
 		let redraw = flush(&mut editor, vec![closed]);
 		assert_eq!(redraw.layers.len(), 2);
 	}
@@ -1842,7 +1852,7 @@ mod tests {
 		let mut editor = screen();
 		// Window 2 at row 1 with a winbar, and a 2×1 external window with 4 pixels of padding, on the 80×80 pixel
 		// screen
-		let margins = WinViewportMarginsEvent { grid: 2, win: IgnoredAny, top: 1, bottom: 0, left: 0, right: 0 };
+		let margins = WinViewportMarginsEvent { grid: Grid(2), win: IgnoredAny, top: 1, bottom: 0, left: 0, right: 0 };
 		let events = vec![
 			resize(2, 10, 3),
 			win_pos(2, 1, 0),
@@ -1918,8 +1928,8 @@ mod tests {
 		let layer = redraw.layers.iter().find(|layer| layer.id == 3).unwrap();
 		assert_eq!((layer.x, layer.y, layer.padding, layer.outline), (2 * 8, 2 * 16, Edges::default(), None));
 		// The mouse finds its cells where Neovim placed them.
-		assert_eq!(editor.grid_at(17.0, 33.0), Some(GridPosition { grid: 3, row: 0, col: 0 }));
-		assert_eq!(editor.grid_at(25.0, 33.0), Some(GridPosition { grid: 3, row: 0, col: 1 }));
+		assert_eq!(editor.grid_at(17.0, 33.0), Some(GridPosition { grid: Grid(3), row: 0, col: 0 }));
+		assert_eq!(editor.grid_at(25.0, 33.0), Some(GridPosition { grid: Grid(3), row: 0, col: 1 }));
 	}
 
 	#[test]
@@ -2019,7 +2029,7 @@ mod tests {
 		assert_eq!(shadow_of(&redraw, 3), None);
 
 		// Forgotten with the float's grid
-		flush(&mut editor, vec![RedrawNotification::GridDestroy(vec![GridDestroyEvent { grid: 3 }])]);
+		flush(&mut editor, vec![RedrawNotification::GridDestroy(vec![GridDestroyEvent { grid: Grid(3) }])]);
 		assert!(editor.floats.is_empty());
 	}
 
@@ -2125,7 +2135,7 @@ mod tests {
 
 		// Forgotten with the window's grid
 		editor.set_scroll_motion(win_of(2), None);
-		flush(&mut editor, vec![RedrawNotification::GridDestroy(vec![GridDestroyEvent { grid: 2 }])]);
+		flush(&mut editor, vec![RedrawNotification::GridDestroy(vec![GridDestroyEvent { grid: Grid(2) }])]);
 		assert!(editor.scroll_motions.is_empty());
 	}
 
@@ -2191,7 +2201,7 @@ mod tests {
 			let (x, y) = middle(row, col);
 			editor.grid_at(x, y)
 		};
-		let cell = |grid, row, col| Some(GridPosition { grid, row, col });
+		let cell = |grid, row, col| Some(GridPosition { grid: Grid(grid), row, col });
 
 		assert_eq!(at(&editor, 0, 7), cell(2, 0, 1));
 		assert_eq!(at(&editor, 0, 2), cell(1, 0, 2));
@@ -2210,10 +2220,10 @@ mod tests {
 		assert_eq!(at(&editor, 2, 6), cell(2, 2, 0));
 
 		assert_eq!(
-			(editor.grid_origin(1), editor.grid_origin(2), editor.grid_origin(6)),
+			(editor.grid_origin(Grid(1)), editor.grid_origin(Grid(2)), editor.grid_origin(Grid(6))),
 			(Some((0, 0)), Some((0, 6)), Some((1, 5)))
 		);
-		assert_eq!(editor.grid_origin(9), None);
+		assert_eq!(editor.grid_origin(Grid(9)), None);
 	}
 
 	#[test]
@@ -2224,8 +2234,8 @@ mod tests {
 			let (x, y) = middle(row, col);
 			editor.grid_at(x, y)
 		};
-		assert_eq!(at(3, 4), Some(GridPosition { grid: 3, row: 0, col: 4 }));
-		assert_eq!(at(2, 4), Some(GridPosition { grid: 1, row: 2, col: 4 }));
-		assert_eq!(editor.grid_origin(3), Some((3, 0)));
+		assert_eq!(at(3, 4), Some(GridPosition { grid: Grid(3), row: 0, col: 4 }));
+		assert_eq!(at(2, 4), Some(GridPosition { grid: Grid(1), row: 2, col: 4 }));
+		assert_eq!(editor.grid_origin(Grid(3)), Some((3, 0)));
 	}
 }

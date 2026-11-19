@@ -1,3 +1,4 @@
+use crate::Grid;
 use arrayvec::ArrayString;
 use serde::Deserialize;
 
@@ -10,7 +11,7 @@ pub type CellText = ArrayString<32>;
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct GridLineEvent {
-	pub grid: u32,
+	pub grid: Grid,
 	pub row: u32,
 	pub col_start: u32,
 	pub cells: Vec<GridCell>,
@@ -35,7 +36,7 @@ mod tests {
 	#[test]
 	fn de_grid_line() {
 		let expected = RedrawNotification::GridLine(vec![GridLineEvent {
-			grid: 1,
+			grid: crate::Grid(1),
 			row: 0,
 			col_start: 0,
 			cells: vec![
@@ -59,7 +60,7 @@ mod tests {
 	#[test]
 	fn de_grid_line_wide_and_combining() {
 		let expected = RedrawNotification::GridLine(vec![GridLineEvent {
-			grid: 1,
+			grid: crate::Grid(1),
 			row: 0,
 			col_start: 0,
 			cells: vec![

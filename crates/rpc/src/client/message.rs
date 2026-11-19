@@ -247,7 +247,7 @@ mod tests {
 	#[test]
 	fn de_notification() {
 		let expected = IncomingRpcMessage::<()>::Notification(Notification::Redraw(vec![
-			RedrawNotification::GridResize(vec![GridResizeEvent { grid: 1, width: 10, height: 10 }]),
+			RedrawNotification::GridResize(vec![GridResizeEvent { grid: crate::Grid(1), width: 10, height: 10 }]),
 		]));
 
 		let notification = vec![

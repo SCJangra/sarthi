@@ -14,8 +14,9 @@ impl GridCell {
 	}
 }
 
+/// What Neovim drew to a grid: its cells, and the cursor's place in it
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Grid {
+pub struct GridState {
 	pub width: u32,
 	pub height: u32,
 	pub cells: Vec<GridCell>,
@@ -23,7 +24,7 @@ pub struct Grid {
 	pub cursor_col: u32,
 }
 
-impl Grid {
+impl GridState {
 	pub fn new(width: u32, height: u32) -> Self {
 		let mut grid = Self { width: 0, height: 0, cells: Vec::new(), cursor_row: 0, cursor_col: 0 };
 		grid.resize(width, height);
@@ -115,12 +116,12 @@ impl Grid {
 
 #[cfg(test)]
 mod tests {
-	use super::{Grid, GridCell};
+	use super::{GridCell, GridState};
 	use rpc::neovim::{CellText, GridCell as NvimGridCell};
 
 	#[test]
 	fn new_grid() {
-		let grid = Grid::new(3, 2);
+		let grid = GridState::new(3, 2);
 
 		assert_eq!(grid.width, 3);
 		assert_eq!(grid.height, 2);
@@ -144,7 +145,7 @@ mod tests {
 
 	#[test]
 	fn clear() {
-		let mut grid = Grid::new(2, 2);
+		let mut grid = GridState::new(2, 2);
 
 		grid.cells[0] = GridCell { text: CellText::from("x").unwrap(), hl_id: 1 };
 		grid.cells[3] = GridCell { text: CellText::from("y").unwrap(), hl_id: 2 };
@@ -155,7 +156,7 @@ mod tests {
 
 	#[test]
 	fn set_line() {
-		let mut grid = Grid::new(5, 2);
+		let mut grid = GridState::new(5, 2);
 		let cells = vec![
 			NvimGridCell { text: CellText::from("a").unwrap(), hl_id: Some(1), repeat: Some(2) },
 			NvimGridCell { text: CellText::from("b").unwrap(), hl_id: None, repeat: None },
@@ -182,7 +183,7 @@ mod tests {
 
 	#[test]
 	fn set_line_reuses_last_hl_id() {
-		let mut grid = Grid::new(6, 1);
+		let mut grid = GridState::new(6, 1);
 		let cells = vec![
 			NvimGridCell { text: CellText::from("a").unwrap(), hl_id: Some(4), repeat: None },
 			NvimGridCell { text: CellText::from("b").unwrap(), hl_id: None, repeat: Some(2) },
@@ -198,8 +199,8 @@ mod tests {
 	}
 
 	/// A grid with one row per string, one character per cell
-	fn grid_of(rows: &[&str]) -> Grid {
-		let mut grid = Grid::new(rows[0].len() as u32, rows.len() as u32);
+	fn grid_of(rows: &[&str]) -> GridState {
+		let mut grid = GridState::new(rows[0].len() as u32, rows.len() as u32);
 		for (row, text) in (0..).zip(rows) {
 			let cells: Vec<_> = text
 				.chars()
@@ -210,7 +211,7 @@ mod tests {
 		grid
 	}
 
-	fn rows_of(grid: &Grid) -> Vec<String> {
+	fn rows_of(grid: &GridState) -> Vec<String> {
 		grid.cells
 			.chunks(grid.width as usize)
 			.map(|row| row.iter().map(|cell| cell.text.as_str()).collect())
@@ -265,7 +266,7 @@ mod tests {
 
 	#[test]
 	fn set_cursor() {
-		let mut grid = Grid::new(3, 2);
+		let mut grid = GridState::new(3, 2);
 
 		grid.set_cursor(1, 2);
 		assert_eq!(grid.cursor_row, 1);

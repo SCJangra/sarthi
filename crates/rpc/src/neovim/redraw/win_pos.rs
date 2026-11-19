@@ -1,3 +1,4 @@
+use crate::Grid;
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
@@ -8,7 +9,7 @@ use crate::Window;
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinPosEvent {
-	pub grid: u32,
+	pub grid: Grid,
 
 	/// The window handle, unused
 	pub win: IgnoredAny,
@@ -24,13 +25,13 @@ pub struct WinPosEvent {
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinFloatPosEvent {
-	pub grid: u32,
+	pub grid: Grid,
 
 	pub win: Window,
 
 	/// "NW", "NE", "SW" or "SE"
 	pub anchor: String,
-	pub anchor_grid: i64,
+	pub anchor_grid: Grid,
 	pub anchor_row: f64,
 	pub anchor_col: f64,
 
@@ -52,7 +53,7 @@ pub struct WinFloatPosEvent {
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinExternalPosEvent {
-	pub grid: u32,
+	pub grid: Grid,
 	pub win: Window,
 }
 
@@ -60,28 +61,28 @@ pub struct WinExternalPosEvent {
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinHideEvent {
-	pub grid: u32,
+	pub grid: Grid,
 }
 
 /// Closes the window of `grid`
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinCloseEvent {
-	pub grid: u32,
+	pub grid: Grid,
 }
 
 /// Frees `grid`; it won't be used again
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct GridDestroyEvent {
-	pub grid: u32,
+	pub grid: Grid,
 }
 
 /// Shows the message grid at `row` of grid 1, across its full width (`:help ui-multigrid`)
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct MsgSetPosEvent {
-	pub grid: u32,
+	pub grid: Grid,
 	pub row: u32,
 
 	/// Whether messages scrolled up over other windows; the TUI then draws a line of `sep_char` above them
@@ -120,7 +121,8 @@ mod tests {
 	fn de_win_pos() {
 		// From Neovim 0.12: ["win_pos", [2, win, 0, 31, 29, 13]]
 		let event = decode("win_pos", vec![vec![2.into(), win(0xE8), 0.into(), 31.into(), 29.into(), 13.into()]]);
-		let expected = WinPosEvent { grid: 2, win: IgnoredAny, start_row: 0, start_col: 31, width: 29, height: 13 };
+		let expected =
+			WinPosEvent { grid: crate::Grid(2), win: IgnoredAny, start_row: 0, start_col: 31, width: 29, height: 13 };
 		assert_eq!(event, RedrawNotification::WinPos(vec![expected]));
 	}
 
@@ -142,10 +144,10 @@ mod tests {
 		];
 		let event = decode("win_float_pos", vec![float]);
 		let expected = WinFloatPosEvent {
-			grid: 6,
+			grid: crate::Grid(6),
 			win: Window(0x3EB),
 			anchor: String::from("NW"),
-			anchor_grid: 1,
+			anchor_grid: crate::Grid(1),
 			anchor_row: 3.0,
 			anchor_col: 10.0,
 			mouse_enabled: true,
@@ -169,7 +171,7 @@ mod tests {
 	fn de_win_external_pos() {
 		// From Neovim 0.12, after `nvim_open_win(buf, false, { external = true, width = 20, height = 5 })`
 		let event = decode("win_external_pos", vec![vec![4.into(), win(0xE9)]]);
-		let expected = WinExternalPosEvent { grid: 4, win: Window(0x3E9) };
+		let expected = WinExternalPosEvent { grid: crate::Grid(4), win: Window(0x3E9) };
 		assert_eq!(event, RedrawNotification::WinExternalPos(vec![expected]));
 	}
 
@@ -177,17 +179,17 @@ mod tests {
 	fn de_win_hide_close_and_grid_destroy() {
 		assert_eq!(
 			decode("win_hide", vec![vec![5.into()]]),
-			RedrawNotification::WinHide(vec![WinHideEvent { grid: 5 }])
+			RedrawNotification::WinHide(vec![WinHideEvent { grid: crate::Grid(5) }])
 		);
 		assert_eq!(
 			decode("win_close", vec![vec![7.into()]]),
-			RedrawNotification::WinClose(vec![WinCloseEvent { grid: 7 }])
+			RedrawNotification::WinClose(vec![WinCloseEvent { grid: crate::Grid(7) }])
 		);
 		assert_eq!(
 			decode("grid_destroy", vec![vec![7.into()], vec![8.into()]]),
 			RedrawNotification::GridDestroy(vec![
-				super::GridDestroyEvent { grid: 7 },
-				super::GridDestroyEvent { grid: 8 }
+				super::GridDestroyEvent { grid: crate::Grid(7) },
+				super::GridDestroyEvent { grid: crate::Grid(8) }
 			])
 		);
 	}
@@ -197,8 +199,14 @@ mod tests {
 		// From Neovim 0.12, after a long message scrolled up
 		let event =
 			decode("msg_set_pos", vec![vec![3.into(), 10.into(), true.into(), " ".into(), 200.into(), 2.into()]]);
-		let expected =
-			MsgSetPosEvent { grid: 3, row: 10, scrolled: true, sep_char: String::from(" "), zindex: 200, compindex: 2 };
+		let expected = MsgSetPosEvent {
+			grid: crate::Grid(3),
+			row: 10,
+			scrolled: true,
+			sep_char: String::from(" "),
+			zindex: 200,
+			compindex: 2,
+		};
 		assert_eq!(event, RedrawNotification::MsgSetPos(vec![expected]));
 	}
 }

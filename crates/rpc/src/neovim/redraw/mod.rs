@@ -151,8 +151,8 @@ mod tests {
 	#[test]
 	fn de_ignores_trailing_arguments() {
 		let expected = RedrawNotification::GridCursorGoto(vec![
-			GridCursorGotoEvent { grid: 1, row: 5, col: 9 },
-			GridCursorGotoEvent { grid: 2, row: 7, col: 3 },
+			GridCursorGotoEvent { grid: crate::Grid(1), row: 5, col: 9 },
+			GridCursorGotoEvent { grid: crate::Grid(2), row: 7, col: 3 },
 		]);
 
 		// ["grid_cursor_goto", [1, 5, 9, "new"], [2, 7, 3]]: a newer Neovim may append parameters

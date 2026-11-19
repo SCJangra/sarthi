@@ -1,3 +1,4 @@
+use crate::Grid;
 use serde::{Serialize, Serializer};
 
 use crate::RpcMethod;
@@ -21,7 +22,7 @@ pub struct InputMouseParams {
 	pub modifiers: String,
 
 	/// The grid and its cell. A drag can go past the grid's edges, e.g. to select beyond the window, which scrolls it.
-	pub grid: u32,
+	pub grid: Grid,
 	pub row: i64,
 	pub col: i64,
 }
@@ -97,7 +98,7 @@ mod tests {
 	use super::{InputMouseParams, MouseButton, MouseInput, WheelDirection};
 
 	fn encode(input: MouseInput) -> Value {
-		let params = InputMouseParams { input, modifiers: String::from("C"), grid: 2, row: -1, col: 4 };
+		let params = InputMouseParams { input, modifiers: String::from("C"), grid: crate::Grid(2), row: -1, col: 4 };
 		rmpv::ext::to_value(params).unwrap()
 	}
 

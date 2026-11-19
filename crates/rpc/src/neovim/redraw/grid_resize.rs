@@ -1,9 +1,10 @@
+use crate::Grid;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct GridResizeEvent {
-	pub grid: u32,
+	pub grid: Grid,
 	pub width: u32,
 	pub height: u32,
 }
@@ -16,8 +17,8 @@ mod tests {
 	#[test]
 	fn de_grid_resize() {
 		let expected = RedrawNotification::GridResize(vec![
-			GridResizeEvent { grid: 1, width: 20, height: 20 },
-			GridResizeEvent { grid: 2, width: 40, height: 40 },
+			GridResizeEvent { grid: crate::Grid(1), width: 20, height: 20 },
+			GridResizeEvent { grid: crate::Grid(2), width: 40, height: 40 },
 		]);
 
 		let event = vec![
