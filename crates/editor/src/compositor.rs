@@ -1,4 +1,4 @@
-use renderer::{BarOrientation, CellLayer, CellSize, Cursor, Decoration, FontId, RenderCell, TextStyle};
+use renderer::{BarOrientation, CellSize, Cursor, Decoration, FontId, Layer, RenderCell, TextStyle};
 use rpc::neovim::CursorShape;
 
 use crate::cursor::CursorStyle;
@@ -13,7 +13,7 @@ pub fn cell_layer(
 	highlights: &HighlightState,
 	cursor: Option<CursorStyle>,
 	cell: CellSize,
-) -> CellLayer {
+) -> Layer {
 	let cells = grid
 		.cells
 		.iter()
@@ -34,7 +34,7 @@ pub fn cell_layer(
 		})
 		.collect();
 
-	let mut layer = CellLayer {
+	let mut layer = Layer {
 		id: u64::from(id),
 		x: 0,
 		y: 0,
@@ -59,7 +59,7 @@ pub fn cell_layer(
 
 /// Gives `layer` its cursor, at `row`, `col`, in `style`. The colors come from the cursor's highlight, or are the
 /// cell's swapped when it has none (`:help ui-event-mode_info_set`).
-fn draw_cursor(layer: &mut CellLayer, row: usize, col: usize, style: CursorStyle, highlights: &HighlightState) {
+fn draw_cursor(layer: &mut Layer, row: usize, col: usize, style: CursorStyle, highlights: &HighlightState) {
 	let width = layer.width as usize;
 	let index = row * width + col;
 	let Some(&cell) = layer.cells.get(index).filter(|_| col < width) else { return };
@@ -163,7 +163,7 @@ mod tests {
 		grid
 	}
 
-	fn colors(layer: &renderer::CellLayer) -> Vec<(u32, u32)> {
+	fn colors(layer: &renderer::Layer) -> Vec<(u32, u32)> {
 		layer
 			.cells
 			.iter()

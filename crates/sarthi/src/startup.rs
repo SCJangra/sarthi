@@ -313,7 +313,7 @@ mod tests {
 		let redraw = editor.refresh().expect("drawn");
 		// The screen, and the error's window over it
 		assert_eq!(redraw.layers.len(), 2);
-		let renderer::Layer::Cells(screen) = &redraw.layers[0];
+		let screen = &redraw.layers[0];
 		assert!(screen.cursor.is_none());
 		assert_eq!(redraw.background, 0x14161B);
 	}

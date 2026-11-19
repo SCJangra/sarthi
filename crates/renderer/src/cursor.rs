@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use crate::animation::{Approach, Easing, Motion};
-use crate::{BarOrientation, CellLayer, CellSize, Cursor, CursorShape};
+use crate::{BarOrientation, CellSize, Cursor, CursorShape, Layer};
 
 /// How the cursor moves to a new place
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -113,7 +113,7 @@ impl CursorAnimation {
 
 /// Where `cursor` of `layer` is, in pixels from the window's top-left corner: left, top, width, height. A bar is as
 /// thick as it's drawn at rest.
-pub(crate) fn cursor_rect(layer: &CellLayer, cursor: Cursor) -> [f32; 4] {
+pub(crate) fn cursor_rect(layer: &Layer, cursor: Cursor) -> [f32; 4] {
 	let cell = layer.cell;
 	let (left, top) = (layer.x + cursor.col * cell.width, layer.y + cursor.row * cell.height);
 	let width = cursor.width * cell.width;
@@ -163,7 +163,7 @@ mod tests {
 	use std::time::{Duration, Instant};
 
 	use super::{CursorAnimation, CursorMotion, cursor_rect, lead};
-	use crate::{BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Easing, Motion};
+	use crate::{BarOrientation, CellSize, Cursor, CursorShape, Easing, Layer, Motion};
 
 	const CELL: CellSize = CellSize { width: 10, height: 20 };
 
@@ -273,7 +273,7 @@ mod tests {
 	#[test]
 	fn cursor_rects() {
 		// At row 1, column 2 of the window's cells
-		let layer = CellLayer {
+		let layer = Layer {
 			id: 1,
 			x: 20,
 			y: 20,

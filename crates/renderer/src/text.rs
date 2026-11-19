@@ -13,7 +13,7 @@ use crate::font::LineMetrics;
 use crate::font::Run;
 use crate::quad::underline_band;
 use crate::renderer::{Piece, PieceKind};
-use crate::{CellLayer, CellSize, FontId, Fonts, RenderCell, RendererError, TextStyle};
+use crate::{CellSize, FontId, Fonts, Layer, RenderCell, RendererError, TextStyle};
 
 /// Draws the text of cell layers with glyphon
 pub(crate) struct TextPipeline {
@@ -192,7 +192,7 @@ fn text_areas<'a>(rows: &'a [Row], piece: &Piece, empty: &'a Buffer) -> impl Ite
 /// Lays out the rows of `layer` whose cells changed since `rows` were laid out, in the layer's fonts. A changed row takes
 /// over the layout of another changed row that had the same cells, so content that only moved, e.g. after scrolling,
 /// isn't laid out again.
-fn update_rows(rows: &mut Vec<Row>, layer: &CellLayer, fonts: &mut Fonts, swash_cache: &mut SwashCache) {
+fn update_rows(rows: &mut Vec<Row>, layer: &Layer, fonts: &mut Fonts, swash_cache: &mut SwashCache) {
 	let font = layer.font;
 	let (cell, lines) = (fonts.cell_size(font), fonts.line_metrics(font));
 	rows.resize_with(layer.height as usize, Row::default);
@@ -440,7 +440,7 @@ fn layout(fonts: &mut Fonts, font: FontId, segment: &Segment) -> Buffer {
 mod tests {
 	use arrayvec::ArrayString;
 
-	use super::{CellLayer, Fonts, RenderCell, Run, Segment, TextStyle, segments, update_rows};
+	use super::{Fonts, Layer, RenderCell, Run, Segment, TextStyle, segments, update_rows};
 	use crate::{CellSize, Decoration, FontId, TextSize};
 
 	const PLAIN: TextStyle = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
@@ -474,8 +474,8 @@ mod tests {
 	}
 
 	/// A layer one cell wide, with one row per string
-	fn column(rows: &[&str]) -> CellLayer {
-		CellLayer {
+	fn column(rows: &[&str]) -> Layer {
+		Layer {
 			id: 1,
 			x: 0,
 			y: 0,
@@ -656,13 +656,13 @@ mod tests {
 	}
 
 	/// A one-row layer of `text`, one character per cell, underlined in style `underline`
-	fn underlined(text: &str, underline: crate::Underline) -> CellLayer {
+	fn underlined(text: &str, underline: crate::Underline) -> Layer {
 		let decoration = Decoration { underline: Some(underline), ..Decoration::default() };
 		let cells: Vec<RenderCell> = text
 			.chars()
 			.map(|c| RenderCell { decoration, ..cells(&[&c.to_string()], PLAIN)[0] })
 			.collect();
-		CellLayer { width: cells.len() as u32, height: 1, cells, ..column(&["x"]) }
+		Layer { width: cells.len() as u32, height: 1, cells, ..column(&["x"]) }
 	}
 
 	#[test]

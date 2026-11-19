@@ -5,7 +5,7 @@ use std::ops::Range;
 use std::time::Instant;
 
 use crate::animation::{Approach, Motion};
-use crate::{CellLayer, Decoration, Layer, RenderCell, Scroll};
+use crate::{Decoration, Layer, RenderCell, Scroll};
 
 /// The layers whose text is sliding, by layer id
 pub(crate) struct ScrollAnimations {
@@ -19,7 +19,7 @@ pub(crate) struct ScrollAnimations {
 pub(crate) struct SlidingRegion {
 	/// The region's text, from the first row that shows: the layer's text, with text from before the scroll above or
 	/// below it
-	pub layer: CellLayer,
+	pub layer: Layer,
 
 	/// Rows below the region's top to draw `layer`, or above if negative
 	pub offset: f32,
@@ -63,15 +63,13 @@ impl ScrollAnimations {
 			animation.offset(now) != 0.0
 				&& layers
 					.iter()
-					.any(|Layer::Cells(layer)| layer.id == *id && animation.fits(layer, layer.scroll.as_ref()))
+					.any(|layer| layer.id == *id && animation.fits(layer, layer.scroll.as_ref()))
 		});
 
-		for Layer::Cells(layer) in layers {
+		for layer in layers {
 			let Some(scroll) = layer.scroll else { continue };
 			// A new layer has no text to slide from; neither has one that changed size, e.g. a resized window.
-			let previous = shown
-				.iter()
-				.find_map(|Layer::Cells(previous)| (previous.id == layer.id).then_some(previous));
+			let previous = shown.iter().find(|previous| previous.id == layer.id);
 			let Some(previous) =
 				previous.filter(|previous| (previous.width, previous.height) == (layer.width, layer.height))
 			else {
@@ -98,7 +96,7 @@ impl ScrollAnimations {
 	}
 
 	/// The scrolling region of `layer` while its text slides, or `None` if nothing slides
-	pub(crate) fn region(&self, layer: &CellLayer, now: Instant) -> Option<SlidingRegion> {
+	pub(crate) fn region(&self, layer: &Layer, now: Instant) -> Option<SlidingRegion> {
 		let animation = self.layers.get(&layer.id)?;
 		let offset = animation.offset(now);
 		(offset != 0.0).then(|| animation.region_layer(layer, offset))
@@ -107,7 +105,7 @@ impl ScrollAnimations {
 
 impl Animation {
 	/// Whether this animation still fits `layer`, which scrolled within `scroll` if it did
-	fn fits(&self, layer: &CellLayer, scroll: Option<&Scroll>) -> bool {
+	fn fits(&self, layer: &Layer, scroll: Option<&Scroll>) -> bool {
 		let region = |scroll: &Scroll| (scroll.top, scroll.bottom, scroll.left, scroll.right);
 		self.size == (layer.width, layer.height) && scroll.is_none_or(|scroll| region(scroll) == region(&self.region))
 	}
@@ -124,7 +122,7 @@ impl Animation {
 	/// Moves the text by `scroll.rows`, from where it's drawn at `now`, and moves on from there. The text slides at
 	/// most the region's height: after a longer jump, the text of `previous` (the layer as shown until now) slides out
 	/// and the new text slides in right behind it.
-	fn scroll(&mut self, previous: &CellLayer, scroll: Scroll, now: Instant) {
+	fn scroll(&mut self, previous: &Layer, scroll: Scroll, now: Instant) {
 		let (offset, height) = (self.offset(now), self.height());
 		let target = (offset + scroll.rows as f32).clamp(-height as f32, height as f32);
 		let rows = (target - offset).round() as i32;
@@ -150,7 +148,7 @@ impl Animation {
 	}
 
 	/// The region of `layer` while its text is drawn `offset` rows below its place
-	fn region_layer(&self, layer: &CellLayer, offset: f32) -> SlidingRegion {
+	fn region_layer(&self, layer: &Layer, offset: f32) -> SlidingRegion {
 		let region = &self.region;
 		let hidden = self.hidden_rows(offset);
 		let first = hidden.start.min(0);
@@ -172,7 +170,7 @@ impl Animation {
 
 		let width = region.right - region.left;
 		// The cursor doesn't slide: it's drawn where Neovim put it, over the region.
-		let region_layer = CellLayer {
+		let region_layer = Layer {
 			id: layer.id,
 			x: layer.x + region.left * layer.cell.width,
 			y: layer.y + region.top * layer.cell.height,
@@ -204,7 +202,7 @@ fn blank(cells: &[RenderCell]) -> Vec<RenderCell> {
 }
 
 /// The rows of `layer` in the scrolling region of `scroll`
-fn region_rows<'a>(layer: &'a CellLayer, scroll: &Scroll) -> impl Iterator<Item = &'a [RenderCell]> {
+fn region_rows<'a>(layer: &'a Layer, scroll: &Scroll) -> impl Iterator<Item = &'a [RenderCell]> {
 	let width = layer.width as usize;
 	let (left, right) = (scroll.left as usize, scroll.right as usize);
 	layer
@@ -223,9 +221,7 @@ mod tests {
 
 	use super::ScrollAnimations;
 	use crate::animation::{Easing, Motion};
-	use crate::{
-		BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, Layer, RenderCell, Scroll, TextStyle,
-	};
+	use crate::{BarOrientation, CellSize, Cursor, CursorShape, Decoration, Layer, RenderCell, Scroll, TextStyle};
 
 	const DURATION: Duration = Duration::from_millis(150);
 	const CELL: CellSize = CellSize { width: 8, height: 16 };
@@ -251,7 +247,7 @@ mod tests {
 			.collect();
 		let width = rows[0].len() as u32;
 		let scroll = (scroll != 0).then_some(Scroll { rows: scroll, top, bottom, left: 0, right: width, motion: None });
-		Layer::Cells(CellLayer {
+		Layer {
 			id: 1,
 			x: 0,
 			y: 0,
@@ -267,12 +263,11 @@ mod tests {
 			padding: [0; 4],
 			padding_background: (0, 0),
 			corner_radius: 0.0,
-		})
+		}
 	}
 
 	/// The rows of the sliding region of `layer` at `now`, and the rows it's drawn below the region's top
 	fn region(scrolls: &ScrollAnimations, layer: &Layer, now: Instant) -> Option<(Vec<String>, f32)> {
-		let Layer::Cells(layer) = layer;
 		let region = scrolls.region(layer, now)?;
 		let rows = region.layer.cells.chunks(region.layer.width as usize);
 		Some((rows.map(|row| row.iter().map(|cell| cell.text.as_str()).collect()).collect(), region.offset))
@@ -303,9 +298,9 @@ mod tests {
 	fn see_through_text_slides_too() {
 		let (mut scrolls, now) = (animations(), Instant::now());
 		let shown = [layer(&["a", "b", "c"], 0, 0, 3)];
-		let [Layer::Cells(mut scrolled)] = [layer(&["b", "c", "d"], 1, 0, 3)];
+		let [mut scrolled] = [layer(&["b", "c", "d"], 1, 0, 3)];
 		scrolled.cells[1].blend = 30;
-		let scrolled = [Layer::Cells(scrolled)];
+		let scrolled = [scrolled];
 		scrolls.update(&shown, &scrolled, now);
 		// The renderer leaves the region out of the layer under it (see `pieces`).
 		assert!(region(&scrolls, &scrolled[0], now).is_some());
@@ -363,13 +358,11 @@ mod tests {
 		// A winbar above the text
 		let shown = [layer(&["w", "a", "b", "c"], 0, 1, 4)];
 		let mut scrolled = layer(&["w", "b", "c", "d"], 1, 1, 4);
-		let Layer::Cells(cells) = &mut scrolled;
 		let shape = CursorShape::Bar { orientation: BarOrientation::Vertical, percentage: 25 };
-		cells.cursor = Some(Cursor { row: 2, col: 0, width: 1, shape, color: 0, text_color: 0, animate: true });
+		scrolled.cursor = Some(Cursor { row: 2, col: 0, width: 1, shape, color: 0, text_color: 0, animate: true });
 		scrolls.update(&shown, std::slice::from_ref(&scrolled), now);
 
-		let Layer::Cells(cells) = &scrolled;
-		let region = scrolls.region(cells, now).unwrap();
+		let region = scrolls.region(&scrolled, now).unwrap();
 		assert_eq!((region.top, region.layer.y, region.layer.height, region.height), (1, 16, 4, 3));
 		// The cursor doesn't slide with the text: it's drawn where Neovim put it, over the region.
 		assert_eq!(region.layer.cursor, None);
@@ -414,9 +407,8 @@ mod tests {
 		let mut scrolls = animations();
 		let shown = [layer(&["a", "b", "c"], 0, 0, 3)];
 		let mut scrolled = layer(&["b", "c", "d"], 1, 0, 3);
-		let Layer::Cells(cells) = &mut scrolled;
 		let linear = Motion::Ease { easing: Easing::Linear, duration: DURATION * 2 };
-		cells.scroll = cells.scroll.map(|scroll| Scroll { motion: Some(linear), ..scroll });
+		scrolled.scroll = scrolled.scroll.map(|scroll| Scroll { motion: Some(linear), ..scroll });
 		scrolls.update(&shown, std::slice::from_ref(&scrolled), now);
 
 		// Linearly over twice the duration: half a row from its place at the duration the others take

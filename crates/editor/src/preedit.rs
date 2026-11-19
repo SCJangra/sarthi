@@ -1,6 +1,6 @@
 //! The text an input method is composing (its preedit), shown at the cursor until it's committed to Neovim
 
-use renderer::{BarOrientation, CellLayer, Cursor, CursorShape, Layer, RenderCell, Underline};
+use renderer::{BarOrientation, Cursor, CursorShape, Layer, RenderCell, Underline};
 use rpc::neovim::CellText;
 use unicode_width::UnicodeWidthChar;
 
@@ -17,8 +17,7 @@ pub struct Preedit {
 /// The cursor among `layers`, the last one's if more have one: left, top, width and height in pixels. Not the caret in the
 /// text an input method composes: its candidates stay by the cursor, rather than move with each key.
 pub fn cursor_rect(layers: &[Layer]) -> Option<[u32; 4]> {
-	layers.iter().rev().find_map(|layer| {
-		let Layer::Cells(cells) = layer;
+	layers.iter().rev().find_map(|cells| {
 		let cursor = cells.cursor.filter(|_| cells.id != PREEDIT_ID)?;
 		let (width, height) = (cells.cell.width, cells.cell.height);
 		Some([cells.x + cursor.col * width, cells.y + cursor.row * height, cursor.width * width, height])
@@ -28,10 +27,7 @@ pub fn cursor_rect(layers: &[Layer]) -> Option<[u32; 4]> {
 /// A layer showing `preedit` over the cursor's cell and those after it, underlined, in the colors of the cell under the
 /// cursor. The cursor moves into it, to the preedit's caret, or is hidden without one. `None` without a cursor.
 pub fn preedit_layer(layers: &mut [Layer], preedit: &Preedit) -> Option<Layer> {
-	let cursor_layer = layers.iter_mut().rev().find_map(|layer| {
-		let Layer::Cells(cells) = layer;
-		cells.cursor.is_some().then_some(cells)
-	})?;
+	let cursor_layer = layers.iter_mut().rev().find(|layer| layer.cursor.is_some())?;
 	let cursor = cursor_layer.cursor.take()?;
 	let under = cursor_layer
 		.cells
@@ -86,7 +82,7 @@ pub fn preedit_layer(layers: &mut [Layer], preedit: &Preedit) -> Option<Layer> {
 		text_color: cursor.text_color,
 		animate: false,
 	});
-	Some(Layer::Cells(CellLayer {
+	Some(Layer {
 		id: PREEDIT_ID,
 		x: x + cursor.col * cell.width,
 		y: y + cursor.row * cell.height,
@@ -102,7 +98,7 @@ pub fn preedit_layer(layers: &mut [Layer], preedit: &Preedit) -> Option<Layer> {
 		padding: [0; 4],
 		padding_background: (style.background, 0),
 		corner_radius: 0.0,
-	}))
+	})
 }
 
 /// How much of a cell the caret covers: as much as the cursor's own vertical bar, as in insert mode, otherwise a quarter
@@ -116,8 +112,7 @@ fn bar_percentage(shape: CursorShape) -> u32 {
 #[cfg(test)]
 mod tests {
 	use renderer::{
-		BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, FontId, Layer, RenderCell, TextStyle,
-		Underline,
+		BarOrientation, CellSize, Cursor, CursorShape, Decoration, FontId, Layer, RenderCell, TextStyle, Underline,
 	};
 	use rpc::neovim::CellText;
 
@@ -137,7 +132,7 @@ mod tests {
 			decoration: Decoration::default(),
 		};
 		let shape = CursorShape::Bar { orientation: BarOrientation::Vertical, percentage: 15 };
-		Layer::Cells(CellLayer {
+		Layer {
 			id: 1,
 			x: 100,
 			y: 40,
@@ -153,16 +148,11 @@ mod tests {
 			padding: [0; 4],
 			padding_background: (BG, 0),
 			corner_radius: 0.0,
-		})
+		}
 	}
 
 	fn preedit(text: &str, caret: Option<usize>) -> Preedit {
 		Preedit { text: text.to_owned(), caret }
-	}
-
-	fn cells(layer: &Layer) -> &CellLayer {
-		let Layer::Cells(cells) = layer;
-		cells
 	}
 
 	#[test]
@@ -179,7 +169,6 @@ mod tests {
 	fn preedit_covers_the_cells_from_the_cursor_on_underlined() {
 		let mut layers = [layer()];
 		let shown = preedit_layer(&mut layers, &preedit("ab", None)).unwrap();
-		let shown = cells(&shown);
 		assert_eq!((shown.x, shown.y, shown.width, shown.height), (120, 60, 2, 1));
 		let texts: Vec<&str> = shown.cells.iter().map(|cell| cell.text.as_str()).collect();
 		assert_eq!(texts, ["a", "b"]);
@@ -188,14 +177,14 @@ mod tests {
 		assert_eq!(first.decoration.underline, Some(Underline::Single));
 		// No caret: the cursor is hidden, rather than drawn under the text.
 		assert_eq!(shown.cursor, None);
-		assert_eq!(cells(&layers[0]).cursor, None);
+		assert_eq!(layers[0].cursor, None);
 	}
 
 	#[test]
 	fn double_width_characters_take_two_cells() {
 		let mut layers = [layer()];
 		let shown = preedit_layer(&mut layers, &preedit("日本", None)).unwrap();
-		let texts: Vec<&str> = cells(&shown).cells.iter().map(|cell| cell.text.as_str()).collect();
+		let texts: Vec<&str> = shown.cells.iter().map(|cell| cell.text.as_str()).collect();
 		assert_eq!(texts, ["日", "", "本", ""]);
 	}
 
@@ -204,26 +193,25 @@ mod tests {
 		let mut layers = [layer()];
 		// After "日", 3 bytes in: its two cells
 		let shown = preedit_layer(&mut layers, &preedit("日本", Some(3))).unwrap();
-		let caret = cells(&shown).cursor.unwrap();
+		let caret = shown.cursor.unwrap();
 		assert_eq!((caret.col, caret.color, caret.animate), (2, 0xFF0000, false));
 		assert_eq!(caret.shape, CursorShape::Bar { orientation: BarOrientation::Vertical, percentage: 15 });
 		// At the end, a cell after the text holds it.
 		let shown = preedit_layer(&mut [layer()], &preedit("ab", Some(2))).unwrap();
-		assert_eq!((cells(&shown).width, cells(&shown).cursor.map(|caret| caret.col)), (3, Some(2)));
+		assert_eq!((shown.width, shown.cursor.map(|caret| caret.col)), (3, Some(2)));
 	}
 
 	#[test]
 	fn combining_characters_join_the_cell_before_them() {
 		let shown = preedit_layer(&mut [layer()], &preedit("e\u{301}", None)).unwrap();
-		let texts: Vec<&str> = cells(&shown).cells.iter().map(|cell| cell.text.as_str()).collect();
+		let texts: Vec<&str> = shown.cells.iter().map(|cell| cell.text.as_str()).collect();
 		assert_eq!(texts, ["e\u{301}"]);
 	}
 
 	#[test]
 	fn nothing_without_a_cursor() {
 		let mut layers = [layer()];
-		let Layer::Cells(cells) = &mut layers[0];
-		cells.cursor = None;
+		layers[0].cursor = None;
 		assert_eq!(preedit_layer(&mut layers, &preedit("ab", None)), None);
 	}
 }

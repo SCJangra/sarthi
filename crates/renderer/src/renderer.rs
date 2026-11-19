@@ -16,8 +16,8 @@ use crate::shape::ShapePipeline;
 use crate::stencil;
 use crate::text::TextPipeline;
 use crate::{
-	CellLayer, Cursor, CursorMotion, CursorShape, Decoration, Fonts, Layer, Motion, RenderCell, RendererConfig,
-	RendererError, TextStyle,
+	Cursor, CursorMotion, CursorShape, Decoration, Fonts, Layer, Motion, RenderCell, RendererConfig, RendererError,
+	TextStyle,
 };
 
 pub struct Renderer {
@@ -326,10 +326,7 @@ impl Renderer {
 	/// Moves the cursor animation on to the layers' cursor, and gives the cursor and its corners at `now` (in pixels:
 	/// top-left, top-right, bottom-right, bottom-left) while it's on its way.
 	fn move_cursor(&mut self, now: Instant) -> Option<([[f32; 2]; 4], Cursor)> {
-		let (layer, cursor) = self
-			.layers
-			.iter()
-			.find_map(|Layer::Cells(layer)| Some((layer, layer.cursor?)))?;
+		let (layer, cursor) = self.layers.iter().find_map(|layer| Some((layer, layer.cursor?)))?;
 		self.cursor.update(cursor_rect(layer, cursor), cursor.animate, layer.cell, now);
 		if !self.cursor.is_animating(now) {
 			return None;
@@ -371,7 +368,7 @@ pub enum Frame {
 /// A cell layer as drawn in a frame: a whole layer, then over it the scrolling region of one whose text slides; and after
 /// all layers, the cursor
 pub(crate) struct Piece<'a> {
-	pub layer: Cow<'a, CellLayer>,
+	pub layer: Cow<'a, Layer>,
 
 	/// Which part of its layer this is, which keeps its laid-out rows apart from the others'
 	pub kind: PieceKind,
@@ -412,7 +409,7 @@ fn pieces<'a>(layers: &'a [Layer], scrolls: &ScrollAnimations, surface: (u32, u3
 
 	let mut pieces = Vec::with_capacity(layers.len() + 1);
 	let mut cursor_piece = None;
-	for Layer::Cells(layer) in layers {
+	for layer in layers {
 		let whole = clip(layer.rect());
 		let round = (layer.corner_radius > 0.0).then(|| (layer.outer_rect(), layer.corner_radius));
 		let region = scrolls.region(layer, now);
@@ -443,7 +440,7 @@ fn pieces<'a>(layers: &'a [Layer], scrolls: &ScrollAnimations, surface: (u32, u3
 }
 
 /// `layer` without the text and backgrounds of its `region` that slides, which is drawn over it
-fn without(layer: &CellLayer, region: &SlidingRegion) -> CellLayer {
+fn without(layer: &Layer, region: &SlidingRegion) -> Layer {
 	let (top, left) = (region.top, region.left);
 	let Some(&first) = layer.cells.first() else { return layer.clone() };
 	let text = ArrayString::from(" ").unwrap_or_default();
@@ -453,17 +450,17 @@ fn without(layer: &CellLayer, region: &SlidingRegion) -> CellLayer {
 		let start = (row * layer.width + left) as usize;
 		cells[start..start + region.layer.width as usize].fill(blank);
 	}
-	CellLayer { cells, cursor: None, scroll: None, shadow: layer.shadow.clone(), ..*layer }
+	Layer { cells, cursor: None, scroll: None, shadow: layer.shadow.clone(), ..*layer }
 }
 
 /// The cursor of `layer` as a layer of its own. A block is the cells under it, in the cursor's colors, so its
 /// character stays readable; a bar or an outline is drawn over nothing.
-fn cursor_layer(layer: &CellLayer, cursor: Cursor) -> CellLayer {
+fn cursor_layer(layer: &Layer, cursor: Cursor) -> Layer {
 	let (x, y) = (layer.x + cursor.col * layer.cell.width, layer.y + cursor.row * layer.cell.height);
 	let empty =
-		CellLayer { x, y, width: 0, height: 0, cells: Vec::new(), cursor: None, scroll: None, shadow: None, ..*layer };
+		Layer { x, y, width: 0, height: 0, cells: Vec::new(), cursor: None, scroll: None, shadow: None, ..*layer };
 	if cursor.shape != CursorShape::Block {
-		return CellLayer { x: layer.x, y: layer.y, cursor: Some(cursor), ..empty };
+		return Layer { x: layer.x, y: layer.y, cursor: Some(cursor), ..empty };
 	}
 
 	let start = (cursor.row * layer.width + cursor.col) as usize;
@@ -478,7 +475,7 @@ fn cursor_layer(layer: &CellLayer, cursor: Cursor) -> CellLayer {
 			..*cell
 		})
 		.collect();
-	CellLayer { width: cursor.width, height: 1, cells, ..empty }
+	Layer { width: cursor.width, height: 1, cells, ..empty }
 }
 
 /// A layer's ranges of the frame's quads: its shadow and outline, drawn first and uncut since they reach past the layer;
@@ -593,7 +590,7 @@ mod tests {
 	use crate::scroll::ScrollAnimations;
 	use crate::shape::ShapePipeline;
 	use crate::text::TextPipeline;
-	use crate::{CellLayer, CellSize, Decoration, FontId, Fonts, Layer, RenderCell, RendererConfig, TextStyle};
+	use crate::{CellSize, Decoration, FontId, Fonts, Layer, RenderCell, RendererConfig, TextStyle};
 
 	/// Cells of the bundled font at 14 pixels, which the tests draw with
 	const CELL: CellSize = CellSize { width: 8, height: 19 };
@@ -608,7 +605,7 @@ mod tests {
 			blend: 0,
 			decoration: Decoration::default(),
 		};
-		Layer::Cells(CellLayer {
+		Layer {
 			id,
 			x: 0,
 			y: 0,
@@ -624,7 +621,7 @@ mod tests {
 			padding: [0; 4],
 			padding_background: (0, 0),
 			corner_radius: 0.0,
-		})
+		}
 	}
 
 	/// Draws `layers` like the renderer does, into a 64×19 texture, and returns the pixel in the middle of the first cell,
@@ -751,8 +748,7 @@ mod tests {
 	}
 
 	/// `layer` with a cursor of `shape` on its top-left cell, red with white text
-	fn with_cursor(layer: Layer, shape: crate::CursorShape) -> Layer {
-		let Layer::Cells(mut layer) = layer;
+	fn with_cursor(mut layer: Layer, shape: crate::CursorShape) -> Layer {
 		layer.cursor = Some(crate::Cursor {
 			row: 0,
 			col: 0,
@@ -762,7 +758,7 @@ mod tests {
 			text_color: 0xFFFFFF,
 			animate: true,
 		});
-		Layer::Cells(layer)
+		layer
 	}
 
 	#[test]
@@ -808,9 +804,9 @@ mod tests {
 	#[test]
 	fn gpu_a_blended_cell_shows_whats_under_it() {
 		let blended = |blend: u8| {
-			let Layer::Cells(mut layer) = cell(2, " ", 0xFFFFFF);
+			let mut layer = cell(2, " ", 0xFFFFFF);
 			layer.cells[0].blend = blend;
-			Layer::Cells(layer)
+			layer
 		};
 		// White, half see-through, over red
 		let Some(pixel) = middle_pixel(&[cell(1, " ", 0xFF0000), blended(50)]) else {
@@ -826,11 +822,11 @@ mod tests {
 	fn gpu_a_shadow_isnt_drawn_under_what_casts_it() {
 		// A see-through cell at column 3, drawing no background, with a red shadow, on black
 		let shadow = crate::Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
-		let Layer::Cells(mut clear) = cell(1, " ", 0xFFFFFF);
+		let mut clear = cell(1, " ", 0xFFFFFF);
 		clear.cells[0].blend = 100;
 		let area = vec![[3 * CELL.width, 0, CELL.width, CELL.height]];
 		let shadow = crate::LayerShadow { shadow, area, radius: 0.0 };
-		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, shadow: Some(shadow), ..clear });
+		let layer = Layer { x: 3 * CELL.width, shadow: Some(shadow), ..clear };
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");
 			return;
@@ -846,10 +842,10 @@ mod tests {
 	fn gpu_a_shadow_fades_out_around_its_layer() {
 		// A white cell at column 3, with a red shadow, on black
 		let shadow = crate::Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
-		let Layer::Cells(white) = cell(1, " ", 0xFFFFFF);
+		let white = cell(1, " ", 0xFFFFFF);
 		let area = vec![[3 * CELL.width, 0, CELL.width, CELL.height]];
 		let shadow = crate::LayerShadow { shadow, area, radius: 0.0 };
-		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, shadow: Some(shadow), ..white });
+		let layer = Layer { x: 3 * CELL.width, shadow: Some(shadow), ..white };
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");
 			return;
@@ -871,9 +867,9 @@ mod tests {
 	#[test]
 	fn gpu_an_outline_goes_around_its_layer() {
 		// A white cell at column 3, with a 1 px red outline, on black
-		let Layer::Cells(white) = cell(1, " ", 0xFFFFFF);
+		let white = cell(1, " ", 0xFFFFFF);
 		let outline = crate::Outline { width: 1.0, color: 0xFF0000 };
-		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, outline: Some(outline), ..white });
+		let layer = Layer { x: 3 * CELL.width, outline: Some(outline), ..white };
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");
 			return;
@@ -888,8 +884,8 @@ mod tests {
 	#[test]
 	fn gpu_rounded_corners_cut_the_layer() {
 		// A white cell at column 3 with corners rounded by 3 px, on black
-		let Layer::Cells(white) = cell(1, " ", 0xFFFFFF);
-		let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, corner_radius: 3.0, ..white });
+		let white = cell(1, " ", 0xFFFFFF);
+		let layer = Layer { x: 3 * CELL.width, corner_radius: 3.0, ..white };
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");
 			return;
@@ -906,11 +902,11 @@ mod tests {
 	fn gpu_a_group_s_shadow_follows_its_rounded_corners() {
 		// The red shadow of a menu with a scrollbar inside its right edge, on black, away from the layer drawn with it
 		let shadow = crate::Shadow { blur: 4.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
-		let Layer::Cells(black) = cell(1, " ", 0x000000);
+		let black = cell(1, " ", 0x000000);
 		let reds = |radius: f32| {
 			let area = vec![[20, 3, 24, 13], [40, 5, 3, 9]];
 			let shadow = crate::LayerShadow { shadow, area, radius };
-			let (pixels, _) = drawn(&[Layer::Cells(CellLayer { shadow: Some(shadow), ..black.clone() })], None)?;
+			let (pixels, _) = drawn(&[Layer { shadow: Some(shadow), ..black.clone() }], None)?;
 			let red = |x: u32, y: u32| pixels[(y * WIDTH + x) as usize][0];
 			// The menu's corner pixel, and one just above its straight top edge
 			Some((u32::from(red(20, 3)), u32::from(red(30, 2))))
@@ -926,9 +922,9 @@ mod tests {
 	#[test]
 	fn gpu_rounded_corners_cut_the_text() {
 		// A full block in white, which inks its cell into the corners, on black: square, then rounded by 3 px
-		let Layer::Cells(block) = cell(1, "█", 0x000000);
+		let block = cell(1, "█", 0x000000);
 		let corner_of = |radius: f32| {
-			let layer = Layer::Cells(CellLayer { x: 3 * CELL.width, corner_radius: radius, ..block.clone() });
+			let layer = Layer { x: 3 * CELL.width, corner_radius: radius, ..block.clone() };
 			let (pixels, cell) = drawn(&[layer], None)?;
 			let at = |x: u32, y: u32| pixels[(y * WIDTH + x) as usize];
 			let left = 3 * cell.width;
@@ -947,11 +943,10 @@ mod tests {
 	#[test]
 	fn gpu_padding_goes_around_its_layer() {
 		// A white cell at column 3 with 2 px of the window's green padding, and a red outline around that, on black
-		let Layer::Cells(white) = cell(1, " ", 0xFFFFFF);
+		let white = cell(1, " ", 0xFFFFFF);
 		let outline = Some(crate::Outline { width: 1.0, color: 0xFF0000 });
 		let padding_background = (0x00FF00, 0);
-		let layer =
-			Layer::Cells(CellLayer { x: 3 * CELL.width, padding: [2; 4], padding_background, outline, ..white });
+		let layer = Layer { x: 3 * CELL.width, padding: [2; 4], padding_background, outline, ..white };
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");
 			return;
@@ -1021,7 +1016,7 @@ mod tests {
 	fn the_cursor_stays_put_while_text_slides() {
 		// A 1×3 layer that scrolled up by a row, with the cursor on its last row
 		let column = |rows: [&str; 3], scroll: bool| {
-			let Layer::Cells(top) = cell(1, rows[0], 0);
+			let top = cell(1, rows[0], 0);
 			let cells = rows
 				.iter()
 				.map(|text| RenderCell { text: ArrayString::from(text).unwrap(), ..top.cells[0] });
@@ -1036,7 +1031,7 @@ mod tests {
 				text_color: 0,
 				animate: true,
 			};
-			Layer::Cells(CellLayer { height: 3, cells: cells.collect(), cursor: Some(cursor), scroll, ..top })
+			Layer { height: 3, cells: cells.collect(), cursor: Some(cursor), scroll, ..top }
 		};
 		let (shown, scrolled) = (column(["a", "b", "c"], false), column(["b", "c", "d"], true));
 		let mut scrolls = ScrollAnimations::new(RendererConfig::default().scroll);
@@ -1056,13 +1051,13 @@ mod tests {
 	#[test]
 	fn under_see_through_sliding_text_the_layer_leaves_the_region_out() {
 		let column = |rows: [&str; 3], scroll: bool, blend: u8| {
-			let Layer::Cells(top) = cell(1, rows[0], 0x000000);
+			let top = cell(1, rows[0], 0x000000);
 			let cells =
 				rows.iter()
 					.map(|text| RenderCell { text: ArrayString::from(text).unwrap(), blend, ..top.cells[0] });
 			let scroll =
 				scroll.then_some(crate::Scroll { rows: 1, top: 1, bottom: 3, left: 0, right: 1, motion: None });
-			Layer::Cells(CellLayer { height: 3, cells: cells.collect(), scroll, ..top })
+			Layer { height: 3, cells: cells.collect(), scroll, ..top }
 		};
 		let layer_text = |blend: u8| {
 			let (shown, scrolled) = (column(["x", "b", "c"], false, blend), column(["x", "c", "d"], true, blend));

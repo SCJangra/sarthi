@@ -9,9 +9,7 @@ pub mod preedit;
 
 use std::collections::HashMap;
 
-use renderer::{
-	CellLayer, CellSize, Decoration, FontId, Layer, LayerShadow, Motion, Outline, RenderCell, Scroll, Shadow,
-};
+use renderer::{CellSize, Decoration, FontId, Layer, LayerShadow, Motion, Outline, RenderCell, Scroll, Shadow};
 use rpc::neovim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification, Window};
 
 use crate::compositor::cell_layer;
@@ -834,8 +832,7 @@ impl Editor {
 				// wouldn't leave room for
 				Placement::Float { row, col, .. } => {
 					let mut layer = self.layer(id, *row, *col);
-					let Layer::Cells(cells) = &mut layer;
-					cells.shadow = shadows.remove(&id);
+					layer.shadow = shadows.remove(&id);
 					layers.push(layer);
 				},
 				Placement::Message { row, separator, .. } => {
@@ -871,13 +868,13 @@ impl Editor {
 		if !self.see_through {
 			return layer;
 		}
-		let (Layer::Cells(cells), background) = (&mut layer, self.background());
-		for cell in cells.cells.iter_mut().filter(|cell| cell.background == background) {
+		let background = self.background();
+		for cell in layer.cells.iter_mut().filter(|cell| cell.background == background) {
 			cell.blend = 100;
 		}
 
 		let blank = CellText::from(" ").expect("a space fits in a cell");
-		let (width, height, (origin_row, origin_col)) = (cells.width, cells.height, origin);
+		let (width, height, (origin_row, origin_col)) = (layer.width, layer.height, origin);
 		for &[col, row, cover_width, cover_height] in covered {
 			// In the layer's cells
 			let (left, top) = (col.saturating_sub(origin_col).min(width), row.saturating_sub(origin_row));
@@ -885,7 +882,7 @@ impl Editor {
 			let bottom = (row + cover_height).saturating_sub(origin_row).min(height);
 			for layer_row in top..bottom {
 				let start = layer_row * width;
-				for cell in &mut cells.cells[(start + left) as usize..(start + right) as usize] {
+				for cell in &mut layer.cells[(start + left) as usize..(start + right) as usize] {
 					*cell = RenderCell { text: blank, blend: 100, decoration: Decoration::default(), ..*cell };
 				}
 			}
@@ -955,7 +952,7 @@ impl Editor {
 		layer.font = font;
 		(layer.x, layer.y) = (col * self.cell.width, row * self.cell.height);
 		layer.scroll = self.scroll(id, layer.width, layer.height);
-		Layer::Cells(layer)
+		layer
 	}
 
 	/// The shadows under the external windows among `placed`, by the grid of the window each is drawn with. Like attached
@@ -1003,14 +1000,13 @@ impl Editor {
 	/// the shadow drawn with it (see [`Editor::external_shadows`])
 	fn external_layer(&self, id: u32, win: Window, shadow: Option<LayerShadow>) -> Layer {
 		let mut layer = self.layer(id, 0, 0);
-		let Layer::Cells(cells) = &mut layer;
-		[cells.x, cells.y, ..] = self.external_rect(id, win);
-		cells.shadow = shadow;
-		cells.outline = self.outline_of(win);
-		cells.corner_radius = self.corners_of(win);
-		cells.padding = self.padding_of(win);
+		[layer.x, layer.y, ..] = self.external_rect(id, win);
+		layer.shadow = shadow;
+		layer.outline = self.outline_of(win);
+		layer.corner_radius = self.corners_of(win);
+		layer.padding = self.padding_of(win);
 		let style = self.style_of(win);
-		cells.padding_background = (style.background.unwrap_or_else(|| self.background()), style.blend);
+		layer.padding_background = (style.background.unwrap_or_else(|| self.background()), style.blend);
 		layer
 	}
 
@@ -1091,7 +1087,7 @@ impl Editor {
 		let mut layer = cell_layer(0, &line, &self.highlights, None, self.cell);
 		// An id no grid has: Neovim's grid ids are 32-bit.
 		(layer.id, layer.y) = (u64::from(u32::MAX) + 1, row * self.cell.height);
-		Layer::Cells(layer)
+		layer
 	}
 }
 
@@ -1104,7 +1100,7 @@ fn outset([left, top, width, height]: [u32; 4], [above, right, below, before]: [
 
 /// Keeps the first `height` rows of `layer`, if it's taller
 fn clip_rows(layer: &mut Layer, height: u32) {
-	let Layer::Cells(CellLayer { height: layer_height, width, cells, cursor, .. }) = layer;
+	let Layer { height: layer_height, width, cells, cursor, .. } = layer;
 	if *layer_height <= height {
 		return;
 	}
@@ -1117,7 +1113,7 @@ fn clip_rows(layer: &mut Layer, height: u32) {
 
 #[cfg(test)]
 mod tests {
-	use renderer::{CellLayer, CellSize, Cursor, CursorShape, FontId, Layer, Motion, Shadow};
+	use renderer::{CellSize, Cursor, CursorShape, FontId, Layer, Motion, Shadow};
 	use rpc::neovim::{
 		CellText, DefaultColorsSetEvent, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
 		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, OptionSetEvent, OptionValue,
@@ -1160,7 +1156,7 @@ mod tests {
 
 	/// The text of each row of the only layer of `redraw`
 	fn rows(redraw: &Redraw) -> Vec<String> {
-		let [Layer::Cells(layer)] = redraw.layers.as_slice() else { panic!("expected one layer") };
+		let [layer] = redraw.layers.as_slice() else { panic!("expected one layer") };
 		layer
 			.cells
 			.chunks(layer.width as usize)
@@ -1205,7 +1201,7 @@ mod tests {
 		let mut editor = Editor::new();
 		let events = vec![colors(), resize(1, 2, 1), line(1, 0, "ab"), goto(1, 0, 1), RedrawNotification::Flush];
 		let redraw = editor.apply(events).unwrap();
-		let [Layer::Cells(layer)] = redraw.layers.as_slice() else { panic!("expected one layer") };
+		let [layer] = redraw.layers.as_slice() else { panic!("expected one layer") };
 		// A block cursor in the cell's swapped colors, on "b"
 		let cursor =
 			Cursor { row: 0, col: 1, width: 1, shape: CursorShape::Block, color: FG, text_color: BG, animate: true };
@@ -1222,9 +1218,7 @@ mod tests {
 
 		editor.set_preedit(Some(Preedit { text: String::from("xy"), caret: None }));
 		let redraw = editor.refresh().unwrap();
-		let [Layer::Cells(grid), Layer::Cells(preedit)] = redraw.layers.as_slice() else {
-			panic!("expected two layers")
-		};
+		let [grid, preedit] = redraw.layers.as_slice() else { panic!("expected two layers") };
 		assert_eq!((grid.cursor, preedit.x, preedit.width), (None, grid.cell.width, 2));
 
 		// The same text again changes nothing; none, once committed, leaves the grid as it was.
@@ -1280,7 +1274,7 @@ mod tests {
 		redraw
 			.layers
 			.iter()
-			.map(|Layer::Cells(layer)| (layer.id, layer.y / CELL.height, layer.x / CELL.width, layer.height))
+			.map(|layer| (layer.id, layer.y / CELL.height, layer.x / CELL.width, layer.height))
 			.collect()
 	}
 
@@ -1343,7 +1337,7 @@ mod tests {
 		let separator_id = u64::from(u32::MAX) + 1;
 		assert_eq!(placement(&redraw), [(1, 0, 0, 5), (separator_id, 1, 0, 1), (3, 2, 0, 3)]);
 
-		let Layer::Cells(CellLayer { cells, .. }) = &redraw.layers[1];
+		let Layer { cells, .. } = &redraw.layers[1];
 		assert!(
 			cells
 				.iter()
@@ -1373,7 +1367,7 @@ mod tests {
 		let mut editor = screen();
 		let redraw = flush(&mut editor, vec![win_pos(2, 0, 6), line(2, 0, "ab"), goto(2, 0, 1)]);
 		let cursor = |index: usize| {
-			let Layer::Cells(layer) = &redraw.layers[index];
+			let layer = &redraw.layers[index];
 			layer.cursor.map(|cursor| (cursor.row, cursor.col))
 		};
 		// On "b" in the window, and not in grid 1
@@ -1400,7 +1394,7 @@ mod tests {
 
 	/// The scroll of grid `id`'s layer in `redraw`: (rows, top, bottom, left, right)
 	fn scroll_of(redraw: &Redraw, id: u64) -> Option<(i32, u32, u32, u32, u32)> {
-		let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id)?;
+		let layer = redraw.layers.iter().find(|layer| layer.id == id)?;
 		layer
 			.scroll
 			.map(|scroll| (scroll.rows, scroll.top, scroll.bottom, scroll.left, scroll.right))
@@ -1449,7 +1443,7 @@ mod tests {
 	#[test]
 	fn a_see_through_window_shows_through_the_default_background() {
 		let blends = |redraw: &Redraw, id: u64| {
-			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
+			let layer = redraw.layers.iter().find(|layer| layer.id == id).unwrap();
 			layer.cells.iter().map(|cell| cell.blend).collect::<Vec<_>>()
 		};
 		let mut editor = screen();
@@ -1479,7 +1473,7 @@ mod tests {
 		let mut editor = screen();
 		flush(&mut editor, vec![line(1, 0, "  |"), line(1, 4, "  |"), win_pos(2, 0, 0)]);
 		let grid_1 = |redraw: &Redraw| {
-			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 1).unwrap();
+			let layer = redraw.layers.iter().find(|layer| layer.id == 1).unwrap();
 			layer
 				.cells
 				.iter()
@@ -1497,7 +1491,7 @@ mod tests {
 		let redraw = flush(&mut editor, vec![]);
 		assert_eq!(grid_1(&redraw)[2], (String::from(" "), 100));
 		// Outside the window, grid 1 keeps what it shows.
-		let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 1).unwrap();
+		let layer = redraw.layers.iter().find(|layer| layer.id == 1).unwrap();
 		assert_eq!(layer.cells[4 * 10 + 2].text.as_str(), "|");
 	}
 
@@ -1531,16 +1525,16 @@ mod tests {
 		// A float and a 4×2 external window: the screen is 80×80 pixels, the window 32×32.
 		let events = vec![resize(3, 2, 1), float(3, 0, 0, 5), resize(4, 4, 2), external(4)];
 		let redraw = flush(&mut editor, events);
-		let ids: Vec<u64> = redraw.layers.iter().map(|Layer::Cells(layer)| layer.id).collect();
+		let ids: Vec<u64> = redraw.layers.iter().map(|layer| layer.id).collect();
 		assert_eq!(ids, [1, 3, 4]);
-		let Layer::Cells(window) = &redraw.layers[2];
+		let window = &redraw.layers[2];
 		assert_eq!((window.x, window.y), (24, 24));
 		// Its own shadow, under it
 		assert_eq!(shadow_of(&redraw, 4), Some(vec![[3, 1, 4, 2]]));
 
 		// A larger window is centered again.
 		let redraw = flush(&mut editor, vec![resize(4, 8, 4), external(4)]);
-		let Layer::Cells(window) = &redraw.layers[2];
+		let window = &redraw.layers[2];
 		assert_eq!((window.x, window.y), (8, 8));
 	}
 
@@ -1548,7 +1542,7 @@ mod tests {
 	fn external_windows_go_where_placed() {
 		let mut editor = screen();
 		let at = |redraw: &Redraw| {
-			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 4).unwrap();
+			let layer = redraw.layers.iter().find(|layer| layer.id == 4).unwrap();
 			(layer.x, layer.y)
 		};
 		// A 2×1 external window a row below window 2's top-left corner
@@ -1650,7 +1644,7 @@ mod tests {
 		editor.set_external_font(win_of(4), Some((FontId::MAIN, cell)));
 		assert_eq!(editor.external_fonts().collect::<Vec<_>>(), [win_of(4)]);
 		let redraw = editor.refresh().expect("its cells changed");
-		let Layer::Cells(window) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 4).unwrap();
+		let window = redraw.layers.iter().find(|layer| layer.id == 4).unwrap();
 		assert_eq!((window.x, window.y, window.cell), (20, 20, cell));
 		// The mouse goes by its cells too.
 		assert_eq!(editor.grid_at(20.0 + 10.0 + 1.0, 20.0 + 1.0), Some(GridPosition { grid: 4, row: 0, col: 1 }));
@@ -1658,7 +1652,7 @@ mod tests {
 		// Back to the main fonts
 		editor.set_external_font(win_of(4), None);
 		let redraw = editor.refresh().expect("its cells changed");
-		let Layer::Cells(window) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 4).unwrap();
+		let window = redraw.layers.iter().find(|layer| layer.id == 4).unwrap();
 		assert_eq!(window.cell, CELL);
 	}
 
@@ -1669,7 +1663,7 @@ mod tests {
 		flush(&mut editor, events);
 		// Neovim sends the first again, e.g. after a tab switch: it stays under the second.
 		let redraw = flush(&mut editor, vec![external(4)]);
-		let ids: Vec<u64> = redraw.layers.iter().map(|Layer::Cells(layer)| layer.id).collect();
+		let ids: Vec<u64> = redraw.layers.iter().map(|layer| layer.id).collect();
 		assert_eq!(ids, [1, 4, 5]);
 
 		// Closed, it's gone.
@@ -1682,14 +1676,14 @@ mod tests {
 	fn layers_are_placed_in_pixels() {
 		let mut editor = screen();
 		let redraw = flush(&mut editor, vec![win_pos(2, 1, 6)]);
-		let Layer::Cells(window) = &redraw.layers[1];
+		let window = &redraw.layers[1];
 		assert_eq!((window.x, window.y, window.cell), (6 * 8, 16, CELL));
 
 		// A new cell size moves and resizes them.
 		let cell = CellSize { width: 10, height: 20 };
 		editor.set_cell_size(cell);
 		let redraw = editor.refresh().expect("the cell size changed");
-		let Layer::Cells(window) = &redraw.layers[1];
+		let window = &redraw.layers[1];
 		assert_eq!((window.x, window.y, window.cell), (60, 20, cell));
 		assert_eq!(editor.refresh(), None, "nothing changed since");
 	}
@@ -1698,7 +1692,7 @@ mod tests {
 	fn outlines_around_external_windows() {
 		let mut editor = screen();
 		let outline_of = |redraw: &Redraw, id: u64| {
-			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
+			let layer = redraw.layers.iter().find(|layer| layer.id == id).unwrap();
 			layer.outline
 		};
 		// A float and an external window; none until a style has one
@@ -1738,7 +1732,7 @@ mod tests {
 		let shadow = Some(Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 });
 		editor.set_default_float_style(FloatStyle { shadow, ..FloatStyle::default() });
 		let radius_of = |redraw: &Redraw, id: u64| {
-			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
+			let layer = redraw.layers.iter().find(|layer| layer.id == id).unwrap();
 			(layer.corner_radius, layer.shadow.as_ref().map(|shadow| shadow.radius))
 		};
 		// A lone float, two floats side by side at another level, and an external window
@@ -1781,7 +1775,7 @@ mod tests {
 		let shadow = Some(Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 });
 		editor.set_default_float_style(FloatStyle { shadow, ..FloatStyle::default() });
 		let padding_of = |redraw: &Redraw, id: u64| {
-			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
+			let layer = redraw.layers.iter().find(|layer| layer.id == id).unwrap();
 			(layer.padding, layer.shadow.as_ref().map(|shadow| shadow.area.clone()))
 		};
 		// A float at row 1, column 1, and an external window at the top left; none until a style has it
@@ -1827,7 +1821,7 @@ mod tests {
 
 		// In the window's own background, whatever its cells', or Neovim's default one until known
 		let background_of = |redraw: &Redraw| {
-			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 4).unwrap();
+			let layer = redraw.layers.iter().find(|layer| layer.id == 4).unwrap();
 			layer.padding_background
 		};
 		editor.set_float_style(win_of(4), FloatStyle { padding: Some([1.0; 4]), ..FloatStyle::default() });
@@ -1857,7 +1851,7 @@ mod tests {
 		let at = |editor: &mut Editor, place| {
 			editor.set_external_place(win_of(4), place);
 			let redraw = editor.refresh().expect("placed");
-			let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 4).unwrap();
+			let layer = redraw.layers.iter().find(|layer| layer.id == 4).unwrap();
 			(layer.x, layer.y)
 		};
 		let place = |relative, row, col, fixed| Place::Relative {
@@ -1916,7 +1910,7 @@ mod tests {
 		editor.set_default_float_style(FloatStyle { outline, padding: Some([2.0; 4]), ..FloatStyle::default() });
 		// Placed at row 2, column 2: drawn there whatever its style, with no frame to move it
 		let redraw = flush(&mut editor, vec![resize(3, 2, 1), float(3, 2, 2, 1)]);
-		let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 3).unwrap();
+		let layer = redraw.layers.iter().find(|layer| layer.id == 3).unwrap();
 		assert_eq!((layer.x, layer.y, layer.padding, layer.outline), (2 * 8, 2 * 16, [0; 4], None));
 		// The mouse finds its cells where Neovim placed them.
 		assert_eq!(editor.grid_at(17.0, 33.0), Some(GridPosition { grid: 3, row: 0, col: 0 }));
@@ -1950,7 +1944,7 @@ mod tests {
 
 		// The external window's cells and 2 pixels around them, which the outline covers: it doesn't hide the shadow's
 		// edge. The cells moved by those 2 pixels from where it's placed, so the outline starts there.
-		let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 3).unwrap();
+		let layer = redraw.layers.iter().find(|layer| layer.id == 3).unwrap();
 		let area = layer.shadow.as_ref().map(|shadow| shadow.area.clone());
 		assert_eq!(area, Some(vec![[CELL.width, CELL.height, 2 * CELL.width + 4, CELL.height + 4]]));
 	}
@@ -2097,7 +2091,7 @@ mod tests {
 
 	/// The area of the shadow drawn with grid `id`'s layer in `redraw`, in cells of the screen
 	fn shadow_of(redraw: &Redraw, id: u64) -> Option<Vec<[u32; 4]>> {
-		let Layer::Cells(layer) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == id).unwrap();
+		let layer = redraw.layers.iter().find(|layer| layer.id == id).unwrap();
 		let cells = |[x, y, width, height]: [u32; 4]| {
 			[x / CELL.width, y / CELL.height, width / CELL.width, height / CELL.height]
 		};
@@ -2121,9 +2115,7 @@ mod tests {
 		editor.set_scroll_motion(win_of(2), Some(motion));
 		let redraw = flush(&mut editor, vec![viewport(2, 100, 1), line(2, 0, "b")]);
 		assert_eq!(scroll_of(&redraw, 2), Some((1, 0, 3, 0, 4)));
-		let Some(Layer::Cells(layer)) = redraw.layers.iter().find(|Layer::Cells(layer)| layer.id == 2) else {
-			panic!()
-		};
+		let Some(layer) = redraw.layers.iter().find(|layer| layer.id == 2) else { panic!() };
 		assert_eq!(layer.scroll.and_then(|scroll| scroll.motion), Some(motion));
 
 		// Forgotten with the window's grid

@@ -2,15 +2,9 @@ use arrayvec::ArrayString;
 
 use crate::{CellSize, FontId, Motion};
 
-/// Something to draw in a window. Layers are drawn in order, so later ones cover earlier ones.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Layer {
-	Cells(CellLayer),
-}
-
 /// A block of cells at a position in the window, e.g. one of Neovim's grids, each cell `cell` large
 #[derive(Debug, Clone, PartialEq)]
-pub struct CellLayer {
+pub struct Layer {
 	/// Identifies the layer across frames, so unchanged rows aren't laid out again
 	pub id: u64,
 
@@ -56,7 +50,7 @@ pub struct CellLayer {
 	pub corner_radius: f32,
 }
 
-impl CellLayer {
+impl Layer {
 	/// The layer's rectangle, in pixels from the window's top-left corner: left, top, width, height
 	pub fn rect(&self) -> [u32; 4] {
 		[self.x, self.y, self.width * self.cell.width, self.height * self.cell.height]
@@ -71,7 +65,7 @@ impl CellLayer {
 	}
 }
 
-/// A line around a [`CellLayer`], in physical pixels
+/// A line around a [`Layer`], in physical pixels
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Outline {
 	pub width: f32,
@@ -109,7 +103,7 @@ pub struct Shadow {
 	pub opacity: f32,
 }
 
-/// Text of a [`CellLayer`] that moved since the layer was last shown, e.g. a window that scrolled
+/// Text of a [`Layer`] that moved since the layer was last shown, e.g. a window that scrolled
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scroll {
 	/// Rows the text moved up, or down if negative
@@ -175,7 +169,7 @@ pub struct TextStyle {
 	pub italic: bool,
 }
 
-/// The cursor in a cell of a [`CellLayer`], drawn over the text
+/// The cursor in a cell of a [`Layer`], drawn over the text
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cursor {
 	/// Position of the cell, in cells from the layer's top-left corner

@@ -6,7 +6,7 @@ use crate::color::rgba;
 use crate::font::LineMetrics;
 use crate::stencil;
 use crate::{
-	BarOrientation, CellLayer, CellSize, CursorShape, Decoration, LayerShadow, Outline, RenderCell, Shadow, Underline,
+	BarOrientation, CellSize, CursorShape, Decoration, Layer, LayerShadow, Outline, RenderCell, Shadow, Underline,
 };
 
 /// A rectangle in physical pixels, with optional rounded corners and border
@@ -290,7 +290,7 @@ fn instance_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
 
 /// Adds a quad for each run of cells in `layer` with the same background. Default backgrounds are drawn too, so a
 /// layer covers whatever is below it.
-pub(crate) fn cell_backgrounds(quads: &mut Vec<Quad>, layer: &CellLayer, srgb_surface: bool) {
+pub(crate) fn cell_backgrounds(quads: &mut Vec<Quad>, layer: &Layer, srgb_surface: bool) {
 	let (width, height) = (layer.cell.width as f32, layer.cell.height as f32);
 	let (left, top) = (layer.x as f32, layer.y as f32);
 
@@ -312,7 +312,7 @@ pub(crate) fn cell_backgrounds(quads: &mut Vec<Quad>, layer: &CellLayer, srgb_su
 /// crosses them, given as x ranges in pixels from the row's left.
 pub(crate) fn cell_decorations<'a>(
 	quads: &mut Vec<Quad>,
-	layer: &CellLayer,
+	layer: &Layer,
 	lines: LineMetrics,
 	srgb_surface: bool,
 	ink: impl Fn(usize) -> &'a [Range<f32>],
@@ -428,7 +428,7 @@ fn cut(quads: &mut Vec<Quad>, start: usize, gaps: &[Range<f32>]) {
 
 /// Adds a quad for the cursor of `layer`, if it's a bar or an outline, `thickness` pixels thick for an outline. A block
 /// cursor is drawn as the cells under it (see `cursor_layer` in the renderer).
-pub(crate) fn cursor_quad(quads: &mut Vec<Quad>, layer: &CellLayer, thickness: f32, srgb_surface: bool) {
+pub(crate) fn cursor_quad(quads: &mut Vec<Quad>, layer: &Layer, thickness: f32, srgb_surface: bool) {
 	let Some(cursor) = layer.cursor else { return };
 	let cell = layer.cell;
 	let (left, top) = (layer.x + cursor.col * cell.width, layer.y + cursor.row * cell.height);
@@ -458,7 +458,7 @@ pub(crate) fn cursor_quad(quads: &mut Vec<Quad>, layer: &CellLayer, thickness: f
 /// The quads of `layer`'s padding: its background around its cells, the window's own (`padding_background`). Only the
 /// bands around the cells, one a side: under a see-through window, the color would show twice. They're cut to the
 /// layer's rounded corners.
-pub(crate) fn padding_quads(quads: &mut Vec<Quad>, layer: &CellLayer, srgb_surface: bool) {
+pub(crate) fn padding_quads(quads: &mut Vec<Quad>, layer: &Layer, srgb_surface: bool) {
 	let (background, blend) = layer.padding_background;
 	let [r, g, b, _] = rgba(background, srgb_surface);
 	let color = [r, g, b, 1.0 - f32::from(blend.min(100)) / 100.0];
@@ -590,9 +590,7 @@ mod tests {
 	};
 	use crate::color::rgba;
 	use crate::font::LineMetrics;
-	use crate::{
-		BarOrientation, CellLayer, CellSize, Cursor, CursorShape, Decoration, RenderCell, TextStyle, Underline,
-	};
+	use crate::{BarOrientation, CellSize, Cursor, CursorShape, Decoration, Layer, RenderCell, TextStyle, Underline};
 
 	fn cells(backgrounds: &[u32]) -> Vec<RenderCell> {
 		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
@@ -638,7 +636,7 @@ mod tests {
 	fn bar_rect(orientation: BarOrientation, width: u32, percentage: u32) -> [f32; 4] {
 		let shape = CursorShape::Bar { orientation, percentage };
 		let cursor = Cursor { row: 2, col: 3, width, shape, color: 0xFFFFFF, text_color: 0, animate: true };
-		let layer = CellLayer {
+		let layer = Layer {
 			id: 1,
 			x: 8,
 			y: 19,
@@ -676,7 +674,7 @@ mod tests {
 			cell.decoration = decoration;
 		}
 		let cell = CellSize { width: 8, height: 19 };
-		let layer = CellLayer {
+		let layer = Layer {
 			id: 1,
 			x: 0,
 			y: 19,
@@ -723,7 +721,7 @@ mod tests {
 			blend: 0,
 			decoration: Decoration::default(),
 		};
-		let layer = CellLayer {
+		let layer = Layer {
 			id: 1,
 			x: 4,
 			y: 4,
