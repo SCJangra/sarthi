@@ -7,6 +7,7 @@ use crate::{Editor, Placement};
 /// How the mouse pointer looks, by what's under it (see [`Editor::pointer_at`])
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pointer {
+	/// The default pointer
 	Arrow,
 
 	/// Over text
@@ -22,8 +23,11 @@ pub enum Pointer {
 /// A cell of a grid
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridPosition {
+	/// The grid
 	pub grid: Grid,
+	/// Row of the cell, from the grid's top
 	pub row: u32,
+	/// Column of the cell, from the grid's left
 	pub col: u32,
 }
 

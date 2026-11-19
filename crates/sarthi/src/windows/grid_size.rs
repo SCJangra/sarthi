@@ -1,3 +1,5 @@
+//! How many cells fit in the window
+
 use renderer::CellSize;
 use winit::dpi::PhysicalSize;
 

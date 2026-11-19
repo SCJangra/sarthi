@@ -1,3 +1,5 @@
+//! A msgpack-rpc client over any reader and writer, reading and writing on threads of its own
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};

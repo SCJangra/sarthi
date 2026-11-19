@@ -14,7 +14,7 @@ const LINES_PER_NOTCH: f64 = 3.0;
 /// What the mouse is doing over a window
 #[derive(Debug)]
 pub struct Mouse {
-	/// Lines a touchpad scrolls per row of finger movement (see [`crate::settings::TouchpadSettings`])
+	/// Lines a touchpad scrolls per row of finger movement (see [`rpc::sarthi::TouchpadSettings`])
 	touchpad_scroll: f64,
 
 	/// The pointer's position, in physical pixels from the window's top-left, while it's over the window

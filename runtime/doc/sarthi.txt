@@ -210,6 +210,7 @@ corners.enabled                                       *sarthi-corners.enabled*
 corners.radius                                         *sarthi-corners.radius*
     Type: number
     Default: `8`
+    How round they are: the radius of their arcs, in logical pixels.
 
 corners.exclude_filetypes                   *sarthi-corners.exclude_filetypes*
     Type: string[]

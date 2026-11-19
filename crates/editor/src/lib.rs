@@ -1,5 +1,7 @@
 //! Neovim's UI state, from its redraw events, and the layers the renderer draws from it. Knows nothing about windows.
 
+#![warn(missing_docs)]
+
 pub mod compositor;
 pub mod cursor;
 pub mod external;
@@ -139,7 +141,7 @@ struct Viewport {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FloatStyle {
 	/// The shadow it casts, if any, from its outer edge: its outline's, or a float's cells. Floats at one level share
-	/// theirs (see [`Editor::float_shadows`]).
+	/// theirs (see `Editor::float_shadows`).
 	pub shadow: Option<Shadow>,
 
 	/// The line just outside its cells, if it has one. External windows only, like `corners` and `padding`: Neovim
@@ -166,6 +168,7 @@ pub struct FloatStyle {
 /// A line around a floating or external window, in logical pixels
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutlineStyle {
+	/// Thickness
 	pub width: f32,
 
 	/// The highlight group whose text color the line has
@@ -192,6 +195,7 @@ impl Default for Editor {
 }
 
 impl Editor {
+	/// An editor with no grids yet, as before Neovim's first redraw
 	pub fn new() -> Self {
 		Self {
 			grids: HashMap::new(),

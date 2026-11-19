@@ -1,3 +1,5 @@
+//! A Neovim window's handle, as Neovim sends it
+
 use std::fmt;
 
 use serde::Deserialize;

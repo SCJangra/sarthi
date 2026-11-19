@@ -1,6 +1,8 @@
 //! What sarthi's Lua tells sarthi without waiting for an answer, so Neovim goes on at once. Each is a variant of
 //! [`Notification`](crate::Notification), with the method named like a request's.
 
+#![allow(missing_docs, reason = "the arguments of sarthi's Lua API, which `runtime/lua/sarthi/api.lua` documents")]
+
 use serde::de::IgnoredAny;
 use serde::{Deserialize, Deserializer};
 

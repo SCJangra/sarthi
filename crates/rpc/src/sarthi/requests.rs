@@ -2,6 +2,8 @@
 //! name in snake case, e.g. `rpcrequest(channel, "set_clipboard", register, lines, regtype)`, and the arguments are
 //! decoded in order into the variant's struct.
 
+#![allow(missing_docs, reason = "the arguments of sarthi's Lua API, which `runtime/lua/sarthi/api.lua` documents")]
+
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 

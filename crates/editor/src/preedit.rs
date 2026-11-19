@@ -10,7 +10,9 @@ const PREEDIT_ID: u64 = u32::MAX as u64 + 2;
 /// Text an input method is composing, and where its caret is in it, as a byte offset
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preedit {
+	/// The text, as the input method shows it
 	pub text: String,
+	/// Where the caret is in `text`, as a byte offset, if the input method shows one
 	pub caret: Option<usize>,
 }
 

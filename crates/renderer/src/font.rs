@@ -1,3 +1,5 @@
+//! The fonts text is drawn with: the bundled and system families of `guifont`, their faces and metrics, the size of a cell, and which face draws each character
+
 use std::sync::Arc;
 
 use glyphon::FontSystem;
@@ -22,18 +24,22 @@ const MAX_FAMILIES: usize = 32;
 /// Size of a grid cell, in physical pixels
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellSize {
+	/// Width, in physical pixels
 	pub width: u32,
+	/// Height, in physical pixels: the font's line height plus the line space
 	pub height: u32,
 }
 
 /// How large text and its underlines are drawn, in physical pixels
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextSize {
+	/// Size of the font, in physical pixels
 	pub font_size: f32,
 
 	/// Added to the height of each row, or taken from it if negative (Neovim's `linespace`)
 	pub line_space: i32,
 
+	/// How thick underlines are, and where they go
 	pub underlines: UnderlineSize,
 }
 
@@ -88,20 +94,26 @@ pub struct FontChoice {
 
 	/// Draws all text bold or italic, not only text highlighted so
 	pub bold: bool,
+	/// Draws all text italic, not only text highlighted so
 	pub italic: bool,
 }
 
+/// Why fonts couldn't be chosen
 #[derive(Debug, thiserror::Error)]
 pub enum FontError {
+	/// None of the named fonts is installed
 	#[error("no font found of: {0}")]
 	NotFound(String),
 
+	/// The font lacks metrics to size cells by
 	#[error("font {0} has no usable metrics")]
 	NoMetrics(String),
 
+	/// More fonts were named than [`FontChoice::families`] takes
 	#[error("at most {MAX_FAMILIES} fonts")]
 	TooMany,
 
+	/// More sets of fonts were chosen than [`crate::FontId`] can number
 	#[error("too many sets of fonts")]
 	TooManySets,
 }

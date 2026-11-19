@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 /// Text Neovim copied: its lines, and its register type (`v`, `V` or a block like `^V10`)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Copied {
+	/// The lines
 	pub lines: Vec<String>,
+	/// The register type
 	pub regtype: String,
 }
 
@@ -14,7 +16,9 @@ pub struct Copied {
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Paste {
+	/// The lines and their register type
 	Typed((Vec<String>, String)),
+	/// Only the lines
 	Lines(Vec<String>),
 }
 
@@ -22,7 +26,9 @@ pub enum Paste {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
 pub enum Register {
+	/// The `+` register, the system clipboard
 	Clipboard,
+	/// The `*` register, the primary selection
 	Primary,
 }
 

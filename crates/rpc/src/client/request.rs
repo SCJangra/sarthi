@@ -1,3 +1,5 @@
+//! What Neovim sends unasked: notifications, and requests sarthi answers through a [`Responder`]
+
 use flume::WeakSender;
 use serde::Serialize;
 
@@ -6,14 +8,18 @@ use crate::{Notification, OutgoingRpcMessage, Request};
 /// What Neovim sends without being asked, in the order it sent it: its notifications, and the requests of sarthi's Lua
 #[derive(Debug)]
 pub enum Message {
+	/// A notification
 	Notification(Notification),
+	/// A request, which must be answered
 	Request(IncomingRequest),
 }
 
 /// A request from Neovim, e.g. from `rpcrequest()` on sarthi's channel, and what answers it
 #[derive(Debug)]
 pub struct IncomingRequest {
+	/// What's asked
 	pub request: Request,
+	/// Answers it, once
 	pub responder: Responder,
 }
 

@@ -1,6 +1,8 @@
 //! sarthi's RPC with Neovim: the connection and process (`client`), Neovim's API (`neovim`), and sarthi's own API
 //! between sarthi and its Lua (`sarthi`, with the Lua in the workspace's `runtime/`).
 
+#![warn(missing_docs)]
+
 pub mod client;
 pub mod neovim;
 pub mod sarthi;

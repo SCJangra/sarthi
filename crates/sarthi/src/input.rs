@@ -1,3 +1,5 @@
+//! Keys as Neovim's key notation (`:help key-notation`), for `nvim_input`
+
 use winit::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 
 /// Text an input method committed, for `nvim_input`: typed as it is, but for `<`, which would start a key's name

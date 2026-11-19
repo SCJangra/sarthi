@@ -1,3 +1,5 @@
+//! What the renderer draws: [`Layer`]s of cells, with their cursor, scroll, shadow and frame
+
 use arrayvec::ArrayString;
 
 use crate::{CellSize, Edges, FontId, Motion, Rect};
@@ -10,6 +12,7 @@ pub struct Layer {
 
 	/// Position of the top-left cell, in pixels from the window's top-left corner
 	pub x: u32,
+	/// Top edge, in pixels from the window's top
 	pub y: u32,
 
 	/// The fonts its text is drawn with, which also give its cells' size
@@ -20,6 +23,7 @@ pub struct Layer {
 
 	/// Size in cells
 	pub width: u32,
+	/// Rows of cells
 	pub height: u32,
 
 	/// Row by row, `width * height` cells
@@ -75,6 +79,7 @@ impl Layer {
 /// A line around a [`Layer`], in physical pixels
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Outline {
+	/// Thickness, in physical pixels
 	pub width: f32,
 
 	/// As `0xRRGGBB` in sRGB
@@ -84,6 +89,7 @@ pub struct Outline {
 /// A shadow under an area of the window, made of rectangles that may overlap
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayerShadow {
+	/// How the shadow looks
 	pub shadow: Shadow,
 
 	/// Rectangles in pixels from the window's top-left corner
@@ -119,8 +125,11 @@ pub struct Scroll {
 	/// The cells that scroll, in cells from the layer's top-left corner: rows `top..bottom` and columns
 	/// `left..right`. The rest, like a winbar or a border, stays in place.
 	pub top: u32,
+	/// Past the last row that scrolls
 	pub bottom: u32,
+	/// The first column that scrolls
 	pub left: u32,
+	/// Past the last column that scrolls
 	pub right: u32,
 
 	/// How the text slides to its new place, if not as the renderer's other scrolled text does (see
@@ -128,10 +137,12 @@ pub struct Scroll {
 	pub motion: Option<Motion>,
 }
 
+/// A cell of a [`Layer`], with its highlight resolved to colors and styles
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RenderCell {
 	/// Empty for the right half of a double-width character
 	pub text: ArrayString<32>,
+	/// How its text is drawn
 	pub style: TextStyle,
 
 	/// As `0xRRGGBB` in sRGB
@@ -141,12 +152,14 @@ pub struct RenderCell {
 	/// `winblend`
 	pub blend: u8,
 
+	/// Lines drawn over its text
 	pub decoration: Decoration,
 }
 
 /// Lines drawn over a cell's text
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Decoration {
+	/// The line drawn under the text, if any
 	pub underline: Option<Underline>,
 
 	/// Drawn in the text color
@@ -159,20 +172,29 @@ pub struct Decoration {
 	pub underline_color: u32,
 }
 
+/// The style of an underline, like Neovim's `underline`, `underdouble`, `undercurl`, `underdotted` and `underdashed`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Underline {
+	/// A straight line
 	Single,
+	/// Two straight lines
 	Double,
+	/// A wave
 	Curly,
+	/// A line of dots
 	Dotted,
+	/// A line of dashes
 	Dashed,
 }
 
+/// How a cell's text is drawn
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TextStyle {
 	/// As `0xRRGGBB` in sRGB
 	pub foreground: u32,
+	/// Drawn in a bold face
 	pub bold: bool,
+	/// Drawn in an italic face
 	pub italic: bool,
 }
 
@@ -181,11 +203,13 @@ pub struct TextStyle {
 pub struct Cursor {
 	/// Position of the cell, in cells from the layer's top-left corner
 	pub row: u32,
+	/// Column of the cell
 	pub col: u32,
 
 	/// Cells covered, 2 for a double-width character
 	pub width: u32,
 
+	/// What the cursor looks like
 	pub shape: CursorShape,
 
 	/// The cursor's color: a block's background, or a bar's color. As `0xRRGGBB` in sRGB.
@@ -198,19 +222,27 @@ pub struct Cursor {
 	pub animate: bool,
 }
 
+/// What a [`Cursor`] looks like, from Neovim's `guicursor`
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorShape {
 	/// The whole cell, with its character drawn again in the cursor's text color
 	Block,
 
 	/// A bar covering `percentage` percent of the cell
-	Bar { orientation: BarOrientation, percentage: u32 },
+	Bar {
+		/// Which edge of the cell it lies along
+		orientation: BarOrientation,
+
+		/// How much of the cell it covers, from 1 to 100
+		percentage: u32,
+	},
 
 	/// The whole cell's outline, as thick as underlines, with its character in its own colors: e.g. while the window
 	/// doesn't have the focus
 	Outline,
 }
 
+/// Which edge of the cell a bar cursor lies along
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BarOrientation {
 	/// Along the left edge of the cell, e.g. in insert mode

@@ -1,3 +1,5 @@
+//! Splitting the msgpack stream from Neovim into whole messages before decoding them
+
 use std::io;
 
 use rmp::Marker;

@@ -1,3 +1,5 @@
+//! The renderer: draws the layers each frame, piece by piece, over the clear color
+
 use std::borrow::Cow;
 use std::ops::Range;
 use std::time::Instant;
@@ -20,6 +22,7 @@ use crate::{
 	RendererError, TextStyle,
 };
 
+/// Draws [`Layer`]s to a window's surface with wgpu
 pub struct Renderer {
 	surface: wgpu::Surface<'static>,
 	device: wgpu::Device,
@@ -59,6 +62,7 @@ impl Renderer {
 		Self::with_config(target, width, height, RendererConfig::default()).await
 	}
 
+	/// A renderer for `target`, a surface of `width` × `height` pixels, set up as `config` says
 	pub async fn with_config(
 		target: impl Into<wgpu::SurfaceTarget<'static>>,
 		width: u32,
@@ -165,6 +169,7 @@ impl Renderer {
 		})
 	}
 
+	/// Resizes the surface to `width` × `height` pixels, for a resized window
 	pub fn resize(&mut self, width: u32, height: u32) {
 		self.config.width = width.max(1);
 		self.config.height = height.max(1);

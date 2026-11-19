@@ -5,7 +5,7 @@
 //! sections with the same keys, each replacing the setting's value for that window, e.g.
 //! `vim.w[win].sarthi = { shadow = { opacity = 0.6 } }`.
 //!
-//! Each section is declared with [`section!`], which also keeps what the help file (`:help sarthi`) says about it: its
+//! Each section is declared with `section!`, which also keeps what the help file (`:help sarthi`) says about it: its
 //! doc comments, its keys' types, and which keys a window can have its own values of. The help file's defaults are what
 //! serde gives for an empty table.
 
@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 /// A key of a section of the settings, as declared, for the help file
 #[derive(Debug)]
 pub struct Key {
+	/// Its name in the section
 	pub name: &'static str,
 
 	/// Its Rust type, as written
@@ -26,11 +27,12 @@ pub struct Key {
 	pub doc: &'static [&'static str],
 }
 
-/// A section of the settings, as declared with [`section!`], for the help file
+/// A section of the settings, as declared with `section!`, for the help file
 pub trait Section {
 	/// Its doc comment, line by line
 	const DOC: &'static [&'static str];
 
+	/// Its keys, in order
 	const KEYS: &'static [Key];
 
 	/// The keys a window can have its own values of, in `w:sarthi`
@@ -40,9 +42,13 @@ pub trait Section {
 /// A section of the settings, by its name in them (see [`SECTIONS`])
 #[derive(Debug)]
 pub struct SectionDoc {
+	/// Its name in the settings
 	pub name: &'static str,
+	/// Its doc comment, line by line
 	pub doc: &'static [&'static str],
+	/// Its keys, in order
 	pub keys: &'static [Key],
+	/// The keys a window can have its own values of
 	pub window_keys: &'static [&'static str],
 }
 
@@ -54,7 +60,10 @@ macro_rules! window_options {
 		#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 		#[serde(default, deny_unknown_fields)]
 		pub struct $options {
-			$(pub $field: Option<$type>,)*
+			$(
+				#[doc = concat!("The window's own `", stringify!($field), "`, if it has one")]
+				pub $field: Option<$type>,
+			)*
 		}
 
 		impl $settings {
@@ -122,10 +131,14 @@ macro_rules! section {
 /// Declares [`Settings`], with the sections in the order the help file lists them, and [`SECTIONS`]
 macro_rules! settings {
 	($($section:ident: $type:ident),* $(,)?) => {
+		/// The settings `require('sarthi').setup()` takes, a section each
 		#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 		#[serde(default, deny_unknown_fields)]
 		pub struct Settings {
-			$(pub $section: $type,)*
+			$(
+				#[doc = concat!("The `", stringify!($section), "` section")]
+				pub $section: $type,
+			)*
 		}
 
 		/// Every section of the settings, in order, for the help file
@@ -171,27 +184,40 @@ section! {
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "curve", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Animation {
+	/// No animation: the value jumps to its target
 	None,
+	/// Like a weight on a spring
 	Spring {
+		/// How hard the spring pulls
 		#[serde(default = "default_stiffness")]
 		stiffness: f32,
+		/// How much the spring slows the value down
 		#[serde(default = "default_damping")]
 		damping: f32,
 	},
+	/// At a constant speed
 	Linear {
+		/// How long it takes, in milliseconds
 		#[serde(default = "default_duration")]
 		duration: f32,
 	},
+	/// Slowing down at the end
 	EaseOut {
+		/// How long it takes, in milliseconds
 		#[serde(default = "default_duration")]
 		duration: f32,
 	},
+	/// Speeding up, then slowing down
 	EaseInOut {
+		/// How long it takes, in milliseconds
 		#[serde(default = "default_duration")]
 		duration: f32,
 	},
+	/// Along a cubic Bézier curve, like CSS's `cubic-bezier()`
 	CubicBezier {
+		/// The curve's control points: x1, y1, x2, y2
 		points: [f32; 4],
+		/// How long it takes, in milliseconds
 		#[serde(default = "default_duration")]
 		duration: f32,
 	},
@@ -203,6 +229,7 @@ pub struct Curve {
 	/// Its `curve` value
 	pub name: &'static str,
 
+	/// What it does
 	pub doc: &'static str,
 
 	/// Its keys without a default, with example values, as Lua
@@ -331,6 +358,7 @@ section! {
 		/// Whether windows have them. Off by default: a window's text in its corner cells isn't cut to them.
 		enabled: bool = false,
 
+		/// How round they are: the radius of their arcs, in logical pixels.
 		radius: f32 = 8.0,
 
 		/// Windows showing these filetypes keep square corners, whatever their `w:sarthi` gives. Glob patterns, e.g.
@@ -411,7 +439,9 @@ section! {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum PaddingSize {
+	/// The same on every side
 	All(f32),
+	/// Each side's own
 	Sides(PaddingSides),
 }
 
@@ -419,9 +449,13 @@ pub enum PaddingSize {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct PaddingSides {
+	/// Above the cells
 	pub top: f32,
+	/// Right of the cells
 	pub right: f32,
+	/// Below the cells
 	pub bottom: f32,
+	/// Left of the cells
 	pub left: f32,
 }
 
@@ -484,6 +518,7 @@ impl<'de> Deserialize<'de> for PaddingSize {
 pub struct Filetypes(Vec<glob::Pattern>);
 
 impl Filetypes {
+	/// Compiles `patterns`, or says which one isn't a glob pattern
 	pub fn new<'a>(patterns: impl IntoIterator<Item = &'a str>) -> Result<Self, String> {
 		patterns
 			.into_iter()
@@ -523,10 +558,15 @@ pub struct WindowOptions {
 	/// opened with `require('sarthi').api`, which sets it. Without it, the window has only what it gives of those; the
 	/// settings' `scroll` and `shadow` apply to every window.
 	pub managed: Option<bool>,
+	/// The window's own `scroll`
 	pub scroll: ScrollOptions,
+	/// The window's own `shadow`
 	pub shadow: ShadowOptions,
+	/// The window's own `outline`
 	pub outline: OutlineOptions,
+	/// The window's own `corners`
 	pub corners: CornerOptions,
+	/// The window's own `padding`
 	pub padding: PaddingOptions,
 }
 

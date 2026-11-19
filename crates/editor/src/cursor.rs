@@ -1,3 +1,5 @@
+//! The cursor's style from Neovim's modes (`:help ui-event-mode_info_set`), and when its moves animate
+
 use rpc::neovim::{CursorShape, HlId, ModeInfo};
 
 /// How Neovim wants the cursor drawn, from `mode_info_set`, `mode_change`, `busy_start` and `busy_stop`
@@ -43,6 +45,7 @@ impl Default for CursorState {
 /// The cursor's look in the current mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CursorStyle {
+	/// Block, vertical or horizontal bar
 	pub shape: CursorShape,
 
 	/// How much of the cell a horizontal or vertical cursor covers, in percent
@@ -59,11 +62,13 @@ pub struct CursorStyle {
 }
 
 impl CursorState {
+	/// Neovim's modes, from `mode_info_set`, and whether its cursor styles are used at all (`'guicursor'`)
 	pub fn set_modes(&mut self, style_enabled: bool, modes: Vec<ModeInfo>) {
 		self.style_enabled = style_enabled;
 		self.modes = modes;
 	}
 
+	/// The current mode, by its index in the modes and its name (`mode_change`)
 	pub fn set_mode(&mut self, mode: usize, name: &str) {
 		self.mode = mode;
 		name.clone_into(&mut self.mode_name);
@@ -84,6 +89,7 @@ impl CursorState {
 		self.drawn_mode.clone_from(&self.mode_name);
 	}
 
+	/// Hides the cursor while Neovim is busy (`busy_start`), or shows it again (`busy_stop`)
 	pub fn set_hidden(&mut self, hidden: bool) {
 		self.hidden = hidden;
 	}

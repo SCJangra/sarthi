@@ -1,3 +1,5 @@
+//! A grid as a layer for the renderer, with its highlights resolved and the cursor drawn
+
 use renderer::{BarOrientation, CellSize, Cursor, Decoration, FontId, Layer, RenderCell, TextStyle};
 use rpc::neovim::{CursorShape, HlId};
 

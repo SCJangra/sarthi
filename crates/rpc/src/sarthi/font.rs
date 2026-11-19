@@ -14,15 +14,19 @@ pub struct WindowFont {
 	pub size: Option<f32>,
 }
 
+/// The fonts of a window's set, as `font.family` takes them: one name or a list
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(untagged)]
 pub enum FontFamilies {
+	/// One font
 	One(String),
+	/// Fonts in order, each drawing what the ones before it lack
 	Many(Vec<String>),
 }
 
 impl FontFamilies {
+	/// The fonts as a list, in order
 	pub fn into_vec(self) -> Vec<String> {
 		match self {
 			Self::One(family) => vec![family],

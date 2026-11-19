@@ -1,3 +1,5 @@
+//! The window's size and font size at start, from the command line
+
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
 	pub title: String,

@@ -1,3 +1,5 @@
+//! What can stop sarthi
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
 	#[error("Renderer({0})")]

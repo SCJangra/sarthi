@@ -1,15 +1,22 @@
+//! Rectangles and the sizes around them, in pixels or cells
+
 use std::ops::Add;
 
 /// A rectangle: its top-left corner and its size, in pixels or cells
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Rect<T> {
+	/// Left edge
 	pub x: T,
+	/// Top edge
 	pub y: T,
+	/// Width, from the left edge
 	pub width: T,
+	/// Height, from the top edge
 	pub height: T,
 }
 
 impl<T: Copy + Add<Output = T>> Rect<T> {
+	/// A rectangle at `x`, `y`, `width` × `height` large
 	pub fn new(x: T, y: T, width: T, height: T) -> Self {
 		Self { x, y, width, height }
 	}
@@ -32,6 +39,7 @@ impl Rect<u32> {
 		Self { x, y, width: self.right() + edges.right - x, height: self.bottom() + edges.bottom - y }
 	}
 
+	/// The same rectangle in floating-point numbers, as the GPU takes it
 	pub fn to_f32(self) -> Rect<f32> {
 		Rect { x: self.x as f32, y: self.y as f32, width: self.width as f32, height: self.height as f32 }
 	}
@@ -62,9 +70,13 @@ impl<T> From<Rect<T>> for [T; 4] {
 /// A size on each side of a rectangle, like padding
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Edges<T> {
+	/// Above
 	pub top: T,
+	/// On the right
 	pub right: T,
+	/// Below
 	pub bottom: T,
+	/// On the left
 	pub left: T,
 }
 
@@ -74,6 +86,7 @@ impl<T: Copy> Edges<T> {
 		Self { top: size, right: size, bottom: size, left: size }
 	}
 
+	/// The sizes converted by `f`, side by side
 	pub fn map<U>(self, f: impl Fn(T) -> U) -> Edges<U> {
 		Edges { top: f(self.top), right: f(self.right), bottom: f(self.bottom), left: f(self.left) }
 	}

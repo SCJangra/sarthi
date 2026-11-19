@@ -1,3 +1,8 @@
+//! Neovim's redraw events (`:help ui-events`), one module each, as Neovim sends them. Their fields are named and
+//! ordered as in Neovim's help, which documents them.
+
+#![allow(missing_docs, reason = "named and typed as in Neovim's help, which documents them")]
+
 mod default_colors_set;
 mod grid_clear;
 mod grid_cursor_goto;

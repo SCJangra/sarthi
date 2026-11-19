@@ -1,3 +1,10 @@
+//! Draws Neovim's grids with wgpu.
+//!
+//! The editor turns Neovim's state into [`Layer`]s of cells, which [`Renderer`] draws: their text, backgrounds,
+//! decorations and frames, the cursor, and the animations of scrolling and the cursor. It knows nothing about Neovim.
+
+#![warn(missing_docs)]
+
 mod animation;
 mod builtin_glyphs;
 mod color;

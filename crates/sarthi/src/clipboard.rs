@@ -1,3 +1,5 @@
+//! The system clipboard and primary selection, for Neovim's `+` and `*` registers
+
 use std::time::{Duration, Instant};
 
 use rpc::sarthi::{Copied, Paste, Register};

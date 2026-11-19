@@ -1,3 +1,5 @@
+//! Text, laid out a row at a time with glyphon in the layers' fonts, and only again when a row changes
+
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -320,7 +322,7 @@ fn builtin_glyphs(cells: &[RenderCell], cell: CellSize) -> Vec<CustomGlyph> {
 		.collect()
 }
 
-/// A run of cells laid out together, starting at column `col`, in chosen font `face` (see [`Fonts::face_of`])
+/// A run of cells laid out together, starting at column `col`, in chosen font `face` (see `FontSet::face_of`)
 #[derive(Debug, PartialEq)]
 struct Segment {
 	col: u32,

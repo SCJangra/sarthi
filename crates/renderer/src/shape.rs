@@ -1,3 +1,5 @@
+//! The cursor's shape on its way between cells: a quadrilateral through its four corners
+
 use bytemuck::{Pod, Zeroable};
 
 /// What [`ShapePipeline`] draws: see `shaders/shape.wgsl`

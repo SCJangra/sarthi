@@ -1,3 +1,5 @@
+//! The app: the window, Neovim, and everything between them, driven by winit's events and Neovim's messages
+
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::sync::Arc;

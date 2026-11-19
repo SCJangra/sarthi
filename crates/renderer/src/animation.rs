@@ -6,12 +6,24 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Motion {
 	/// Along `easing`, taking `duration`. A new target restarts the curve from where the value is.
-	Ease { easing: Easing, duration: Duration },
+	Ease {
+		/// How the value speeds up and slows down
+		easing: Easing,
+
+		/// How long the value takes to reach its target
+		duration: Duration,
+	},
 
 	/// Like a weight on a spring (of mass 1), pulled by `stiffness` and slowed by `damping`. With less damping than
 	/// `2 * stiffness.sqrt()`, it overshoots and bounces; with more, it creeps in. A new target keeps the value's
 	/// speed, so motion stays smooth when targets change quickly, e.g. while scrolling continuously.
-	Spring { stiffness: f32, damping: f32 },
+	Spring {
+		/// How hard the spring pulls the value to its target
+		stiffness: f32,
+
+		/// How much the spring slows the value down
+		damping: f32,
+	},
 }
 
 impl Motion {

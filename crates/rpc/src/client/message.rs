@@ -1,25 +1,35 @@
+//! msgpack-rpc messages, to and from Neovim
+
 use crate::{Notification, Request};
 
+/// A message to Neovim, whose arguments or result are `T`
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum OutgoingRpcMessage<T> {
+	/// A call, which Neovim answers
 	Request(RpcRequest<T>),
 
 	/// A call Neovim doesn't reply to. It reports errors from such calls with `nvim_error_event`.
 	Notification {
+		/// The API function
 		method: &'static str,
+		/// Its arguments
 		params: T,
 	},
 
 	/// Successful response to a request from the server
 	Response {
+		/// The request's id
 		id: u32,
+		/// What the request returns
 		result: T,
 	},
 
 	/// Failed response to a request from the server
 	ErrorResponse {
+		/// The request's id
 		id: u32,
+		/// Why it failed
 		message: String,
 	},
 }
@@ -29,23 +39,40 @@ pub enum OutgoingRpcMessage<T> {
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum IncomingRpcMessage<T> {
-	Request { id: u32, request: Request },
+	/// A request, which must be answered
+	Request {
+		/// Matches the answer to it
+		id: u32,
+
+		/// What's asked
+		request: Request,
+	},
+
+	/// The answer to a call of sarthi's
 	Response(RpcResponse<T>),
+	/// A notification, which isn't answered
 	Notification(Notification),
 }
 
+/// A call to Neovim, with arguments `P`
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct RpcRequest<P> {
+	/// Matches the call's response to it
 	pub id: u32,
+	/// The API function
 	pub method: String,
+	/// Its arguments
 	pub params: P,
 }
 
+/// Neovim's answer to a call, with a result `R`
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct RpcResponse<R> {
+	/// The id of the call it answers
 	pub id: u32,
+	/// The result, or the error Neovim raised
 	pub result: Result<R, rmpv::Value>,
 }
 

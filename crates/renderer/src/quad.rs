@@ -1,3 +1,5 @@
+//! Rectangles drawn on the GPU: cell backgrounds, decorations, the cursor, and layers' padding, outlines and shadows
+
 use std::ops::Range;
 
 use bytemuck::{Pod, Zeroable};

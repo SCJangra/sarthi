@@ -1,3 +1,5 @@
+//! Neovim: its process and the API functions sarthi calls
+
 use std::ffi::{OsStr, OsString};
 use std::time::{Duration, Instant};
 use std::{process, thread};
@@ -16,6 +18,7 @@ use crate::{
 /// while it writes ShaDa leaves a temporary file behind.
 const EXIT_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// Neovim, running embedded, and the API functions sarthi calls
 pub struct Nvim {
 	// Fields drop in order: dropping `rpc` closes Neovim's input, which makes it exit, and then
 	// `process` waits for that.

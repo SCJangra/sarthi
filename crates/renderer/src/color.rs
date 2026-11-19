@@ -1,3 +1,5 @@
+//! Colors as Neovim sends them (`0xRRGGBB` in sRGB), converted to what the GPU and the surface take
+
 /// Converts a color as Neovim sends it, `0xRRGGBB` in sRGB, to a [`wgpu::Color`] for a surface of the
 /// given kind.
 ///

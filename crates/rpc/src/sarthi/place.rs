@@ -11,15 +11,20 @@ use crate::sarthi::notifications::optional_window_number;
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(default, deny_unknown_fields)]
 pub struct WindowPlace {
+	/// Centered over the screen
 	pub center: Option<bool>,
+	/// What `row` and `col` count from
 	pub relative: Option<PlaceRelative>,
 
 	/// The window it's relative to, for `relative = 'win'`; the current window if left out, like for floats
 	#[serde(deserialize_with = "optional_window_number")]
 	pub win: Option<Window>,
 
+	/// The corner at `row`, `col`
 	pub anchor: Option<PlaceAnchor>,
+	/// Rows from what it's relative to
 	pub row: Option<f64>,
+	/// Columns from what it's relative to
 	pub col: Option<f64>,
 
 	/// Moves it further, in logical pixels, e.g. past another window's padding: `{ x = …, y = … }`
@@ -34,27 +39,37 @@ pub struct WindowPlace {
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(default, deny_unknown_fields)]
 pub struct PlaceOffset {
+	/// Right, or left if negative
 	pub x: f64,
+	/// Down, or up if negative
 	pub y: f64,
 }
 
+/// What a window's `row` and `col` count from, named like a float's `relative`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlaceRelative {
+	/// The screen's top-left corner
 	Editor,
+	/// Window `win`'s text
 	Win,
+	/// The cursor
 	Cursor,
 }
 
 /// Which corner is at `row`, `col`, named like Neovim's `anchor`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum PlaceAnchor {
+	/// The top-left corner
 	#[serde(rename = "NW")]
 	NorthWest,
+	/// The top-right corner
 	#[serde(rename = "NE")]
 	NorthEast,
+	/// The bottom-left corner
 	#[serde(rename = "SW")]
 	SouthWest,
+	/// The bottom-right corner
 	#[serde(rename = "SE")]
 	SouthEast,
 }

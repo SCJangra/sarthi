@@ -1,3 +1,5 @@
+//! Neovim's highlights (`:help ui-event-hl_attr_define`): the colors and attributes of each highlight id
+
 use std::collections::HashMap;
 
 use renderer::Underline;
@@ -10,25 +12,35 @@ const INITIAL_DEFAULT_COLORS: DefaultColors =
 /// Neovim's default colors (`default_colors_set`), as `0xRRGGBB`
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DefaultColors {
+	/// Text color
 	pub foreground: u32,
+	/// Background color
 	pub background: u32,
+	/// Color of underlines and undercurls
 	pub special: u32,
 }
 
 /// How a cell looks, with every color resolved to `0xRRGGBB`
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellStyle {
+	/// Text color
 	pub foreground: u32,
+	/// Background color
 	pub background: u32,
 
 	/// Color of underlines and undercurls
 	pub special: u32,
 
+	/// Drawn in a bold face
 	pub bold: bool,
+	/// Drawn in an italic face
 	pub italic: bool,
 
+	/// The line drawn under the text, if any
 	pub underline: Option<Underline>,
+	/// A line through the text
 	pub strikethrough: bool,
+	/// A line over the text
 	pub overline: bool,
 
 	/// How much of what's under the cell shows through its background, from 0 to 100 (`winblend`, `pumblend`)
@@ -53,10 +65,12 @@ impl Default for HighlightState {
 }
 
 impl HighlightState {
+	/// No highlights yet, with Neovim's default colors before it sends its own
 	pub fn new() -> Self {
 		Self { attrs: HashMap::new(), defaults: INITIAL_DEFAULT_COLORS, groups: HashMap::new() }
 	}
 
+	/// Neovim's default colors, which highlights without colors of their own take
 	pub fn defaults(&self) -> DefaultColors {
 		self.defaults
 	}
@@ -74,6 +88,7 @@ impl HighlightState {
 		}
 	}
 
+	/// The highlight ids of Neovim's UI groups, by name (`hl_group_set`)
 	pub fn set_hl_groups(&mut self, groups: Vec<HlGroupSetEvent>) {
 		self.groups.extend(groups.into_iter().map(|group| (group.name, group.hl_id)));
 	}

@@ -11,10 +11,26 @@ pub enum Place {
 	/// Centered over the screen, until placed otherwise
 	Center,
 
-	/// Like a floating window (`nvim_open_win()`'s `relative`, `anchor`, `row`, `col` and `fixed`): its frame's
-	/// `anchor` corner at `row`, `col` (whole cells) from what it's relative to, moved further by `offset` (right and
-	/// down, in logical pixels), kept on the screen; `fixed`, not moved sideways for it unless anchored on the right
-	Relative { relative: Relative, anchor: Anchor, row: f64, col: f64, offset: [f64; 2], fixed: bool },
+	/// Like a floating window (`nvim_open_win()`'s `relative`, `anchor`, `row`, `col` and `fixed`), kept on the screen
+	Relative {
+		/// What `row` and `col` count from
+		relative: Relative,
+
+		/// The corner of its frame that goes at `row`, `col`
+		anchor: Anchor,
+
+		/// Rows from what it's relative to, in whole cells
+		row: f64,
+
+		/// Columns from what it's relative to, in whole cells
+		col: f64,
+
+		/// Moves it further right and down, in logical pixels
+		offset: [f64; 2],
+
+		/// Not moved sideways to stay on the screen, unless anchored on the right
+		fixed: bool,
+	},
 }
 
 /// What a [`Place::Relative`] window's `row` and `col` count from
@@ -34,10 +50,14 @@ pub enum Relative {
 /// Which corner of a [`Place::Relative`] window is at its `row` and `col`
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Anchor {
+	/// Its top-left corner
 	#[default]
 	NorthWest,
+	/// Its top-right corner
 	NorthEast,
+	/// Its bottom-left corner
 	SouthWest,
+	/// Its bottom-right corner
 	SouthEast,
 }
 
