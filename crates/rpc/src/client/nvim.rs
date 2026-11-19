@@ -1,6 +1,7 @@
 //! Neovim: its process and the API functions sarthi calls
 
 use std::ffi::{OsStr, OsString};
+use std::ops::Deref;
 use std::time::{Duration, Instant};
 use std::{process, thread};
 
@@ -9,9 +10,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::{
-	ClientInfo, Error, ExecLua, GetChanInfo, Input, InputMouse, InputMouseParams, Message, RpcClient, SetClientInfo,
-	SetVar, UiAttach, UiAttachParams, UiSetFocus, UiTryResize, UiTryResizeGrid, UiTryResizeGridParams,
-	UiTryResizeParams,
+	Buffer, CallFunction, ClientInfo, Error, ExecLua, GetChanInfo, GetCurrentWin, GetStringOption, Input, InputMouse,
+	InputMouseParams, Message, NoOpts, OpenWin, RpcClient, RpcHandle, SetClientInfo, SetStringOption, SetVar, UiAttach,
+	UiAttachParams, UiSetFocus, UiTryResize, UiTryResizeGrid, UiTryResizeGridParams, UiTryResizeParams, WinClose,
+	WinGetConfig, WinSetConfig, WinSetVar, Window,
 };
 
 /// How long to wait for Neovim to exit on its own before killing it. Generous, since killing it
@@ -20,10 +22,14 @@ const EXIT_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Neovim, running embedded, and the API functions sarthi calls
 pub struct Nvim {
+	/// What calls it, here and on other threads
+	handle: NvimHandle,
+
 	// Fields drop in order: dropping `rpc` closes Neovim's input, which makes it exit, and then
 	// `process` waits for that.
+	#[expect(dead_code, reason = "kept for its drop, which closes Neovim's input")]
 	rpc: RpcClient,
-	#[allow(unused)]
+	#[allow(dead_code, reason = "kept for its drop, which waits for Neovim to exit")]
 	process: NvimProcess,
 }
 
@@ -67,9 +73,32 @@ impl Nvim {
 
 		let (rpc, messages) = RpcClient::start(stdout, stdin);
 
-		Ok((Self { rpc, process: NvimProcess(nvim) }, messages))
+		Ok((Self { handle: NvimHandle { rpc: rpc.handle() }, rpc, process: NvimProcess(nvim) }, messages))
 	}
 
+	/// A handle that calls Neovim from any thread, cheap to clone. It doesn't keep Neovim running: once this is dropped,
+	/// its calls fail.
+	pub fn handle(&self) -> NvimHandle {
+		self.handle.clone()
+	}
+}
+
+/// Calls through the handle, here on the thread that owns Neovim
+impl Deref for Nvim {
+	type Target = NvimHandle;
+
+	fn deref(&self) -> &NvimHandle {
+		&self.handle
+	}
+}
+
+/// The API functions sarthi calls, from any thread (see [`Nvim::handle`])
+#[derive(Clone)]
+pub struct NvimHandle {
+	rpc: RpcHandle,
+}
+
+impl NvimHandle {
 	/// The id of the channel sarthi and Neovim talk on, e.g. for Lua code that calls back with `rpcrequest()`
 	///
 	/// # Errors
@@ -198,6 +227,101 @@ impl Nvim {
 	/// Fails once the connection to Neovim is closed.
 	pub fn ui_set_focus(&self, focused: bool) -> Result<(), Error> {
 		self.rpc.notify::<UiSetFocus>([focused]).map_err(Error::Rpc)
+	}
+
+	/// The current window
+	///
+	/// # Errors
+	///
+	/// Fails once the connection to Neovim is closed.
+	pub fn current_win(&self) -> Result<Window, Error> {
+		self.rpc.call::<GetCurrentWin>([]).map_err(Error::Rpc)
+	}
+
+	/// Calls Vimscript function `name`, e.g. `winline`, with `args`
+	///
+	/// # Errors
+	///
+	/// Fails if the connection to Neovim closes before it answers, Neovim raises an error, or the result doesn't decode
+	/// as `R`.
+	pub fn call_function<R: DeserializeOwned>(&self, name: &str, args: Vec<rmpv::Value>) -> Result<R, Error> {
+		self.rpc.call::<CallFunction<R>>((name.to_owned(), args)).map_err(Error::Rpc)
+	}
+
+	/// Opens a window showing `buf`, with Neovim's window `config`, entering it if `enter`
+	///
+	/// # Errors
+	///
+	/// Fails if the connection to Neovim closes before it answers, or Neovim raises an error, e.g. about the config.
+	pub fn open_win(&self, buf: Buffer, enter: bool, config: rmpv::Value) -> Result<Window, Error> {
+		self.rpc.call::<OpenWin>((buf, enter, config)).map_err(Error::Rpc)
+	}
+
+	/// Closes `win`, even with changes not written if `force`
+	///
+	/// # Errors
+	///
+	/// Fails if the connection to Neovim closes before it answers, or Neovim raises an error.
+	pub fn win_close(&self, win: Window, force: bool) -> Result<(), Error> {
+		self.rpc.call::<WinClose>((win, force)).map_err(Error::Rpc)
+	}
+
+	/// `win`'s config, as Neovim gives it
+	///
+	/// # Errors
+	///
+	/// Fails if the connection to Neovim closes before it answers, or Neovim raises an error.
+	pub fn win_get_config(&self, win: Window) -> Result<rmpv::Value, Error> {
+		self.rpc.call::<WinGetConfig>((win,)).map_err(Error::Rpc)
+	}
+
+	/// Changes `win`'s config to `config`
+	///
+	/// # Errors
+	///
+	/// Fails if the connection to Neovim closes before it answers, or Neovim raises an error, e.g. about the config.
+	pub fn win_set_config(&self, win: Window, config: rmpv::Value) -> Result<(), Error> {
+		self.rpc.call::<WinSetConfig>((win, config)).map_err(Error::Rpc)
+	}
+
+	/// `win`'s variable `w:name`, or nil if it has none
+	///
+	/// # Errors
+	///
+	/// Fails if the connection to Neovim closes before it answers, or Neovim raises an error.
+	pub fn win_get_var(&self, win: Window, name: &str) -> Result<rmpv::Value, Error> {
+		self.call_function("getwinvar", vec![rmpv::Value::from(win.0), rmpv::Value::from(name), rmpv::Value::Nil])
+	}
+
+	/// Sets `win`'s variable `w:name` to `value`
+	///
+	/// # Errors
+	///
+	/// Fails if the connection to Neovim closes before it answers, or Neovim raises an error.
+	pub fn win_set_var(&self, win: Window, name: &str, value: rmpv::Value) -> Result<(), Error> {
+		self.rpc.call::<WinSetVar>((win, name.to_owned(), value)).map_err(Error::Rpc)
+	}
+
+	/// The value of string option `name`, e.g. `guifont`
+	///
+	/// # Errors
+	///
+	/// Fails if the connection to Neovim closes before it answers, or Neovim raises an error, e.g. for no such option.
+	pub fn get_string_option(&self, name: &str) -> Result<String, Error> {
+		self.rpc
+			.call::<GetStringOption>((name.to_owned(), NoOpts {}))
+			.map_err(Error::Rpc)
+	}
+
+	/// Sets string option `name`, e.g. `guifont`, to `value`
+	///
+	/// # Errors
+	///
+	/// Fails if the connection to Neovim closes before it answers, or Neovim raises an error, e.g. for a wrong value.
+	pub fn set_string_option(&self, name: &str, value: String) -> Result<(), Error> {
+		self.rpc
+			.call::<SetStringOption>((name.to_owned(), value, NoOpts {}))
+			.map_err(Error::Rpc)
 	}
 }
 

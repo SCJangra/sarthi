@@ -18,25 +18,25 @@ use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
 use editor::preedit::{Preedit, cursor_rect};
 use editor::{Editor, Pointer, Redraw};
+use flume::Receiver;
 use renderer::{CellSize, FontChoice, FontId, Fonts, Frame, Rect, Renderer, RendererConfig, RendererError, TextSize};
-use rpc::client::{IncomingRequest, Message, Nvim};
+use rpc::client::{Message, Nvim};
 use rpc::neovim::{
 	ClientInfo, ClientVersion, InputMouseParams, Notification, RedrawNotification, UiAttachParams, UiOptions,
 	UiTryResizeParams,
 };
 use rpc::sarthi::{
-	ChangeFontSizeArgs, CheckWindowOptionsArgs, CmdheightChangedArgs, Copied, FloatsChangedArgs, GetClipboardArgs,
-	HELP, MODULES, PlaceWindowArgs, Request, ResetFontSizeArgs, STARTUP, SetClipboardArgs, SetFontSizeArgs, Settings,
-	SetupArgs, WinScrolledArgs, WindowFont, WindowFontArgs, WindowOptions, WindowVariable,
+	CmdheightChangedArgs, FloatsChangedArgs, HELP, MODULES, STARTUP, Settings, WinClosedArgs, WinScrolledArgs,
+	WindowFont, WindowOptions, WindowVariable,
 };
 
+use crate::api::{self, MainTask};
 use crate::blur::Blur;
 use crate::clipboard::Clipboard;
 use crate::error::Error;
 use crate::guifont::{self, FontSizes, GuiFont};
 use crate::input::{committed_text, neovim_keys};
 use crate::mouse::Mouse;
-use crate::place;
 use crate::settings;
 use crate::startup::{self, StartError};
 use crate::windows::{GridSize, WindowConfig};
@@ -163,8 +163,11 @@ impl WindowState {
 
 #[derive(Debug)]
 pub enum AppEvent {
-	/// A notification or request from Neovim
-	Nvim(Message),
+	/// A notification from Neovim
+	Nvim(Notification),
+
+	/// Work for the main thread, from a request answered on the API's thread pool
+	Main(MainTask),
 
 	/// The connection to Neovim closed, e.g. after `:q`
 	NvimExited,
@@ -179,15 +182,14 @@ impl App {
 		proxy: EventLoopProxy<AppEvent>,
 	) -> Result<Self, Error> {
 		let env = startup::login_environment();
+		// Requests from Neovim are rare, so a few threads are enough, even for requests nested in others.
+		let pool = rayon::ThreadPoolBuilder::new()
+			.num_threads(4)
+			.thread_name(|index| format!("sarthi-api-{index}"))
+			.build()?;
 		let nvim = startup::start(nvim, args, env.as_deref()).map(|(nvim, messages)| {
-			thread::spawn(move || {
-				for message in messages.iter() {
-					let _ = proxy.send_event(AppEvent::Nvim(message));
-				}
-
-				// The message stream only ends once the connection to Neovim is closed.
-				let _ = proxy.send_event(AppEvent::NvimExited);
-			});
+			let ctx = api::Ctx::new(nvim.handle(), proxy.clone());
+			thread::spawn(move || forward(&messages, &proxy, &ctx, &pool));
 			nvim
 		});
 		if let Err(error) = &nvim {
@@ -314,7 +316,7 @@ impl App {
 
 	/// Draws external window `win`'s text in `font` (`sarthi.font`), or the main fonts for `None`; or what's wrong with
 	/// the fonts
-	fn set_window_font(&mut self, win: rpc::neovim::Window, font: Option<WindowFont>) -> Result<(), String> {
+	pub(crate) fn set_window_font(&mut self, win: rpc::neovim::Window, font: Option<WindowFont>) -> Result<(), String> {
 		let Some(font) = font else {
 			self.window_fonts.remove(&win);
 			self.editor.set_external_font(win, None);
@@ -413,6 +415,8 @@ impl App {
 				self.refresh();
 			},
 			Notification::CmdheightChanged(CmdheightChangedArgs { rows }) => self.editor.set_command_rows(rows),
+			// Handled on the forwarding thread, where the API keeps what it forgets
+			Notification::WinClosed(_) => (),
 			Notification::Other { .. } => (),
 		}
 	}
@@ -487,7 +491,7 @@ impl App {
 	}
 
 	/// Shows what changed on sarthi's side, like a float's shadow, without waiting for Neovim's next redraw
-	fn refresh(&mut self) {
+	pub(crate) fn refresh(&mut self) {
 		if let Some(redraw) = self.editor.refresh() {
 			self.show(redraw);
 		}
@@ -525,60 +529,8 @@ impl App {
 		}
 	}
 
-	/// Answers a request from Neovim, which waits for the answer, so this must not wait for Neovim. Dropping a request
-	/// answers it with an error.
-	fn handle_nvim_request(&mut self, IncomingRequest { request, responder }: IncomingRequest) {
-		match request {
-			// A mistake isn't a failed request: setup() raises it in the user's config, at the call.
-			Request::Setup(SetupArgs { settings }) => {
-				responder.respond(Ok::<_, String>(self.apply_settings(*settings).err()))
-			},
-			Request::SetClipboard(SetClipboardArgs { register, lines, regtype }) => {
-				let copied = Copied { lines, regtype };
-				responder.respond(self.clipboard().and_then(|clipboard| clipboard.copy(register, copied)));
-			},
-			Request::GetClipboard(GetClipboardArgs { register }) => {
-				responder.respond(self.clipboard().and_then(|clipboard| clipboard.paste(register)));
-			},
-			Request::SetFontSize(SetFontSizeArgs { guifont, points }) => {
-				let guifont = self.editor.strip_default_guifont(&guifont);
-				responder.respond(self.font_sizes.set(guifont, points));
-			},
-			Request::ChangeFontSize(ChangeFontSizeArgs { guifont, delta }) => {
-				let guifont = self.editor.strip_default_guifont(&guifont);
-				let default = guifont::points(self.config.font_size);
-				responder.respond(self.font_sizes.change(guifont, delta, default));
-			},
-			Request::ResetFontSize(ResetFontSizeArgs { guifont }) => {
-				let guifont = self.editor.strip_default_guifont(&guifont);
-				responder.respond(Ok::<_, String>(self.font_sizes.reset(guifont)));
-			},
-			// A mistake is raised in Lua, at the call that gave the window its fonts.
-			Request::WindowFont(WindowFontArgs { win, font }) => {
-				let mistake = self.set_window_font(win, font.map(|font| *font)).err();
-				responder.respond(Ok::<_, String>(mistake));
-			},
-			// A mistake is raised in Lua, at the call that placed the window.
-			Request::PlaceWindow(PlaceWindowArgs { win, place }) => match place::place(place.as_deref()) {
-				Ok(place) => {
-					self.editor.set_external_place(win, place);
-					self.refresh();
-					responder.respond(Ok::<Option<String>, String>(None));
-				},
-				Err(mistake) => responder.respond(Ok::<_, String>(Some(mistake))),
-			},
-			// A mistake is raised in Lua, at the call that gave the window its options.
-			Request::CheckWindowOptions(CheckWindowOptionsArgs { options }) => {
-				let mistake = self.settings.for_window(&options).validate().err();
-				responder.respond(Ok::<_, String>(mistake));
-			},
-			Request::GetSettings(_) => responder.respond(Ok::<_, String>(&self.settings)),
-			Request::Other { method, .. } => responder.respond::<()>(Err(format!("sarthi doesn't know {method}"))),
-		}
-	}
-
 	/// The clipboard of the window's display
-	fn clipboard(&mut self) -> Result<&mut Clipboard, String> {
+	pub(crate) fn clipboard(&mut self) -> Result<&mut Clipboard, String> {
 		let clipboard = self.window.as_mut().and_then(|state| state.clipboard.as_mut());
 		clipboard.ok_or_else(|| String::from("no clipboard"))
 	}
@@ -596,7 +548,7 @@ impl App {
 	}
 
 	/// Uses `settings` from now on, if their values make sense. Text drawn with other underlines is laid out again.
-	fn apply_settings(&mut self, settings: Settings) -> Result<(), String> {
+	pub(crate) fn apply_settings(&mut self, settings: Settings) -> Result<(), String> {
 		settings.validate()?;
 		self.mouse.set_touchpad_scroll(settings.touchpad.scroll_speed);
 		self.editor
@@ -754,7 +706,7 @@ impl ApplicationHandler<AppEvent> for App {
 			// Neovim quits, asking about unsaved changes first, and sarthi exits when it does (`AppEvent::NvimExited`).
 			// Without Neovim, it closes at once.
 			WindowEvent::CloseRequested => {
-				let asked = self.nvim.as_ref().map(Nvim::ask_to_quit);
+				let asked = self.nvim.as_ref().map(|nvim| nvim.ask_to_quit());
 				if let Ok(Err(error)) = &asked {
 					tracing::warn!("Couldn't ask Neovim to quit: {error}");
 				}
@@ -835,8 +787,8 @@ impl ApplicationHandler<AppEvent> for App {
 
 	fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
 		match event {
-			AppEvent::Nvim(Message::Notification(notification)) => self.handle_nvim_notification(notification),
-			AppEvent::Nvim(Message::Request(request)) => self.handle_nvim_request(request),
+			AppEvent::Nvim(notification) => self.handle_nvim_notification(notification),
+			AppEvent::Main(task) => task.run(self),
 			AppEvent::NvimExited => event_loop.exit(),
 		}
 	}
@@ -851,4 +803,22 @@ fn client_info() -> ClientInfo {
 		patch: number(env!("CARGO_PKG_VERSION_PATCH")),
 	};
 	ClientInfo { name: String::from("sarthi"), version, kind: "ui" }
+}
+
+/// Passes what Neovim sends on, until the connection closes: notifications to the main thread, and requests to the
+/// API's `pool`
+fn forward(messages: &Receiver<Message>, main: &EventLoopProxy<AppEvent>, ctx: &api::Ctx, pool: &rayon::ThreadPool) {
+	for message in messages.iter() {
+		match message {
+			Message::Notification(Notification::WinClosed(WinClosedArgs { win })) => ctx.forget(win),
+			Message::Notification(notification) => _ = main.send_event(AppEvent::Nvim(notification)),
+			Message::Request(request) => {
+				let ctx = ctx.clone();
+				pool.spawn(move || api::handle(&ctx, request));
+			},
+		}
+	}
+
+	// The message stream only ends once the connection to Neovim is closed.
+	_ = main.send_event(AppEvent::NvimExited);
 }

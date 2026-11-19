@@ -65,111 +65,7 @@ local api = {}
 ---@field padding? table External windows only: its own |sarthi-padding| values
 ---@field scroll? table Its own |sarthi-scroll| values
 
--- What only the API keeps of each window's `sarthi` table, by handle, as last given: what isn't in `w:sarthi`
-local configs = {}
-
--- What only external windows take, and why
-local EXTERNAL_ONLY = {
-  place = 'floating windows are placed by Neovim',
-  font = "floating windows share the main grid's cells",
-  outline = 'Neovim places floating windows without room for it',
-  corners = "they'd cut a floating window's text",
-  padding = 'Neovim places floating windows without room for it',
-}
-
--- The sections of the settings a window can have its own values of, kept in `w:sarthi`
-local OPTIONS = { shadow = true, outline = true, corners = true, padding = true, scroll = true }
-
---- `config` without its `sarthi` table, for Neovim, and the table
-local function split(config)
-  if type(config) ~= 'table' then
-    return config, nil
-  end
-  local plain = vim.tbl_extend('force', {}, config)
-  plain.sarthi = nil
-  return plain, config.sarthi
-end
-
---- `options`, a window's `w:sarthi`, with the sections given in `sarthi` merged in, key by key, and marked `managed`:
---- the settings' outline, corners and padding apply to it too
-local function merge(options, sarthi)
-  local merged = vim.deepcopy(options or {})
-  merged.managed = true
-  for section in pairs(OPTIONS) do
-    if sarthi[section] ~= nil then
-      merged[section] = vim.tbl_extend('force', merged[section] or {}, sarthi[section])
-    end
-  end
-  return merged
-end
-
---- `w:sarthi` of a window that is `external` or not, with `options` (its `w:sarthi` until now) and what `sarthi` gives
---- merged; raises what's wrong with either at `level`
-local function check(sarthi, options, external, level)
-  if sarthi == nil then
-    return options
-  end
-  if type(sarthi) ~= 'table' then
-    error('sarthi: `sarthi` takes a table, not a ' .. type(sarthi), level)
-  end
-  for key, value in pairs(sarthi) do
-    if not (OPTIONS[key] or EXTERNAL_ONLY[key]) then
-      error(('sarthi: `sarthi` has no `%s`'):format(key), level)
-    end
-    if EXTERNAL_ONLY[key] and value ~= nil and not external then
-      error(('sarthi: `sarthi.%s` needs `external = true`: %s'):format(key, EXTERNAL_ONLY[key]), level)
-    end
-    if type(value) ~= 'table' then
-      error(('sarthi: `sarthi.%s` takes a table, not a %s'):format(key, type(value)), level)
-    end
-  end
-  options = merge(options, sarthi)
-  -- Sarthi decodes and checks the options, against the settings they go over.
-  local ok, mistake = pcall(vim.rpcrequest, rpc.channel, 'check_window_options', options)
-  if not ok then
-    -- Without Neovim's "Vim:Invoking 'method' on channel …:" line before the message
-    error('sarthi: `sarthi`: ' .. mistake:gsub('^Vim:Invoking.-\n', ''), level)
-  elseif mistake ~= vim.NIL then
-    error('sarthi: `sarthi`: ' .. mistake, level)
-  end
-  return options
-end
-
---- `place` with what it's relative to as it is now, before a window is opened and maybe entered: the current window
---- for 'win' without one or 0, and the cursor for 'cursor'
-local function resolve(place)
-  if place ~= nil and place.relative == 'win' and (place.win == nil or place.win == 0) then
-    return vim.tbl_extend('force', place, { win = vim.api.nvim_get_current_win() })
-  end
-  -- By the cursor where it is now, which sarthi only learns with Neovim's next redraw: relative to the current window, at
-  -- the cursor's cell of it, so in its own cells if it's an external window with fonts of its own
-  if place ~= nil and place.relative == 'cursor' then
-    return vim.tbl_extend('force', place, {
-      relative = 'win',
-      win = vim.api.nvim_get_current_win(),
-      row = vim.fn.winline() - 1 + (place.row or 0),
-      col = vim.fn.wincol() - 1 + (place.col or 0),
-    })
-  end
-  return place
-end
-
---- Applies `sarthi` to `win`, placed at `place` (see `resolve`), with `options` for its `w:sarthi`, raising a mistake at
---- `level`
-local function apply(win, sarthi, place, options, level)
-  vim.w[win].sarthi = options
-  -- At once, so sarthi has the window's style before Neovim draws it
-  require('sarthi.floats').send(win)
-  local mistake = rpc.request('place_window', win, place or vim.NIL)
-  if mistake ~= vim.NIL then
-    error('sarthi: `sarthi.place`: ' .. mistake, level)
-  end
-  mistake = rpc.request('window_font', win, sarthi.font or vim.NIL)
-  if mistake ~= vim.NIL then
-    error('sarthi: `sarthi.font`: ' .. mistake, level)
-  end
-  configs[win] = { place = vim.deepcopy(sarthi.place), font = vim.deepcopy(sarthi.font) }
-end
+-- Sarthi does the work (`crates/sarthi/src/api`); these only call it.
 
 ---Like `vim.api.nvim_open_win()`, with a `sarthi` table in `config`.
 ---@param buf integer
@@ -177,24 +73,7 @@ end
 ---@param config vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig }
 ---@return integer
 function api.nvim_open_win(buf, enter, config)
-  local plain, sarthi = split(config)
-  -- Managed even without a `sarthi` table: it has the settings' outline, corners and padding.
-  if type(plain) == 'table' and sarthi == nil then
-    sarthi = {}
-  end
-  local options = check(sarthi, {}, type(plain) == 'table' and plain.external, 3)
-  -- What it's placed relative to, before entering it makes it the current window
-  local place = sarthi and resolve(sarthi.place)
-  local win = vim.api.nvim_open_win(buf, enter, plain)
-  if sarthi ~= nil then
-    -- A mistake in the place closes the window again, so the call does nothing but fail.
-    local ok, mistake = pcall(apply, win, sarthi, place, options, 0)
-    if not ok then
-      vim.api.nvim_win_close(win, true)
-      error(mistake, 2)
-    end
-  end
-  return win
+  return rpc.request('nvim_open_win', buf, enter, config)
 end
 
 ---Like `vim.api.nvim_win_set_config()`, with a `sarthi` table in `config`:
@@ -203,25 +82,7 @@ end
 ---@param win integer
 ---@param config vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig }
 function api.nvim_win_set_config(win, config)
-  win = win == 0 and vim.api.nvim_get_current_win() or win
-  local plain, sarthi = split(config)
-  -- External after this call: as given, or a float if given `relative`, or as it is
-  local external = plain.external
-  if external == nil then
-    external = (plain.relative == nil or plain.relative == '') and vim.api.nvim_win_get_config(win).external
-  end
-  local options = check(sarthi, vim.w[win].sarthi or {}, external, 3)
-  if next(plain) ~= nil then
-    vim.api.nvim_win_set_config(win, plain)
-  end
-
-  local merged = vim.tbl_extend('force', configs[win] or {}, sarthi or {})
-  -- No longer external: its place and fonts no longer apply.
-  if not external then
-    merged.place = nil
-    merged.font = nil
-  end
-  apply(win, merged, resolve(merged.place), options, 3)
+  rpc.request('nvim_win_set_config', win, config)
 end
 
 ---Like `vim.api.nvim_win_get_config()`, with the window's `sarthi` table:
@@ -229,19 +90,14 @@ end
 ---@param win integer
 ---@return vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig }
 function api.nvim_win_get_config(win)
-  win = win == 0 and vim.api.nvim_get_current_win() or win
-  local config = vim.api.nvim_win_get_config(win)
-  local sarthi = vim.tbl_extend('force', vim.w[win].sarthi or {}, vim.deepcopy(configs[win] or {}))
-  -- Not something to give back: the API sets it
-  sarthi.managed = nil
-  config.sarthi = next(sarthi) ~= nil and sarthi or nil
-  return config
+  return rpc.request('nvim_win_get_config', win)
 end
 
+-- So Sarthi forgets what it kept about a window that closed
 vim.api.nvim_create_autocmd('WinClosed', {
   group = vim.api.nvim_create_augroup('sarthi.api', {}),
   callback = function(args)
-    configs[tonumber(args.match)] = nil
+    rpc.notify('win_closed', tonumber(args.match))
   end,
 })
 

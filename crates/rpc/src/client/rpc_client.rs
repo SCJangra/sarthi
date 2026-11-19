@@ -204,12 +204,28 @@ impl RpcClient {
 		(Self { inner, request: sender, read_handle, write_handle }, messages)
 	}
 
-	/// Calls `M` and waits for Neovim's reply. Never call it from the reader thread, which delivers the reply.
+	/// A handle that calls through this client from any thread, without keeping the connection open: once the client
+	/// is dropped, its calls fail.
+	pub fn handle(&self) -> RpcHandle {
+		RpcHandle { inner: self.inner.clone(), request: self.request.downgrade() }
+	}
+}
+
+/// Calls and notifies through an [`RpcClient`], from any thread. Cheap to clone; it doesn't keep the connection open,
+/// so holding one never keeps the server running once the client is dropped.
+#[derive(Clone)]
+pub struct RpcHandle {
+	inner: Arc<RpcClientInner>,
+	request: WeakSender<Vec<u8>>,
+}
+
+impl RpcHandle {
+	/// Calls `M` and waits for the server's reply. Never call it from the reader thread, which delivers the reply.
 	///
 	/// # Errors
 	///
-	/// Fails if the call can't be encoded or sent, the connection closes before Neovim answers, Neovim raises an
-	/// error, or the result doesn't decode as `M::Response`.
+	/// Fails if the call can't be encoded or sent, the connection closes before the server answers, the server raises
+	/// an error, or the result doesn't decode as `M::Response`.
 	pub fn call<M>(&self, params: M::Params) -> Result<M::Response, RpcError>
 	where
 		M: RpcMethod,
@@ -224,11 +240,11 @@ impl RpcClient {
 			return Err(RpcError::RequestDropped);
 		}
 
-		let req = OutgoingRpcMessage::Request(RpcRequest { id, method: M::METHOD.to_string(), params });
-		let sent = rmp_serde::to_vec_named(&req)
+		let req = OutgoingRpcMessage::Request(RpcRequest { id, method: M::METHOD, params });
+		if let Err(err) = rmp_serde::to_vec_named(&req)
 			.map_err(RpcError::from)
-			.and_then(|req| self.request.send(req).map_err(|_| RpcError::SendRequest));
-		if let Err(err) = sent {
+			.and_then(|req| self.send(req))
+		{
 			self.inner.pending().remove(&id);
 			return Err(err);
 		}
@@ -242,19 +258,24 @@ impl RpcClient {
 		Ok(response)
 	}
 
-	/// Calls `M` without waiting for a reply. Neovim processes it in order with other messages and reports errors
-	/// from it with `nvim_error_event`.
+	/// Calls `M` without waiting for a reply. The server processes it in order with other messages; Neovim reports
+	/// errors from it with `nvim_error_event`.
 	///
 	/// # Errors
 	///
-	/// Fails if the notification can't be encoded, or the connection to Neovim is closed.
+	/// Fails if the notification can't be encoded, or the connection is closed.
 	pub fn notify<M>(&self, params: M::Params) -> Result<(), RpcError>
 	where
 		M: RpcMethod,
 	{
 		let notification = OutgoingRpcMessage::Notification { method: M::METHOD, params };
-		let notification = rmp_serde::to_vec_named(&notification)?;
-		self.request.send(notification).map_err(|_| RpcError::SendRequest)
+		self.send(rmp_serde::to_vec_named(&notification)?)
+	}
+
+	/// Hands an encoded message to the writer thread, while the client is still there
+	fn send(&self, message: Vec<u8>) -> Result<(), RpcError> {
+		let request = self.request.upgrade().ok_or(RpcError::SendRequest)?;
+		request.send(message).map_err(|_| RpcError::SendRequest)
 	}
 }
 
@@ -295,7 +316,7 @@ mod tests {
 
 		let (client, _messages) = RpcClient::start(stdout, stdin);
 
-		let response = client.call::<Eval>(["1 + 1".into()]).unwrap();
+		let response = client.handle().call::<Eval>(["1 + 1".into()]).unwrap();
 
 		assert_eq!(response, rmpv::Value::from(2));
 
@@ -313,16 +334,16 @@ mod tests {
 
 		// With --embed, Neovim finishes starting up, and only then handles typed keys, once a UI attaches.
 		let attach = UiAttachParams { width: 20, height: 5, options: UiOptions::all() };
-		client.call::<UiAttach>(attach).unwrap();
+		client.handle().call::<UiAttach>(attach).unwrap();
 
-		client.notify::<Input>(["ihello<lt>x<Esc>".into()]).unwrap();
+		client.handle().notify::<Input>(["ihello<lt>x<Esc>".into()]).unwrap();
 
 		// nvim_input only queues the keys, and Neovim types them when its event loop gets to it.
 		let typed = rmpv::Value::from("hello<x");
 		let deadline = std::time::Instant::now() + Duration::from_secs(5);
 		let mut line = rmpv::Value::Nil;
 		while line != typed && std::time::Instant::now() < deadline {
-			line = client.call::<Eval>(["getline(1)".into()]).unwrap();
+			line = client.handle().call::<Eval>(["getline(1)".into()]).unwrap();
 		}
 
 		assert_eq!(line, typed);
@@ -342,7 +363,7 @@ mod tests {
 
 		// While evaluating this, Neovim sends us a request on our channel (1) and blocks until we reply. Nobody
 		// receives it here, so it's dropped, which answers it with an error.
-		let caller = client.clone();
+		let caller = client.handle();
 		let response = within_5s(move || caller.call::<Eval>(["rpcrequest(1, 'unknown')".into()]))
 			.expect("Neovim is blocked on our reply");
 
@@ -362,8 +383,7 @@ mod tests {
 		let (client, messages) = RpcClient::start(stdout, stdin);
 
 		// Neovim blocks in rpcrequest() until we answer, and our answer is what it evaluates to.
-		let client = Arc::new(client);
-		let caller = client.clone();
+		let caller = client.handle();
 		let call = std::thread::spawn(move || caller.call::<Eval>(["rpcrequest(1, 'get_clipboard', '*')".into()]));
 
 		let message = messages.recv_timeout(Duration::from_secs(5));
@@ -388,8 +408,7 @@ mod tests {
 		let (client, messages) = RpcClient::start(stdout, stdin);
 
 		// The register is a number: the request can't be decoded, so the client answers it, and the app never sees it.
-		let client = Arc::new(client);
-		let caller = client.clone();
+		let caller = client.handle();
 		let response = within_5s(move || caller.call::<Eval>(["rpcrequest(1, 'get_clipboard', 3)".into()]))
 			.expect("Neovim is blocked on our reply");
 
@@ -412,7 +431,7 @@ mod tests {
 		let (client, _messages) = RpcClient::start(stdout, stdin);
 
 		let params = UiAttachParams { width: 10, height: 10, options: UiOptions::all() };
-		let response = client.call::<UiAttach>(params).unwrap();
+		let response = client.handle().call::<UiAttach>(params).unwrap();
 
 		assert_eq!(response, rmpv::Value::Nil);
 
@@ -465,8 +484,7 @@ mod tests {
 		let reply = [&bad_notification[..], &notification, &response].concat();
 		let (client, messages) = RpcClient::start(reader, Responder { pipe, reply: Some(reply) });
 
-		let client = Arc::new(client);
-		let caller = client.clone();
+		let caller = client.handle();
 		let response =
 			within_5s(move || caller.call::<Eval>(["1 + 1".into()])).expect("response after bad message was lost");
 
@@ -519,8 +537,8 @@ mod tests {
 		let (reader, pipe) = io::pipe().unwrap();
 		let (client, messages) = RpcClient::start(reader, CloseOnWrite(Some(pipe)));
 
-		let response =
-			within_5s(move || client.call::<Eval>(["1 + 1".into()])).expect("pending call hung after disconnect");
+		let response = within_5s(move || client.handle().call::<Eval>(["1 + 1".into()]))
+			.expect("pending call hung after disconnect");
 
 		assert!(matches!(response, Err(RpcError::RequestDropped)), "unexpected response: {response:?}");
 		assert!(matches!(messages.recv_timeout(Duration::from_secs(5)), Err(flume::RecvTimeoutError::Disconnected)));

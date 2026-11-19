@@ -2,8 +2,8 @@
 
 use std::fmt;
 
-use serde::Deserialize;
 use serde::de::{self, Deserializer, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
 
 /// A Neovim window's handle (`:help window-ID`), like `1000`. Neovim sends it as msgpack extension type 1, wrapping the
 /// number.
@@ -15,6 +15,13 @@ const WINDOW_EXT: i8 = 1;
 
 /// The name `rmp_serde` and `rmpv` decode msgpack extensions through, as `(type, bytes)`
 const EXT_STRUCT: &str = "_ExtStruct";
+
+/// As a number, which Neovim's API functions take for a window too
+impl Serialize for Window {
+	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		serializer.serialize_i64(self.0)
+	}
+}
 
 impl<'de> Deserialize<'de> for Window {
 	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {

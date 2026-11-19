@@ -16,18 +16,7 @@ sarthi.api = require('sarthi.api')
 ---later, e.g. from a keymap. A mistake is an error at the call.
 ---@param opts? table The settings (see |sarthi-settings|)
 function sarthi.setup(opts)
-  if opts ~= nil and type(opts) ~= 'table' then
-    error('sarthi: setup() takes a table, not a ' .. type(opts), 2)
-  end
-  opts = opts or {}
-  -- Settings sarthi can't decode (unknown keys, wrong types) fail the request; values it decodes but finds wrong (out
-  -- of range) come back as the answer. Either way the mistake is raised here, at the caller's setup().
-  local mistake = rpc.request('setup', opts)
-  if mistake ~= vim.NIL then
-    error('sarthi: ' .. mistake, 2)
-  end
-  -- Floating windows open already get the new settings too.
-  require('sarthi.floats').resend(opts)
+  rpc.request('setup', opts)
 end
 
 ---The settings in effect: those given to `setup()`, and the defaults of the
@@ -41,20 +30,20 @@ end
 ---Sets the font size, in points (4 to 96), by setting `:h` in `guifont`.
 ---@param points number Size in points
 function sarthi.set_font_size(points)
-  vim.o.guifont = rpc.request('set_font_size', vim.o.guifont, points)
+  rpc.request('set_font_size', points)
 end
 
 ---Makes the font `delta` points bigger, or smaller if negative, by setting
 ---`:h` in `guifont`. The size stays within 4 to 96 points.
 ---@param delta number Points to add
 function sarthi.change_font_size(delta)
-  vim.o.guifont = rpc.request('change_font_size', vim.o.guifont, delta)
+  rpc.request('change_font_size', delta)
 end
 
 ---Sets `guifont` back to its value before the font size was first changed,
 ---unless it was set otherwise since.
 function sarthi.reset_font_size()
-  vim.o.guifont = rpc.request('reset_font_size', vim.o.guifont)
+  rpc.request('reset_font_size')
 end
 
 return sarthi

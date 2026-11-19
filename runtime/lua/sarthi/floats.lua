@@ -102,9 +102,9 @@ function M.send(win)
   end
 end
 
---- Sends every floating window again, after the settings changed to `settings`
-function M.resend(settings)
-  highlight = vim.tbl_get(settings, 'outline', 'highlight') or 'FloatBorder'
+--- Sends every floating window again, after the settings changed, with `outline_highlight` their outline's group
+function M.resend(outline_highlight)
+  highlight = outline_highlight
   sent = {}
   forward()
 end

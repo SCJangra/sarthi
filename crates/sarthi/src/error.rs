@@ -10,4 +10,7 @@ pub enum Error {
 
 	#[error("CreateWindow({0})")]
 	Window(#[from] winit::error::OsError),
+
+	#[error("ThreadPool({0})")]
+	ThreadPool(#[from] rayon::ThreadPoolBuildError),
 }

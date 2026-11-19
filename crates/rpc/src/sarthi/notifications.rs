@@ -15,6 +15,14 @@ pub struct CmdheightChangedArgs {
 	pub rows: u32,
 }
 
+/// A window that closed (`WinClosed`), so what sarthi kept about it can go
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct WinClosedArgs {
+	#[serde(deserialize_with = "window_number")]
+	pub win: Window,
+}
+
 /// Windows that scrolled (`WinScrolled`), sent before Neovim redraws them
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]

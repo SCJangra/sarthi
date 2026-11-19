@@ -6,6 +6,9 @@ edition = { workspace = true }
 [dependencies]
 clap = { workspace = true }
 flume = { workspace = true }
+rayon = { workspace = true }
+rmp-serde = { workspace = true }
+rmpv = { workspace = true }
 editor = { workspace = true }
 renderer = { workspace = true }
 rpc = { workspace = true }

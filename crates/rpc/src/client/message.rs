@@ -61,7 +61,7 @@ pub struct RpcRequest<P> {
 	/// Matches the call's response to it
 	pub id: u32,
 	/// The API function
-	pub method: String,
+	pub method: &'static str,
 	/// Its arguments
 	pub params: P,
 }
@@ -211,7 +211,7 @@ mod tests {
 
 		let req = OutgoingRpcMessage::<Params>::Request(RpcRequest {
 			id: 10,
-			method: String::from("test"),
+			method: "test",
 			params: (1, String::from("abc"), vec![String::from("def")]),
 		});
 

@@ -2,7 +2,7 @@
 
 use sarthi_derive::DeserializeTaggedEnum;
 
-use crate::{CmdheightChangedArgs, FloatsChangedArgs, RedrawNotification, WinScrolledArgs};
+use crate::{CmdheightChangedArgs, FloatsChangedArgs, RedrawNotification, WinClosedArgs, WinScrolledArgs};
 
 /// A notification from Neovim
 #[derive(Debug, DeserializeTaggedEnum)]
@@ -19,6 +19,9 @@ pub enum Notification {
 
 	/// From sarthi's Lua (`crate::sarthi`)
 	CmdheightChanged(CmdheightChangedArgs),
+
+	/// From sarthi's Lua (`crate::sarthi`)
+	WinClosed(WinClosedArgs),
 
 	/// A notification sarthi doesn't handle
 	Other {

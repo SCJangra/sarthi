@@ -409,6 +409,14 @@ impl Editor {
 		if self.default_guifont.as_deref() == Some(value) { "" } else { value }
 	}
 
+	/// A `guifont` value to set, from one the way [`Editor::guifont`] gives it: Neovim's default if empty
+	pub fn with_default_guifont(&self, value: String) -> String {
+		match &self.default_guifont {
+			Some(default) if value.is_empty() => default.clone(),
+			_ => value,
+		}
+	}
+
 	/// The `linespace` option (`:help 'linespace'`): logical pixels added between rows, or taken away if negative
 	pub fn linespace(&self) -> i64 {
 		self.linespace
