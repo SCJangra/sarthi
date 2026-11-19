@@ -183,7 +183,7 @@ impl Animation {
 			scroll: None,
 			shadow: None,
 			outline: None,
-			padding: [0; 4],
+			padding: crate::Edges::default(),
 			padding_background: (0, 0),
 			corner_radius: 0.0,
 		};
@@ -258,7 +258,7 @@ mod tests {
 			scroll,
 			shadow: None,
 			outline: None,
-			padding: [0; 4],
+			padding: crate::Edges::default(),
 			padding_background: (0, 0),
 			corner_radius: 0.0,
 		}

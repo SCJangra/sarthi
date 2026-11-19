@@ -16,7 +16,7 @@ use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
 use editor::preedit::{Preedit, cursor_rect};
 use editor::{Editor, Pointer, Redraw};
-use renderer::{CellSize, FontChoice, FontId, Fonts, Frame, Renderer, RendererConfig, RendererError, TextSize};
+use renderer::{CellSize, FontChoice, FontId, Fonts, Frame, Rect, Renderer, RendererConfig, RendererError, TextSize};
 use rpc::client::{IncomingRequest, Message, Nvim};
 use rpc::neovim::{
 	ClientInfo, ClientVersion, InputMouseParams, Notification, RedrawNotification, UiAttachParams, UiOptions,
@@ -109,7 +109,7 @@ pub struct WindowState {
 
 	/// Where the input method was last told the cursor is, so it puts its candidates by it: left, top, width, height in
 	/// pixels
-	pub ime_area: Option<[u32; 4]>,
+	pub ime_area: Option<Rect<u32>>,
 }
 
 impl WindowState {
@@ -133,8 +133,8 @@ impl WindowState {
 
 	/// Tells the input method where the cursor is, its `area` in pixels, so its candidates go by it; where it isn't drawn, they
 	/// stay where they were
-	fn place_ime(&mut self, area: Option<[u32; 4]>) {
-		if let Some(area @ [x, y, width, height]) = area
+	fn place_ime(&mut self, area: Option<Rect<u32>>) {
+		if let Some(area @ Rect { x, y, width, height }) = area
 			&& self.ime_area != Some(area)
 		{
 			self.window

@@ -16,8 +16,8 @@ use crate::shape::ShapePipeline;
 use crate::stencil;
 use crate::text::TextPipeline;
 use crate::{
-	Cursor, CursorMotion, CursorShape, Decoration, Fonts, Layer, Motion, RenderCell, RendererConfig, RendererError,
-	TextStyle,
+	Cursor, CursorMotion, CursorShape, Decoration, Fonts, Layer, Motion, Rect, RenderCell, RendererConfig,
+	RendererError, TextStyle,
 };
 
 pub struct Renderer {
@@ -337,11 +337,10 @@ impl Renderer {
 
 /// The part of the cursor `piece`, within its clip, that the cursor's shape covers while on its way, with `corners` in
 /// pixels
-fn covered(piece: &Piece, corners: [[f32; 2]; 4]) -> [u32; 4] {
-	let [left, top, width, height] = piece.clip;
-	let (mut low, mut high) = ([left, top], [left + width, top + height]);
-	let [x, y, layer_width, layer_height] = piece.layer.rect();
-	let layer = [[x, y], [x + layer_width, y + layer_height]];
+fn covered(piece: &Piece, corners: [[f32; 2]; 4]) -> Rect<u32> {
+	let (clip, layer) = (piece.clip, piece.layer.rect());
+	let (mut low, mut high) = ([clip.x, clip.y], [clip.right(), clip.bottom()]);
+	let layer = [[layer.x, layer.y], [layer.right(), layer.bottom()]];
 	for axis in 0..2 {
 		let (least, most) = corners
 			.iter()
@@ -349,7 +348,7 @@ fn covered(piece: &Piece, corners: [[f32; 2]; 4]) -> [u32; 4] {
 		low[axis] = low[axis].max(layer[0][axis]).max(least.floor().max(0.0) as u32);
 		high[axis] = high[axis].min(layer[1][axis]).min(most.ceil().max(0.0) as u32);
 	}
-	[low[0], low[1], high[0].saturating_sub(low[0]), high[1].saturating_sub(low[1])]
+	Rect::new(low[0], low[1], high[0].saturating_sub(low[0]), high[1].saturating_sub(low[1]))
 }
 
 /// What happened when rendering a frame
@@ -376,12 +375,12 @@ pub(crate) struct Piece<'a> {
 	/// Pixels the layer is drawn below its row, or above if negative
 	pub offset: f32,
 
-	/// What's drawn outside this rectangle of the window is cut off: left, top, width, height in pixels
-	pub clip: [u32; 4],
+	/// What's drawn outside this rectangle of the window, in pixels, is cut off
+	pub clip: Rect<u32>,
 
-	/// Its layer's rectangle (left, top, width, height in pixels) and corner radius, if the corners are rounded: its
+	/// Its layer's rectangle with its padding, in pixels, and corner radius, if the corners are rounded: its
 	/// quads are cut to them, whichever part of the layer it draws
-	pub round: Option<([f32; 4], f32)>,
+	pub round: Option<(Rect<f32>, f32)>,
 }
 
 /// Which part of a layer a [`Piece`] draws
@@ -400,11 +399,11 @@ pub(crate) enum PieceKind {
 
 /// The pieces to draw `layers` at `now`, in order, on a `surface` of width × height pixels
 fn pieces<'a>(layers: &'a [Layer], scrolls: &ScrollAnimations, surface: (u32, u32), now: Instant) -> Vec<Piece<'a>> {
-	// A rectangle in pixels (left, top, width, height), cut to the surface: a scissor rectangle can't reach outside it
-	let clip = |[x, y, width, height]: [u32; 4]| {
-		let (left, top) = (x.min(surface.0), y.min(surface.1));
-		let (right, bottom) = ((x + width).min(surface.0), (y + height).min(surface.1));
-		[left, top, right - left, bottom - top]
+	// A rectangle in pixels, cut to the surface: a scissor rectangle can't reach outside it
+	let clip = |rect: Rect<u32>| {
+		let (left, top) = (rect.x.min(surface.0), rect.y.min(surface.1));
+		let (right, bottom) = (rect.right().min(surface.0), rect.bottom().min(surface.1));
+		Rect::new(left, top, right - left, bottom - top)
 	};
 
 	let mut pieces = Vec::with_capacity(layers.len() + 1);
@@ -422,8 +421,7 @@ fn pieces<'a>(layers: &'a [Layer], scrolls: &ScrollAnimations, surface: (u32, u3
 		pieces.push(Piece { layer: base, kind: PieceKind::Layer, offset: 0.0, clip: whole, round });
 
 		if let Some(region) = region {
-			let [x, y, width, _] = region.layer.rect();
-			let clip = clip([x, y, width, region.height * layer.cell.height]);
+			let clip = clip(Rect { height: region.height * layer.cell.height, ..region.layer.rect() });
 			// Whole pixels keep the text sharp.
 			let offset = (region.offset * layer.cell.height as f32).round();
 			pieces.push(Piece { layer: Cow::Owned(region.layer), kind: PieceKind::Region, offset, clip, round });
@@ -488,7 +486,7 @@ struct LayerQuads {
 
 	/// Where its text may be drawn, for the stencil: its rounded rectangle, or all of it
 	mask: Range<u32>,
-	clip: [u32; 4],
+	clip: Rect<u32>,
 
 	/// Whether the cursor's shape is drawn first, uncut: for the cursor on its way
 	shape: bool,
@@ -532,12 +530,12 @@ fn layer_quads(
 		quad.rect[1] += piece.offset;
 		// Cut to the layer's rounded corners, which don't move with sliding text
 		if let Some((clip, radius)) = piece.round {
-			(quad.clip, quad.clip_radius) = (clip, [radius, 0.0]);
+			(quad.clip, quad.clip_radius) = (clip.into(), [radius, 0.0]);
 		}
 	}
 	let end = quads.len();
-	let (rect, radius) = piece.round.unwrap_or((layer.rect().map(|value| value as f32), 0.0));
-	quads.push(Quad { corner_radius: radius, ..Quad::fill(rect, [0.0; 4]) });
+	let (rect, radius) = piece.round.unwrap_or((layer.rect().to_f32(), 0.0));
+	quads.push(Quad { corner_radius: radius, ..Quad::fill(rect.into(), [0.0; 4]) });
 	LayerQuads {
 		around: around as u32..start as u32,
 		under_text: start as u32..middle as u32,
@@ -568,8 +566,8 @@ fn draw_layers(
 			pass.set_scissor_rect(0, 0, surface.0, surface.1);
 			shape.render(pass);
 		}
-		let [left, top, width, height] = layer.clip;
-		pass.set_scissor_rect(left, top, width, height);
+		let Rect { x, y, width, height } = layer.clip;
+		pass.set_scissor_rect(x, y, width, height);
 		quads.render(pass, layer.under_text.clone());
 		pass.set_stencil_reference(stencil::reference(index));
 		quads.render_mask(pass, layer.mask.clone());
@@ -618,7 +616,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
-			padding: [0; 4],
+			padding: crate::Edges::default(),
 			padding_background: (0, 0),
 			corner_radius: 0.0,
 		}
@@ -677,7 +675,7 @@ mod tests {
 					under_text: 0..0,
 					over_text: 0..0,
 					mask: 0..0,
-					clip: [0, 0, 1, 1],
+					clip: crate::Rect::new(0, 0, 1, 1),
 					shape: true,
 				}))
 				.collect();
@@ -824,7 +822,7 @@ mod tests {
 		let shadow = crate::Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
 		let mut clear = cell(1, " ", 0xFFFFFF);
 		clear.cells[0].blend = 100;
-		let area = vec![[3 * CELL.width, 0, CELL.width, CELL.height]];
+		let area = vec![crate::Rect::new(3 * CELL.width, 0, CELL.width, CELL.height)];
 		let shadow = crate::LayerShadow { shadow, area, radius: 0.0 };
 		let layer = Layer { x: 3 * CELL.width, shadow: Some(shadow), ..clear };
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
@@ -843,7 +841,7 @@ mod tests {
 		// A white cell at column 3, with a red shadow, on black
 		let shadow = crate::Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
 		let white = cell(1, " ", 0xFFFFFF);
-		let area = vec![[3 * CELL.width, 0, CELL.width, CELL.height]];
+		let area = vec![crate::Rect::new(3 * CELL.width, 0, CELL.width, CELL.height)];
 		let shadow = crate::LayerShadow { shadow, area, radius: 0.0 };
 		let layer = Layer { x: 3 * CELL.width, shadow: Some(shadow), ..white };
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
@@ -904,7 +902,7 @@ mod tests {
 		let shadow = crate::Shadow { blur: 4.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
 		let black = cell(1, " ", 0x000000);
 		let reds = |radius: f32| {
-			let area = vec![[20, 3, 24, 13], [40, 5, 3, 9]];
+			let area = vec![crate::Rect::new(20, 3, 24, 13), crate::Rect::new(40, 5, 3, 9)];
 			let shadow = crate::LayerShadow { shadow, area, radius };
 			let (pixels, _) = drawn(&[Layer { shadow: Some(shadow), ..black.clone() }], None)?;
 			let red = |x: u32, y: u32| pixels[(y * WIDTH + x) as usize][0];
@@ -946,7 +944,7 @@ mod tests {
 		let white = cell(1, " ", 0xFFFFFF);
 		let outline = Some(crate::Outline { width: 1.0, color: 0xFF0000 });
 		let padding_background = (0x00FF00, 0);
-		let layer = Layer { x: 3 * CELL.width, padding: [2; 4], padding_background, outline, ..white };
+		let layer = Layer { x: 3 * CELL.width, padding: crate::Edges::all(2), padding_background, outline, ..white };
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");
 			return;
@@ -979,10 +977,10 @@ mod tests {
 
 		// The shape reaches halfway into the cell from the right: the right half shows.
 		let arriving = [[4.0, 0.0], [30.0, 0.0], [30.0, 19.0], [4.0, 19.0]];
-		assert_eq!(super::covered(cursor, arriving), [4, 0, 4, 19]);
+		assert_eq!(super::covered(cursor, arriving), crate::Rect::new(4, 0, 4, 19));
 		// Not there yet: nothing shows.
 		let away = [[20.0, 0.0], [30.0, 0.0], [30.0, 19.0], [20.0, 19.0]];
-		assert_eq!(super::covered(cursor, away)[2], 0);
+		assert_eq!(super::covered(cursor, away).width, 0);
 	}
 
 	#[test]

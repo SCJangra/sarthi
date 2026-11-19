@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use crate::animation::{Approach, Easing, Motion};
-use crate::{BarOrientation, CellSize, Cursor, CursorShape, Layer};
+use crate::{BarOrientation, CellSize, Cursor, CursorShape, Layer, Rect};
 
 /// How the cursor moves to a new place
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -64,9 +64,9 @@ impl CursorAnimation {
 		self.motion = motion;
 	}
 
-	/// Moves the cursor to `rect` (left, top, width, height in pixels) at `now`: animated, unless `animate` is false or
+	/// Moves the cursor to `rect`, in pixels, at `now`: animated, unless `animate` is false or
 	/// it's the first cursor. A move is short by cells of `cell`, the cell size where the cursor goes.
-	pub(crate) fn update(&mut self, rect: [f32; 4], animate: bool, cell: CellSize, now: Instant) {
+	pub(crate) fn update(&mut self, rect: Rect<f32>, animate: bool, cell: CellSize, now: Instant) {
 		let targets = corners_of(rect);
 		let at_rest = |target: [f32; 2]| Corner { target, offset: [Approach::new(self.motion.motion, now); 2] };
 		let Some(corners) = &mut self.corners else {
@@ -111,30 +111,30 @@ impl CursorAnimation {
 	}
 }
 
-/// Where `cursor` of `layer` is, in pixels from the window's top-left corner: left, top, width, height. A bar is as
+/// Where `cursor` of `layer` is, in pixels from the window's top-left corner. A bar is as
 /// thick as it's drawn at rest.
-pub(crate) fn cursor_rect(layer: &Layer, cursor: Cursor) -> [f32; 4] {
+pub(crate) fn cursor_rect(layer: &Layer, cursor: Cursor) -> Rect<f32> {
 	let cell = layer.cell;
 	let (left, top) = (layer.x + cursor.col * cell.width, layer.y + cursor.row * cell.height);
 	let width = cursor.width * cell.width;
 	// Like `cursor_quad`
 	let thickness = |size: u32, percentage: u32| (size * percentage).div_ceil(100).clamp(1, size);
 	let rect = match cursor.shape {
-		CursorShape::Block | CursorShape::Outline => [left, top, width, cell.height],
+		CursorShape::Block | CursorShape::Outline => Rect::new(left, top, width, cell.height),
 		CursorShape::Bar { orientation: BarOrientation::Vertical, percentage } => {
-			[left, top, thickness(cell.width, percentage), cell.height]
+			Rect::new(left, top, thickness(cell.width, percentage), cell.height)
 		},
 		CursorShape::Bar { orientation: BarOrientation::Horizontal, percentage } => {
 			let height = thickness(cell.height, percentage);
-			[left, top + cell.height - height, width, height]
+			Rect::new(left, top + cell.height - height, width, height)
 		},
 	};
-	rect.map(|value| value as f32)
+	rect.to_f32()
 }
 
-/// The corners of `rect` (left, top, width, height): top-left, top-right, bottom-right and bottom-left
-fn corners_of([left, top, width, height]: [f32; 4]) -> [[f32; 2]; 4] {
-	let (right, bottom) = (left + width, top + height);
+/// The corners of `rect`: top-left, top-right, bottom-right and bottom-left
+fn corners_of(rect: Rect<f32>) -> [[f32; 2]; 4] {
+	let (left, top, right, bottom) = (rect.x, rect.y, rect.right(), rect.bottom());
 	[[left, top], [right, top], [right, bottom], [left, bottom]]
 }
 
@@ -179,8 +179,8 @@ mod tests {
 	}
 
 	/// A block cursor of a one-pixel cell
-	fn block(col: f32, row: f32) -> [f32; 4] {
-		[col, row, 1.0, 1.0]
+	fn block(col: f32, row: f32) -> crate::Rect<f32> {
+		crate::Rect::new(col, row, 1.0, 1.0)
 	}
 
 	fn close(a: [[f32; 2]; 4], b: [[f32; 2]; 4]) -> bool {
@@ -264,7 +264,7 @@ mod tests {
 	fn a_shape_change_animates_in_place() {
 		let (now, mut cursor) = (Instant::now(), animation(0.5));
 		cursor.update(block(2.0, 0.0), true, PIXEL, now);
-		cursor.update([2.0, 0.0, 0.2, 1.0], true, PIXEL, now);
+		cursor.update(crate::Rect::new(2.0, 0.0, 0.2, 1.0), true, PIXEL, now);
 		// A short move: halfway through the short motion, the right edge is on its way from 3 to 2.2, the left one in place.
 		let corners = cursor.corners(now + Duration::from_millis(5)).unwrap();
 		assert!(close(corners, [[2.0, 0.0], [2.6, 0.0], [2.6, 1.0], [2.0, 1.0]]), "{corners:?}");
@@ -286,15 +286,21 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
-			padding: [0; 4],
+			padding: crate::Edges::default(),
 			padding_background: (0, 0),
 			corner_radius: 0.0,
 		};
 		let cursor = |shape| Cursor { row: 2, col: 3, width: 1, shape, color: 0, text_color: 0, animate: true };
-		assert_eq!(cursor_rect(&layer, cursor(CursorShape::Block)), [50.0, 60.0, 10.0, 20.0]);
+		assert_eq!(cursor_rect(&layer, cursor(CursorShape::Block)), crate::Rect::new(50.0, 60.0, 10.0, 20.0));
 		let bar = |orientation, percentage| CursorShape::Bar { orientation, percentage };
 		// 25% of 10 pixels rounds up to 3, as drawn at rest.
-		assert_eq!(cursor_rect(&layer, cursor(bar(BarOrientation::Vertical, 25))), [50.0, 60.0, 3.0, 20.0]);
-		assert_eq!(cursor_rect(&layer, cursor(bar(BarOrientation::Horizontal, 20))), [50.0, 76.0, 10.0, 4.0]);
+		assert_eq!(
+			cursor_rect(&layer, cursor(bar(BarOrientation::Vertical, 25))),
+			crate::Rect::new(50.0, 60.0, 3.0, 20.0)
+		);
+		assert_eq!(
+			cursor_rect(&layer, cursor(bar(BarOrientation::Horizontal, 20))),
+			crate::Rect::new(50.0, 76.0, 10.0, 4.0)
+		);
 	}
 }

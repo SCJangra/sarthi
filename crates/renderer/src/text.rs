@@ -162,12 +162,12 @@ fn text_areas<'a>(rows: &'a [Row], piece: &Piece, empty: &'a Buffer) -> impl Ite
 	let cell = piece.layer.cell;
 	let (left, top) = (piece.layer.x as f32, piece.layer.y as f32 + piece.offset);
 	// Clipped like the rest of the piece, so e.g. a wide fallback glyph can't spill out of a floating window
-	let [clip_left, clip_top, width, height] = piece.clip;
+	let clip = piece.clip;
 	let bounds = TextBounds {
-		left: clip_left as i32,
-		top: clip_top as i32,
-		right: (clip_left + width) as i32,
-		bottom: (clip_top + height) as i32,
+		left: clip.x as i32,
+		top: clip.y as i32,
+		right: clip.right() as i32,
+		bottom: clip.bottom() as i32,
 	};
 
 	rows.iter().zip(0..).flat_map(move |(row, y)| {
@@ -487,7 +487,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
-			padding: [0; 4],
+			padding: crate::Edges::default(),
 			padding_background: (0, 0),
 			corner_radius: 0.0,
 		}

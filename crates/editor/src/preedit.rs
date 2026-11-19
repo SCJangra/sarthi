@@ -1,6 +1,6 @@
 //! The text an input method is composing (its preedit), shown at the cursor until it's committed to Neovim
 
-use renderer::{BarOrientation, Cursor, CursorShape, Layer, RenderCell, Underline};
+use renderer::{BarOrientation, Cursor, CursorShape, Layer, Rect, RenderCell, Underline};
 use rpc::neovim::CellText;
 use unicode_width::UnicodeWidthChar;
 
@@ -14,13 +14,13 @@ pub struct Preedit {
 	pub caret: Option<usize>,
 }
 
-/// The cursor among `layers`, the last one's if more have one: left, top, width and height in pixels. Not the caret in the
+/// The cursor among `layers`, the last one's if more have one, in pixels. Not the caret in the
 /// text an input method composes: its candidates stay by the cursor, rather than move with each key.
-pub fn cursor_rect(layers: &[Layer]) -> Option<[u32; 4]> {
+pub fn cursor_rect(layers: &[Layer]) -> Option<Rect<u32>> {
 	layers.iter().rev().find_map(|cells| {
 		let cursor = cells.cursor.filter(|_| cells.id != PREEDIT_ID)?;
 		let (width, height) = (cells.cell.width, cells.cell.height);
-		Some([cells.x + cursor.col * width, cells.y + cursor.row * height, cursor.width * width, height])
+		Some(Rect::new(cells.x + cursor.col * width, cells.y + cursor.row * height, cursor.width * width, height))
 	})
 }
 
@@ -92,7 +92,7 @@ pub fn preedit_layer(layers: &mut [Layer], preedit: &Preedit) -> Option<Layer> {
 		scroll: None,
 		shadow: None,
 		outline: None,
-		padding: [0; 4],
+		padding: renderer::Edges::default(),
 		padding_background: (style.background, 0),
 		corner_radius: 0.0,
 	})
@@ -142,7 +142,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
-			padding: [0; 4],
+			padding: renderer::Edges::default(),
 			padding_background: (BG, 0),
 			corner_radius: 0.0,
 		}
@@ -154,7 +154,7 @@ mod tests {
 
 	#[test]
 	fn cursor_rect_is_the_cursors_cell_in_pixels() {
-		assert_eq!(cursor_rect(&[layer()]), Some([120, 60, 10, 20]));
+		assert_eq!(cursor_rect(&[layer()]), Some(renderer::Rect::new(120, 60, 10, 20)));
 		// While text is composed, the cursor is its caret, which doesn't count.
 		let mut layers = vec![layer()];
 		let shown = preedit_layer(&mut layers, &preedit("ab", Some(1))).unwrap();

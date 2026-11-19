@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use editor::{FloatStyle, OutlineStyle};
-use renderer::{CursorMotion, Easing, Motion, Shadow, UnderlineSize};
+use renderer::{CursorMotion, Easing, Edges, Motion, Shadow, UnderlineSize};
 use rpc::sarthi::{Animation, Filetypes, FloatWindow, ScrolledWindow, Settings, WindowOptions, WindowVariable};
 
 /// How the renderer moves scrolled text
@@ -93,7 +93,7 @@ fn style(settings: &Settings, filetype: &str, winblend: u32) -> FloatStyle {
 	let corners = &settings.corners;
 	let corners = shows(corners.enabled, &corners.exclude_filetypes).then_some(corners.radius);
 	let padding = &settings.padding;
-	let padding = shows(padding.enabled, &padding.exclude_filetypes).then_some(padding.size.sides());
+	let padding = shows(padding.enabled, &padding.exclude_filetypes).then_some(Edges::from(padding.size.sides()));
 	FloatStyle { shadow, outline, corners, padding, ..FloatStyle::default() }
 }
 
@@ -242,14 +242,20 @@ mod tests {
 		// None, unless managed or the window turns it on, at the settings' size or the default
 		assert_eq!(super::float_style(&settings, &float("lua"), &none).padding, None);
 		let managed = padding(Some(true), Default::default());
-		assert_eq!(super::float_style(&settings, &float("lua"), &managed).padding, Some([6.0; 4]));
+		assert_eq!(super::float_style(&settings, &float("lua"), &managed).padding, Some(renderer::Edges::all(6.0)));
 		let on = PaddingOptions { enabled: Some(true), ..Default::default() };
-		assert_eq!(super::float_style(&settings, &float("lua"), &padding(None, on.clone())).padding, Some([4.0; 4]));
+		assert_eq!(
+			super::float_style(&settings, &float("lua"), &padding(None, on.clone())).padding,
+			Some(renderer::Edges::all(4.0))
+		);
 
 		// Each side its own
 		let sides = PaddingSize::Sides(PaddingSides { top: 1.0, left: 3.0, ..Default::default() });
 		let own = padding(Some(true), PaddingOptions { size: Some(sides), ..Default::default() });
-		assert_eq!(super::float_style(&settings, &float("lua"), &own).padding, Some([1.0, 0.0, 0.0, 3.0]));
+		assert_eq!(
+			super::float_style(&settings, &float("lua"), &own).padding,
+			Some(renderer::Edges::from([1.0, 0.0, 0.0, 3.0]))
+		);
 		assert_eq!(super::float_style(&settings, &float("satellite"), &padding(None, on)).padding, None);
 		let off = padding(Some(true), PaddingOptions { enabled: Some(false), ..Default::default() });
 		assert_eq!(super::float_style(&settings, &float("lua"), &off).padding, None);

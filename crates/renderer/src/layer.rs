@@ -1,6 +1,6 @@
 use arrayvec::ArrayString;
 
-use crate::{CellSize, FontId, Motion};
+use crate::{CellSize, Edges, FontId, Motion, Rect};
 
 /// A block of cells at a position in the window, e.g. one of Neovim's grids, each cell `cell` large
 #[derive(Debug, Clone, PartialEq)]
@@ -38,9 +38,9 @@ pub struct Layer {
 	/// A line around the layer, just outside its cells, so it takes none of them
 	pub outline: Option<Outline>,
 
-	/// Pixels of its background around its cells, taking none of them: top, right, bottom and left. The outline, the
+	/// Pixels of its background around its cells, taking none of them. The outline, the
 	/// rounded corners and the shadow go around it.
-	pub padding: [u32; 4],
+	pub padding: Edges<u32>,
 
 	/// The background around its cells, the window's own as `0xRRGGBB`, and how see-through it is, like a cell's `blend`:
 	/// its padding's, whatever the cells next to it are highlighted with
@@ -51,17 +51,14 @@ pub struct Layer {
 }
 
 impl Layer {
-	/// The layer's rectangle, in pixels from the window's top-left corner: left, top, width, height
-	pub fn rect(&self) -> [u32; 4] {
-		[self.x, self.y, self.width * self.cell.width, self.height * self.cell.height]
+	/// The layer's rectangle, in pixels from the window's top-left corner
+	pub fn rect(&self) -> Rect<u32> {
+		Rect::new(self.x, self.y, self.width * self.cell.width, self.height * self.cell.height)
 	}
 
-	/// Its rectangle with its padding around it: left, top, width, height in pixels, the left and top possibly past the
-	/// window's edge
-	pub fn outer_rect(&self) -> [f32; 4] {
-		let [x, y, width, height] = self.rect().map(|value| value as f32);
-		let [top, right, bottom, left] = self.padding.map(|padding| padding as f32);
-		[x - left, y - top, width + left + right, height + top + bottom]
+	/// Its rectangle with its padding around it, in pixels, the left and top possibly past the window's edge
+	pub fn outer_rect(&self) -> Rect<f32> {
+		self.rect().to_f32().outset(self.padding.map(|padding| padding as f32))
 	}
 
 	/// Where the cell at `row`, `col` is in [`Layer::cells`]
@@ -89,8 +86,8 @@ pub struct Outline {
 pub struct LayerShadow {
 	pub shadow: Shadow,
 
-	/// Rectangles in pixels from the window's top-left corner: left, top, width, height
-	pub area: Vec<[u32; 4]>,
+	/// Rectangles in pixels from the window's top-left corner
+	pub area: Vec<Rect<u32>>,
 
 	/// Radius of the area's rectangles' rounded corners, in pixels, each at most its own size: windows' with rounded
 	/// corners. The shadow follows them, and is drawn under the cut-off corners too.

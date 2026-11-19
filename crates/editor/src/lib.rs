@@ -9,7 +9,9 @@ pub mod preedit;
 
 use std::collections::HashMap;
 
-use renderer::{CellSize, Decoration, FontId, Layer, LayerShadow, Motion, Outline, RenderCell, Scroll, Shadow};
+use renderer::{
+	CellSize, Decoration, Edges, FontId, Layer, LayerShadow, Motion, Outline, Rect, RenderCell, Scroll, Shadow,
+};
 use rpc::neovim::{CellText, GridCell as NvimGridCell, OptionValue, RedrawNotification, Window};
 
 use crate::compositor::cell_layer;
@@ -124,8 +126,8 @@ struct Viewport {
 	/// reports as a scroll.
 	line_count: u32,
 
-	/// Rows and columns at the window's edges that don't scroll, like the winbar or a border: top, bottom, left, right
-	margins: [u32; 4],
+	/// Rows and columns at the window's edges that don't scroll, like the winbar or a border
+	margins: Edges<u32>,
 
 	/// Rows the text moved up since the last `flush`, or down if negative
 	scrolled: i64,
@@ -146,7 +148,7 @@ pub struct FloatStyle {
 	pub corners: Option<f32>,
 
 	/// The space around its cells, in its background, if it has any; its outline goes around it.
-	pub padding: Option<[f32; 4]>,
+	pub padding: Option<Edges<f32>>,
 
 	/// Its background, as `0xRRGGBB`, its padding's whatever its cells are highlighted with: Neovim's default one if
 	/// `None`
@@ -394,23 +396,22 @@ impl Editor {
 		self.outline_of(win).map_or(0, |outline| outline.width.round().max(0.0) as u32)
 	}
 
-	/// External window `win`'s padding, in whole physical pixels: top, right, bottom and left
-	fn padding_of(&self, win: Window) -> [u32; 4] {
-		let padding = self.style_of(win).padding.unwrap_or([0.0; 4]);
+	/// External window `win`'s padding, in whole physical pixels
+	fn padding_of(&self, win: Window) -> Edges<u32> {
+		let padding = self.style_of(win).padding.unwrap_or_default();
 		padding.map(|size| (size * self.scale).round().max(0.0) as u32)
 	}
 
-	/// How wide external window `win`'s frame is on each side, in pixels: its padding and outline; top, right,
-	/// bottom and left
-	fn frame_of(&self, win: Window) -> [u32; 4] {
+	/// How wide external window `win`'s frame is on each side, in pixels: its padding and outline
+	fn frame_of(&self, win: Window) -> Edges<u32> {
 		let outline = self.outline_width(win);
 		self.padding_of(win).map(|padding| padding + outline)
 	}
 
-	/// What casts external window `win`'s shadow, from its cells at `rect` (left, top, width, height in
-	/// pixels): its outer edge, its outline's around its padding
-	fn shadow_area(&self, win: Window, rect: [u32; 4]) -> [u32; 4] {
-		outset(rect, self.frame_of(win))
+	/// What casts external window `win`'s shadow, from its cells at `rect` in pixels: its outer edge, its outline's
+	/// around its padding
+	fn shadow_area(&self, win: Window, rect: Rect<u32>) -> Rect<u32> {
+		rect.outset(self.frame_of(win))
 	}
 
 	/// The radius of the corners of what casts external window `win`'s shadow (see
@@ -480,8 +481,9 @@ impl Editor {
 	fn external_at(&self, x: f64, y: f64) -> Option<u32> {
 		self.stacked().into_iter().rev().find_map(|(id, placement)| {
 			let Placement::External { win, .. } = placement else { return None };
-			let [left, top, width, height] = self.external_rect(id, *win).map(f64::from);
-			let inside = (left..left + width).contains(&x) && (top..top + height).contains(&y);
+			let rect = self.external_rect(id, *win);
+			let inside = (f64::from(rect.x)..f64::from(rect.right())).contains(&x)
+				&& (f64::from(rect.y)..f64::from(rect.bottom())).contains(&y);
 			inside.then_some(id)
 		})
 	}
@@ -491,8 +493,8 @@ impl Editor {
 	pub fn grid_cell(&self, id: u32, x: f64, y: f64) -> Option<(i64, i64)> {
 		let ([left, top], cell) = match self.placements.get(&id) {
 			Some(Placement::External { win, .. }) => {
-				let [left, top, ..] = self.external_rect(id, *win);
-				([f64::from(left), f64::from(top)], self.cell_of(id))
+				let rect = self.external_rect(id, *win);
+				([f64::from(rect.x), f64::from(rect.y)], self.cell_of(id))
 			},
 			_ => {
 				let (row, col) = self.grid_origin(id)?;
@@ -680,7 +682,7 @@ impl Editor {
 			RedrawNotification::WinViewportMargins(margins) => {
 				for event in margins {
 					self.viewports.entry(event.grid).or_default().margins =
-						[event.top, event.bottom, event.left, event.right];
+						Edges { top: event.top, right: event.right, bottom: event.bottom, left: event.left };
 				}
 			},
 			RedrawNotification::HlAttrDefine(attrs) => {
@@ -796,27 +798,29 @@ impl Editor {
 
 		let mut shadows = self.float_shadows(&placed);
 		shadows.extend(self.external_shadows(&placed));
-		// What covers grid 1, and what covers the tiled windows: column, row, width, height in cells
+		// What covers grid 1, and what covers the tiled windows, in cells
 		let screen_width = self.grids.get(&1).map_or(0, |grid| grid.width);
-		let area_of = |kind: fn(&Placement) -> Option<[u32; 2]>| -> Vec<[u32; 4]> {
+		let area_of = |kind: fn(&Placement) -> Option<[u32; 2]>| -> Vec<Rect<u32>> {
 			placed
 				.iter()
 				.filter_map(|(id, placement)| Some((self.grids.get(id)?, kind(placement)?)))
-				.map(|(grid, [col, row])| [col, row, grid.width, grid.height])
+				.map(|(grid, [col, row])| Rect::new(col, row, grid.width, grid.height))
 				.collect()
 		};
 		let tiled = area_of(|placement| match placement {
 			Placement::Tiled { row, col } => Some([*col, *row]),
 			_ => None,
 		});
-		let messages: Vec<[u32; 4]> = placed
+		let messages: Vec<Rect<u32>> = placed
 			.iter()
 			.filter_map(|(_, placement)| match placement {
-				Placement::Message { row, .. } => Some([0, *row, screen_width, screen_height.saturating_sub(*row)]),
+				Placement::Message { row, .. } => {
+					Some(Rect::new(0, *row, screen_width, screen_height.saturating_sub(*row)))
+				},
 				_ => None,
 			})
 			.collect();
-		let under_windows: Vec<[u32; 4]> = tiled.iter().chain(&messages).copied().collect();
+		let under_windows: Vec<Rect<u32>> = tiled.iter().chain(&messages).copied().collect();
 
 		let mut layers = Vec::with_capacity(placed.len() + 2);
 		if self.grids.contains_key(&1) {
@@ -859,11 +863,11 @@ impl Editor {
 	/// their own while the window is see-through, so what's behind the window shows. Floating windows keep theirs, or
 	/// what's under them would show.
 	///
-	/// Its cells under `covered` (column, row, width, height in cells of the screen), what other grids show over it, are
+	/// Its cells under `covered` (in cells of the screen), what other grids show over it, are
 	/// left blank then: like in Neovim's own compositor, a screen cell shows only its top grid. Neovim leaves old
 	/// separators and status lines in grid 1 under the windows, which opaque windows hide. The layer is at `origin`, a
 	/// row and column of the screen.
-	fn see_through_cells(&self, mut layer: Layer, origin: (u32, u32), covered: &[[u32; 4]]) -> Layer {
+	fn see_through_cells(&self, mut layer: Layer, origin: (u32, u32), covered: &[Rect<u32>]) -> Layer {
 		if !self.see_through {
 			return layer;
 		}
@@ -874,11 +878,11 @@ impl Editor {
 
 		let blank = CellText::from(" ").expect("a space fits in a cell");
 		let (width, height, (origin_row, origin_col)) = (layer.width, layer.height, origin);
-		for &[col, row, cover_width, cover_height] in covered {
+		for cover in covered {
 			// In the layer's cells
-			let (left, top) = (col.saturating_sub(origin_col).min(width), row.saturating_sub(origin_row));
-			let right = (col + cover_width).saturating_sub(origin_col).clamp(left, width);
-			let bottom = (row + cover_height).saturating_sub(origin_row).min(height);
+			let (left, top) = (cover.x.saturating_sub(origin_col).min(width), cover.y.saturating_sub(origin_row));
+			let right = cover.right().saturating_sub(origin_col).clamp(left, width);
+			let bottom = cover.bottom().saturating_sub(origin_row).min(height);
 			for layer_row in top..bottom {
 				let start = layer.index(layer_row, 0);
 				for cell in &mut layer.cells[start + left as usize..start + right as usize] {
@@ -927,7 +931,7 @@ impl Editor {
 			let (grid, cell) = (&self.grids[&id], self.cell);
 			let [width, height] = [grid.width * cell.width, grid.height * cell.height];
 			// Its cells': a float has no frame
-			let rect = [col * cell.width, row * cell.height, width, height];
+			let rect = Rect::new(col * cell.width, row * cell.height, width, height);
 			let same = groups
 				.iter_mut()
 				.find(|(group_level, _, group)| *group_level == level && group.shadow == shadow);
@@ -999,7 +1003,8 @@ impl Editor {
 	/// the shadow drawn with it (see [`Editor::external_shadows`])
 	fn external_layer(&self, id: u32, win: Window, shadow: Option<LayerShadow>) -> Layer {
 		let mut layer = self.layer(id, 0, 0);
-		[layer.x, layer.y, ..] = self.external_rect(id, win);
+		let rect = self.external_rect(id, win);
+		(layer.x, layer.y) = (rect.x, rect.y);
 		layer.shadow = shadow;
 		layer.outline = self.outline_of(win);
 		layer.corner_radius = self.corners_of(win);
@@ -1009,21 +1014,21 @@ impl Editor {
 		layer
 	}
 
-	/// Where external window `win`, grid `id`, is: left, top, width, height in pixels
-	fn external_rect(&self, id: u32, win: Window) -> [u32; 4] {
+	/// Where external window `win`, grid `id`, is, in pixels
+	fn external_rect(&self, id: u32, win: Window) -> Rect<u32> {
 		self.external_rect_within(id, win, 0)
 	}
 
 	/// [`Editor::external_rect`], `depth` external windows away from the one asked for: windows placed relative to one
 	/// another can't go round in a loop.
-	fn external_rect_within(&self, id: u32, win: Window, depth: u32) -> [u32; 4] {
+	fn external_rect_within(&self, id: u32, win: Window, depth: u32) -> Rect<u32> {
 		let (grid, cell) = (&self.grids[&id], self.cell_of(id));
 		let size = [grid.width * cell.width, grid.height * cell.height];
 		// Placed with its frame, like Neovim places a floating window with its border: its cells inside it
-		let [top, right, bottom, left] = self.frame_of(win);
-		let outer = [size[0] + left + right, size[1] + top + bottom];
+		let frame = self.frame_of(win);
+		let outer = [size[0] + frame.left + frame.right, size[1] + frame.top + frame.bottom];
 		let [x, y] = self.external_place(win, outer, depth);
-		[x + left, y + top, size[0], size[1]]
+		Rect::new(x + frame.left, y + frame.top, size[0], size[1])
 	}
 
 	/// Where external window `win`, `outer` pixels with its frame, is placed: its frame's top-left corner. A window
@@ -1039,12 +1044,12 @@ impl Editor {
 		// A window's text's top-left corner and cells, by its grid: every window has a viewport.
 		let origin = |win: Window| {
 			let (&grid, viewport) = self.viewports.iter().find(|(_, viewport)| viewport.win == Some(win))?;
-			let [top, _, left, _] = viewport.margins;
+			let Edges { top, left, .. } = viewport.margins;
 			let (corner, cell) = match self.placements.get(&grid) {
 				// In its own cells, where it's placed; past a few in a row, as if not shown
 				Some(Placement::External { win, .. }) => {
-					let [x, y, ..] = (depth < 8).then(|| self.external_rect_within(grid, *win, depth + 1))?;
-					([x, y], self.cell_of(grid))
+					let rect = (depth < 8).then(|| self.external_rect_within(grid, *win, depth + 1))?;
+					([rect.x, rect.y], self.cell_of(grid))
 				},
 				_ => {
 					let (row, col) = self.grid_origin(grid)?;
@@ -1064,7 +1069,7 @@ impl Editor {
 		if motion == Some(None) {
 			return None;
 		}
-		let [top, bottom, left, right] = viewport.margins;
+		let Edges { top, right, bottom, left } = viewport.margins;
 		Some(Scroll {
 			rows: viewport.scrolled.clamp(i32::MIN.into(), i32::MAX.into()) as i32,
 			top,
@@ -1090,13 +1095,6 @@ impl Editor {
 	}
 }
 
-/// `rect` (left, top, width, height in pixels) with as many pixels around it as given above, right, below and before it
-/// (left), up to the window's top and left edges
-fn outset([left, top, width, height]: [u32; 4], [above, right, below, before]: [u32; 4]) -> [u32; 4] {
-	let (x, y) = (left.saturating_sub(before), top.saturating_sub(above));
-	[x, y, left + width + right - x, top + height + below - y]
-}
-
 /// Keeps the first `height` rows of `layer`, if it's taller
 fn clip_rows(layer: &mut Layer, height: u32) {
 	let Layer { height: layer_height, width, cells, cursor, .. } = layer;
@@ -1112,7 +1110,7 @@ fn clip_rows(layer: &mut Layer, height: u32) {
 
 #[cfg(test)]
 mod tests {
-	use renderer::{CellSize, Cursor, CursorShape, FontId, Layer, Motion, Shadow};
+	use renderer::{CellSize, Cursor, CursorShape, Edges, FontId, Layer, Motion, Shadow};
 	use rpc::neovim::{
 		CellText, DefaultColorsSetEvent, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
 		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, OptionSetEvent, OptionValue,
@@ -1598,7 +1596,7 @@ mod tests {
 		editor.set_external_place(win_of(4), below);
 		assert_eq!(at(&editor.refresh().expect("placed")), (2 * 10, 20));
 		// Counted from 5's text, inside its padding, like from inside a float's border
-		editor.set_float_style(win_of(5), FloatStyle { padding: Some([4.0; 4]), ..FloatStyle::default() });
+		editor.set_float_style(win_of(5), FloatStyle { padding: Some(Edges::all(4.0)), ..FloatStyle::default() });
 		assert_eq!(at(&editor.refresh().expect("padded")), (2 * 10 + 4, 20 + 4));
 
 		// Placed relative to each other: no loop, centered past a few
@@ -1775,7 +1773,11 @@ mod tests {
 		editor.set_default_float_style(FloatStyle { shadow, ..FloatStyle::default() });
 		let padding_of = |redraw: &Redraw, id: u64| {
 			let layer = redraw.layers.iter().find(|layer| layer.id == id).unwrap();
-			(layer.padding, layer.shadow.as_ref().map(|shadow| shadow.area.clone()))
+			let area = layer
+				.shadow
+				.as_ref()
+				.map(|shadow| shadow.area.iter().map(|&rect| <[u32; 4]>::from(rect)).collect::<Vec<_>>());
+			(<[u32; 4]>::from(layer.padding), area)
 		};
 		// A float at row 1, column 1, and an external window at the top left; none until a style has it
 		let events = vec![resize(3, 2, 1), float(3, 1, 1, 1), resize(4, 2, 1), external(4)];
@@ -1795,7 +1797,7 @@ mod tests {
 
 		// In whole physical pixels; the shadow is cast from around it, and the outline around that.
 		let outline = Some(OutlineStyle { width: 1.0, highlight: String::from("FloatBorder"), color: None });
-		let style = FloatStyle { shadow, outline, padding: Some([3.0; 4]), ..FloatStyle::default() };
+		let style = FloatStyle { shadow, outline, padding: Some(Edges::all(3.0)), ..FloatStyle::default() };
 		editor.set_default_float_style(style.clone());
 		editor.set_scale(2.0);
 		let redraw = editor.refresh().expect("padding changed");
@@ -1806,13 +1808,13 @@ mod tests {
 		assert_eq!(padding_of(&redraw, 1).0, [0; 4]);
 
 		// A window's own size, or none
-		editor.set_float_style(win_of(4), FloatStyle { padding: Some([1.0; 4]), ..style.clone() });
+		editor.set_float_style(win_of(4), FloatStyle { padding: Some(Edges::all(1.0)), ..style.clone() });
 		let redraw = editor.refresh().expect("its style changed");
 		assert_eq!(padding_of(&redraw, 4).0, [2; 4]);
 
 		// Each side its own: top 1, right 2, bottom 3, left 4, so 2, 4, 6 and 8 pixels, and the shadow grows by each
 		// side's.
-		editor.set_float_style(win_of(4), FloatStyle { padding: Some([1.0, 2.0, 3.0, 4.0]), ..style });
+		editor.set_float_style(win_of(4), FloatStyle { padding: Some(Edges::from([1.0, 2.0, 3.0, 4.0])), ..style });
 		let redraw = editor.refresh().expect("its padding changed");
 		assert_eq!(padding_of(&redraw, 4), ([2, 4, 6, 8], Some(vec![[0, 0, 32, 28]])));
 		editor.set_float_style(win_of(4), FloatStyle { shadow, ..FloatStyle::default() });
@@ -1823,10 +1825,14 @@ mod tests {
 			let layer = redraw.layers.iter().find(|layer| layer.id == 4).unwrap();
 			layer.padding_background
 		};
-		editor.set_float_style(win_of(4), FloatStyle { padding: Some([1.0; 4]), ..FloatStyle::default() });
+		editor.set_float_style(win_of(4), FloatStyle { padding: Some(Edges::all(1.0)), ..FloatStyle::default() });
 		assert_eq!(background_of(&editor.refresh().expect("padded")), (editor.background(), 0));
-		let own =
-			FloatStyle { padding: Some([1.0; 4]), background: Some(0x123456), blend: 30, ..FloatStyle::default() };
+		let own = FloatStyle {
+			padding: Some(Edges::all(1.0)),
+			background: Some(0x123456),
+			blend: 30,
+			..FloatStyle::default()
+		};
 		editor.set_float_style(win_of(4), own);
 		assert_eq!(background_of(&editor.refresh().expect("its background")), (0x123456, 30));
 	}
@@ -1846,7 +1852,7 @@ mod tests {
 			external(4),
 		];
 		flush(&mut editor, events);
-		editor.set_float_style(win_of(4), FloatStyle { padding: Some([4.0; 4]), ..FloatStyle::default() });
+		editor.set_float_style(win_of(4), FloatStyle { padding: Some(Edges::all(4.0)), ..FloatStyle::default() });
 		let at = |editor: &mut Editor, place| {
 			editor.set_external_place(win_of(4), place);
 			let redraw = editor.refresh().expect("placed");
@@ -1906,11 +1912,11 @@ mod tests {
 	fn a_float_stays_in_its_cells() {
 		let mut editor = screen();
 		let outline = Some(OutlineStyle { width: 2.0, highlight: String::from("FloatBorder"), color: None });
-		editor.set_default_float_style(FloatStyle { outline, padding: Some([2.0; 4]), ..FloatStyle::default() });
+		editor.set_default_float_style(FloatStyle { outline, padding: Some(Edges::all(2.0)), ..FloatStyle::default() });
 		// Placed at row 2, column 2: drawn there whatever its style, with no frame to move it
 		let redraw = flush(&mut editor, vec![resize(3, 2, 1), float(3, 2, 2, 1)]);
 		let layer = redraw.layers.iter().find(|layer| layer.id == 3).unwrap();
-		assert_eq!((layer.x, layer.y, layer.padding, layer.outline), (2 * 8, 2 * 16, [0; 4], None));
+		assert_eq!((layer.x, layer.y, layer.padding, layer.outline), (2 * 8, 2 * 16, Edges::default(), None));
 		// The mouse finds its cells where Neovim placed them.
 		assert_eq!(editor.grid_at(17.0, 33.0), Some(GridPosition { grid: 3, row: 0, col: 0 }));
 		assert_eq!(editor.grid_at(25.0, 33.0), Some(GridPosition { grid: 3, row: 0, col: 1 }));
@@ -1945,7 +1951,7 @@ mod tests {
 		// edge. The cells moved by those 2 pixels from where it's placed, so the outline starts there.
 		let layer = redraw.layers.iter().find(|layer| layer.id == 3).unwrap();
 		let area = layer.shadow.as_ref().map(|shadow| shadow.area.clone());
-		assert_eq!(area, Some(vec![[CELL.width, CELL.height, 2 * CELL.width + 4, CELL.height + 4]]));
+		assert_eq!(area, Some(vec![renderer::Rect::new(CELL.width, CELL.height, 2 * CELL.width + 4, CELL.height + 4)]));
 	}
 
 	#[test]
@@ -2097,7 +2103,7 @@ mod tests {
 		layer
 			.shadow
 			.as_ref()
-			.map(|shadow| shadow.area.iter().copied().map(cells).collect())
+			.map(|shadow| shadow.area.iter().map(|&rect| cells(rect.into())).collect())
 	}
 
 	#[test]

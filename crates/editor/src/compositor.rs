@@ -47,7 +47,7 @@ pub fn cell_layer(
 		scroll: None,
 		shadow: None,
 		outline: None,
-		padding: [0; 4],
+		padding: renderer::Edges::default(),
 		padding_background: (highlights.defaults().background, 0),
 		corner_radius: 0.0,
 	};

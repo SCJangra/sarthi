@@ -6,7 +6,8 @@ use crate::color::rgba;
 use crate::font::LineMetrics;
 use crate::stencil;
 use crate::{
-	BarOrientation, CellSize, CursorShape, Decoration, Layer, LayerShadow, Outline, RenderCell, Shadow, Underline,
+	BarOrientation, CellSize, CursorShape, Decoration, Edges, Layer, LayerShadow, Outline, Rect, RenderCell, Shadow,
+	Underline,
 };
 
 /// A rectangle in physical pixels, with optional rounded corners and border
@@ -462,33 +463,30 @@ pub(crate) fn padding_quads(quads: &mut Vec<Quad>, layer: &Layer, srgb_surface: 
 	let (background, blend) = layer.padding_background;
 	let [r, g, b, _] = rgba(background, srgb_surface);
 	let color = [r, g, b, 1.0 - f32::from(blend.min(100)) / 100.0];
-	let outer = layer.outer_rect();
-	let [left, top, width, _] = outer;
-	let [x, y, cells_width, cells_height] = layer.rect().map(|value| value as f32);
-	let [top_size, right_size, bottom_size, left_size] = layer.padding.map(|padding| padding as f32);
+	let (outer, cells) = (layer.outer_rect(), layer.rect().to_f32());
+	let padding = layer.padding.map(|padding| padding as f32);
 	let bands = [
-		[left, top, width, top_size],
-		[left, y + cells_height, width, bottom_size],
-		[left, y, left_size, cells_height],
-		[x + cells_width, y, right_size, cells_height],
+		Rect { height: padding.top, ..outer },
+		Rect { y: cells.bottom(), height: padding.bottom, ..outer },
+		Rect::new(outer.x, cells.y, padding.left, cells.height),
+		Rect::new(cells.right(), cells.y, padding.right, cells.height),
 	];
-	for band in bands.into_iter().filter(|[_, _, width, height]| *width > 0.0 && *height > 0.0) {
-		let clip = (layer.corner_radius > 0.0).then_some((outer, [layer.corner_radius, 0.0]));
+	for band in bands.into_iter().filter(|band| band.width > 0.0 && band.height > 0.0) {
+		let clip = (layer.corner_radius > 0.0).then_some((outer.into(), [layer.corner_radius, 0.0]));
 		let (clip, clip_radius) = clip.unwrap_or(([0.0; 4], [0.0; 2]));
-		quads.push(Quad { clip, clip_radius, ..Quad::fill(band, color) });
+		quads.push(Quad { clip, clip_radius, ..Quad::fill(band.into(), color) });
 	}
 }
 
-/// A quad for `outline` around a rectangle `rect` (left, top, width, height) with corners rounded by `radius`: a border
-/// just outside it, taking none of its pixels
-pub(crate) fn outline_quad(rect: [f32; 4], outline: Outline, radius: f32, srgb_surface: bool) -> Quad {
+/// A quad for `outline` around `rect` with corners rounded by `radius`: a border just outside it, taking none of its
+/// pixels
+pub(crate) fn outline_quad(rect: Rect<f32>, outline: Outline, radius: f32, srgb_surface: bool) -> Quad {
 	let width = outline.width.max(0.0);
-	let [left, top, rect_width, rect_height] = rect;
-	let rect = [left - width, top - width, rect_width + 2.0 * width, rect_height + 2.0 * width];
+	let rect = rect.outset(Edges::all(width));
 	// Around rounded corners, rounded by as much more as it's wide, so it keeps its width
 	let corner_radius = if radius > 0.0 { radius + width } else { 0.0 };
 	let border_color = rgba(outline.color, srgb_surface);
-	Quad { border_color, border_width: width, corner_radius, ..Quad::fill(rect, [0.0; 4]) }
+	Quad { border_color, border_width: width, corner_radius, ..Quad::fill(rect.into(), [0.0; 4]) }
 }
 
 /// Adds the quads of `shadow`. Its area is first cut into rectangles that don't overlap: a blur
@@ -503,29 +501,26 @@ pub(crate) fn outline_quad(rect: [f32; 4], outline: Outline, radius: f32, srgb_s
 /// what casts it.
 pub(crate) fn area_shadow(frame: &mut FrameQuads, shadow: &LayerShadow, srgb_surface: bool) {
 	if shadow.radius > 0.0 && shadow.area.len() > 1 {
-		let rects: Vec<[f32; 4]> = shadow.area.iter().map(|rect| rect.map(|value| value as f32)).collect();
+		let rects: Vec<Rect<f32>> = shadow.area.iter().map(|rect| rect.to_f32()).collect();
 		let [x, y] = shadow.shadow.offset;
 		let range = [frame.holes.len() as u32, rects.len() as u32];
-		frame.holes.extend(&rects);
+		frame.holes.extend(rects.iter().map(|&rect| <[f32; 4]>::from(rect)));
 		frame.holes.extend(
 			rects
 				.iter()
-				.map(|&[left, top, width, height]| [left + x, top + y, width, height]),
+				.map(|&rect| <[f32; 4]>::from(Rect { x: rect.x + x, y: rect.y + y, ..rect })),
 		);
-		let left = rects.iter().map(|rect| rect[0]).fold(f32::MAX, f32::min);
-		let top = rects.iter().map(|rect| rect[1]).fold(f32::MAX, f32::min);
-		let right = rects.iter().map(|rect| rect[0] + rect[2]).fold(f32::MIN, f32::max);
-		let bottom = rects.iter().map(|rect| rect[1] + rect[3]).fold(f32::MIN, f32::max);
+		let left = rects.iter().map(|rect| rect.x).fold(f32::MAX, f32::min);
+		let top = rects.iter().map(|rect| rect.y).fold(f32::MAX, f32::min);
+		let right = rects.iter().map(Rect::right).fold(f32::MIN, f32::max);
+		let bottom = rects.iter().map(Rect::bottom).fold(f32::MIN, f32::max);
 		let mut quad =
 			Quad::shadow([left, top, right - left, bottom - top], shadow.shadow, shadow.radius, srgb_surface);
 		(quad.holes, quad.pattern[3]) = (range, 1.0);
 		frame.quads.push(quad);
 		return;
 	}
-	let pieces: Vec<[f32; 4]> = disjoint(&shadow.area)
-		.into_iter()
-		.map(|rect| rect.map(|value| value as f32))
-		.collect();
+	let pieces: Vec<[f32; 4]> = disjoint(&shadow.area).into_iter().map(|rect| rect.to_f32().into()).collect();
 	let range = [frame.holes.len() as u32, pieces.len() as u32];
 	frame.holes.extend(&pieces);
 	for rect in pieces {
@@ -535,19 +530,18 @@ pub(crate) fn area_shadow(frame: &mut FrameQuads, shadow: &LayerShadow, srgb_sur
 	}
 }
 
-/// The area of `rects` (left, top, width, height) as rectangles that don't overlap: by bands between the rectangles'
-/// top and bottom edges, each band in runs of covered columns
-fn disjoint(rects: &[[u32; 4]]) -> Vec<[u32; 4]> {
-	let edges = |start: usize, size: usize| {
-		let mut edges: Vec<u32> = rects.iter().flat_map(|rect| [rect[start], rect[start] + rect[size]]).collect();
+/// The area of `rects` as rectangles that don't overlap: by bands between the rectangles' top and bottom edges, each
+/// band in runs of covered columns
+fn disjoint(rects: &[Rect<u32>]) -> Vec<Rect<u32>> {
+	let edges = |edges_of: fn(&Rect<u32>) -> [u32; 2]| {
+		let mut edges: Vec<u32> = rects.iter().flat_map(edges_of).collect();
 		edges.sort_unstable();
 		edges.dedup();
 		edges
 	};
-	let (xs, ys) = (edges(0, 2), edges(1, 3));
-	let covers = |rect: &[u32; 4], x: u32, y: u32| {
-		(rect[0]..rect[0] + rect[2]).contains(&x) && (rect[1]..rect[1] + rect[3]).contains(&y)
-	};
+	let (xs, ys) = (edges(|rect| [rect.x, rect.right()]), edges(|rect| [rect.y, rect.bottom()]));
+	let covers =
+		|rect: &Rect<u32>, x: u32, y: u32| (rect.x..rect.right()).contains(&x) && (rect.y..rect.bottom()).contains(&y);
 
 	let mut pieces = Vec::new();
 	for band in ys.windows(2) {
@@ -558,14 +552,14 @@ fn disjoint(rects: &[[u32; 4]]) -> Vec<[u32; 4]> {
 			match (covered, run) {
 				(true, None) => run = Some(column[0]),
 				(false, Some(left)) => {
-					pieces.push([left, top, column[0] - left, bottom - top]);
+					pieces.push(Rect::new(left, top, column[0] - left, bottom - top));
 					run = None;
 				},
 				_ => (),
 			}
 		}
 		if let (Some(left), Some(&right)) = (run, xs.last()) {
-			pieces.push([left, top, right - left, bottom - top]);
+			pieces.push(Rect::new(left, top, right - left, bottom - top));
 		}
 	}
 	pieces
@@ -649,7 +643,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
-			padding: [0; 4],
+			padding: crate::Edges::default(),
 			padding_background: (0, 0),
 			corner_radius: 0.0,
 		};
@@ -687,7 +681,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
-			padding: [0; 4],
+			padding: crate::Edges::default(),
 			padding_background: (0, 0),
 			corner_radius: 0.0,
 		};
@@ -734,7 +728,7 @@ mod tests {
 			scroll: None,
 			shadow: None,
 			outline: None,
-			padding: [4; 4],
+			padding: crate::Edges::all(4),
 			padding_background: (0x202020, 20),
 			corner_radius: 0.0,
 		};
@@ -782,17 +776,24 @@ mod tests {
 		assert!(decorations(Decoration { underline_color: GREEN, ..Decoration::default() }).is_empty());
 	}
 
+	fn rects(rects: &[[u32; 4]]) -> Vec<crate::Rect<u32>> {
+		rects.iter().map(|&rect| rect.into()).collect()
+	}
+
 	#[test]
 	fn shadow_areas_are_cut_into_rectangles_that_dont_overlap() {
 		// Side by side, like a picker's windows: one rectangle
-		assert_eq!(disjoint(&[[0, 0, 4, 2], [4, 0, 3, 2]]), [[0, 0, 7, 2]]);
+		assert_eq!(disjoint(&rects(&[[0, 0, 4, 2], [4, 0, 3, 2]])), rects(&[[0, 0, 7, 2]]));
 		// A window inside its border: the border's rectangle, by bands
-		assert_eq!(disjoint(&[[0, 0, 10, 5], [1, 1, 8, 3]]), [[0, 0, 10, 1], [0, 1, 10, 3], [0, 4, 10, 1]]);
+		assert_eq!(
+			disjoint(&rects(&[[0, 0, 10, 5], [1, 1, 8, 3]])),
+			rects(&[[0, 0, 10, 1], [0, 1, 10, 3], [0, 4, 10, 1]])
+		);
 		// A menu with a shorter window beside it
-		assert_eq!(disjoint(&[[0, 0, 4, 4], [4, 0, 3, 2]]), [[0, 0, 7, 2], [0, 2, 4, 2]]);
+		assert_eq!(disjoint(&rects(&[[0, 0, 4, 4], [4, 0, 3, 2]])), rects(&[[0, 0, 7, 2], [0, 2, 4, 2]]));
 		// Apart
-		assert_eq!(disjoint(&[[0, 0, 2, 1], [5, 0, 2, 1]]), [[0, 0, 2, 1], [5, 0, 2, 1]]);
-		assert_eq!(disjoint(&[]), Vec::<[u32; 4]>::new());
+		assert_eq!(disjoint(&rects(&[[0, 0, 2, 1], [5, 0, 2, 1]])), rects(&[[0, 0, 2, 1], [5, 0, 2, 1]]));
+		assert_eq!(disjoint(&[]), Vec::new());
 	}
 
 	#[test]
