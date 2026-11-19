@@ -54,6 +54,10 @@ impl Renderer {
 	///
 	/// The surface takes ownership of `target` (e.g. an `Arc<Window>`), which keeps the window
 	/// alive for as long as the renderer exists.
+	///
+	/// # Errors
+	///
+	/// Fails like [`Renderer::with_config`].
 	pub async fn new(
 		target: impl Into<wgpu::SurfaceTarget<'static>>,
 		width: u32,
@@ -63,6 +67,10 @@ impl Renderer {
 	}
 
 	/// A renderer for `target`, a surface of `width` × `height` pixels, set up as `config` says
+	///
+	/// # Errors
+	///
+	/// Fails if no GPU can draw to the surface, or the surface can't be set up as `config` asks.
 	pub async fn with_config(
 		target: impl Into<wgpu::SurfaceTarget<'static>>,
 		width: u32,
@@ -239,6 +247,10 @@ impl Renderer {
 	///
 	/// `pre_present` runs right before the frame is handed to the window system, and only if it is, e.g. for
 	/// winit's `Window::pre_present_notify`.
+	///
+	/// # Errors
+	///
+	/// Fails if the surface was lost or is invalid, or the text can't be prepared or drawn.
 	pub fn render(&mut self, fonts: &mut Fonts, pre_present: impl FnOnce()) -> Result<Frame, RendererError> {
 		let (frame, suboptimal) = match self.surface.get_current_texture() {
 			wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),

@@ -26,8 +26,10 @@ pub fn cursor_rect(layers: &[Layer]) -> Option<Rect<u32>> {
 	})
 }
 
-/// A layer showing `preedit` over the cursor's cell and those after it, underlined, in the colors of the cell under the
-/// cursor. The cursor moves into it, to the preedit's caret, or is hidden without one. `None` without a cursor.
+/// A layer showing `preedit` over the cursor's cell and those after it, underlined.
+///
+/// It's in the colors of the cell under the cursor. The cursor moves into it, to the preedit's caret, or is hidden
+/// without one. `None` without a cursor.
 pub fn preedit_layer(layers: &mut [Layer], preedit: &Preedit) -> Option<Layer> {
 	let cursor_layer = layers.iter_mut().rev().find(|layer| layer.cursor.is_some())?;
 	let cursor = cursor_layer.cursor.take()?;

@@ -11,8 +11,8 @@ use crate::{Editor, Placement};
 
 impl Editor {
 	/// The grids shown over grid 1, in Neovim's drawing order, like its own compositor (`:help
-	/// ui-event-win_float_pos`): the windows, then floating windows and the message grid by `compindex`; and over all of
-	/// them, the external windows in their order. Grids that aren't placed aren't shown.
+	/// ui-event-win_float_pos`): the windows, then floating windows and the message grid by `compindex`; and over all
+	/// of them, the external windows in their order. Grids that aren't placed aren't shown.
 	pub(crate) fn stacked(&self) -> Vec<(Grid, &Placement)> {
 		// Sort keys: tiled windows, floats and messages, then external windows; within each, by drawing order or grid id
 		let mut placed: Vec<(Grid, &Placement)> =
@@ -94,9 +94,9 @@ impl Editor {
 		layers
 	}
 
-	/// `layer`, a tiled window, grid 1 or the message grid, with cells in the default background drawing no background of
-	/// their own while the window is see-through, so what's behind the window shows. Floating windows keep theirs, or
-	/// what's under them would show.
+	/// `layer`, a tiled window, grid 1 or the message grid, with cells in the default background drawing no background
+	/// of their own while the window is see-through, so what's behind the window shows. Floating windows keep theirs,
+	/// or what's under them would show.
 	///
 	/// Its cells under `covered` (in cells of the screen), what other grids show over it, are
 	/// left blank then: like in Neovim's own compositor, a screen cell shows only its top grid. Neovim leaves old
@@ -128,7 +128,7 @@ impl Editor {
 		layer
 	}
 
-	/// GridState `id` as a layer at `row`, `col` of the screen, with the cursor if it's in this grid
+	/// Grid `id` as a layer at `row`, `col` of the screen, with the cursor if it's in this grid
 	fn layer(&self, id: Grid, row: u32, col: u32) -> Layer {
 		let cursor = (id == self.cursor_grid).then(|| self.cursor.style()).flatten();
 		let (font, cell) = self.font_of(id);
@@ -140,8 +140,8 @@ impl Editor {
 		layer
 	}
 
-	/// External window `win`, grid `id`, as a layer where it's placed (see [`Editor::set_external_place`]), with `shadow`,
-	/// the shadow drawn with it (see [`Editor::external_shadows`])
+	/// External window `win`, grid `id`, as a layer where it's placed (see [`Editor::set_external_place`]), with
+	/// `shadow`, the shadow drawn with it (see [`Editor::external_shadows`])
 	fn external_layer(&self, id: Grid, win: Window, shadow: Option<LayerShadow>) -> Layer {
 		let mut layer = self.layer(id, 0, 0);
 		let rect = self.external_rect(id, win);

@@ -50,3 +50,10 @@ window_clipboard = "0.5"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+
+[workspace.lints.clippy]
+# Docs: a short summary first, code in backticks, and when a function fails or panics
+doc_markdown = "warn"
+too_long_first_doc_paragraph = "warn"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"

@@ -331,9 +331,10 @@ section! {
 }
 
 section! {
-	/// A line around external windows, just outside them, in logical pixels: not floating windows, which Neovim places
-	/// without room for it. For windows whose `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have one
-	/// only if their `w:sarthi` turns it on.
+	/// A line around external windows, just outside them, in logical pixels.
+	///
+	/// Not around floating windows, which Neovim places without room for it. For windows whose `w:sarthi` is `managed`,
+	/// e.g. opened with |sarthi.api|; others have one only if their `w:sarthi` turns it on.
 	OutlineSettings, window OutlineOptions { enabled: bool, width: f32, highlight: String } {
 		/// Whether windows have one. Off by default: a window with a border of its own (`nvim_open_win()`'s `border`)
 		/// would have two.
@@ -351,9 +352,10 @@ section! {
 }
 
 section! {
-	/// Rounded corners of external windows, in logical pixels: not floating windows, whose text would be cut by them.
-	/// The outline follows them. For windows whose `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have
-	/// them only if their `w:sarthi` turns them on.
+	/// Rounded corners of external windows, in logical pixels.
+	///
+	/// Not of floating windows, whose text would be cut by them. The outline follows them. For windows whose `w:sarthi`
+	/// is `managed`, e.g. opened with |sarthi.api|; others have them only if their `w:sarthi` turns them on.
 	CornerSettings, window CornerOptions { enabled: bool, radius: f32 } {
 		/// Whether windows have them. Off by default: a window's text in its corner cells isn't cut to them.
 		enabled: bool = false,
@@ -368,9 +370,10 @@ section! {
 }
 
 section! {
-	/// Space around external windows' cells, in their background, in logical pixels: not floating windows, which Neovim
-	/// places without room for it. For windows whose `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others
-	/// have it only if their `w:sarthi` turns it on.
+	/// Space around external windows' cells, in their background, in logical pixels.
+	///
+	/// Not around floating windows, which Neovim places without room for it. For windows whose `w:sarthi` is `managed`,
+	/// e.g. opened with |sarthi.api|; others have it only if their `w:sarthi` turns it on.
 	PaddingSettings, window PaddingOptions { enabled: bool, size: PaddingSize } {
 		/// Whether windows have it
 		enabled: bool = false,
@@ -519,6 +522,10 @@ pub struct Filetypes(Vec<glob::Pattern>);
 
 impl Filetypes {
 	/// Compiles `patterns`, or says which one isn't a glob pattern
+	///
+	/// # Errors
+	///
+	/// Fails with the pattern that isn't a glob pattern.
 	pub fn new<'a>(patterns: impl IntoIterator<Item = &'a str>) -> Result<Self, String> {
 		patterns
 			.into_iter()
@@ -548,9 +555,11 @@ impl Serialize for Filetypes {
 	}
 }
 
-/// What a window's `w:sarthi` sets for it: the sections of the settings about a window, with the same keys. Each value
-/// given is the window's, whatever the settings say; but a window whose filetype a section's `exclude_filetypes`
-/// matches never has that section's effect. `exclude_filetypes` itself is only in the settings.
+/// What a window's `w:sarthi` sets for it.
+///
+/// The sections of the settings about a window, with the same keys. Each value given is the window's, whatever the
+/// settings say; but a window whose filetype a section's `exclude_filetypes` matches never has that section's effect.
+/// `exclude_filetypes` itself is only in the settings.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WindowOptions {
@@ -602,6 +611,10 @@ impl Settings {
 	}
 
 	/// Whether the values make sense, beyond their types; the error names the first that doesn't
+	///
+	/// # Errors
+	///
+	/// Fails with what doesn't make sense, e.g. a negative size.
 	pub fn validate(&self) -> Result<(), String> {
 		validate_animation("scroll.animation", self.scroll.animation)?;
 		validate_animation("cursor.animation", self.cursor.animation)?;

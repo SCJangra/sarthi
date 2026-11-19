@@ -29,8 +29,8 @@ use crate::preedit::Preedit;
 /// Neovim's UI state, kept up to date from its redraw events (`:help ui-events`)
 #[derive(Debug)]
 pub struct Editor {
-	/// Neovim's grids (`:help ui-multigrid`). The global grid, [`Grid::GLOBAL`], is the screen: it holds what isn't in a window, like
-	/// window separators, status lines and the command line, and the windows' grids are placed on it.
+	/// Neovim's grids (`:help ui-multigrid`). The global grid, [`Grid::GLOBAL`], is the screen: it holds what isn't in
+	/// a window, like window separators, status lines and the command line, and the windows' grids are placed on it.
 	grids: HashMap<Grid, GridState>,
 
 	/// Where each grid other than grid 1 is shown; grids without one aren't shown yet

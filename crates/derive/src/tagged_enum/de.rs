@@ -178,7 +178,7 @@ fn gen_tag(known: &[EnumVariant]) -> TokenStream {
 }
 
 /// Generates `__IgnoreTrailing<__T>`, which deserializes `__T` from the start of a sequence and skips any
-/// elements after the ones `__T` reads. Neovim may append parameters to existing events, and rmp_serde
+/// elements after the ones `__T` reads. Neovim may append parameters to existing events, and `rmp_serde`
 /// rejects a sequence that isn't read to the end.
 fn gen_ignore_trailing() -> TokenStream {
 	quote! {

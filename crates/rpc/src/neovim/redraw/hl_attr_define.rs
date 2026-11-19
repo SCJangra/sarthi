@@ -13,7 +13,7 @@ pub struct HlAttrDefineEvent {
 	/// Cterm attributes.
 	pub cterm_attr: HlAttrs,
 
-	/// Semantic highlight info (ext_hlstate).
+	/// Semantic highlight info (`ext_hlstate`).
 	pub info: Vec<HlAttrInfo>,
 }
 

@@ -205,6 +205,11 @@ impl RpcClient {
 	}
 
 	/// Calls `M` and waits for Neovim's reply. Never call it from the reader thread, which delivers the reply.
+	///
+	/// # Errors
+	///
+	/// Fails if the call can't be encoded or sent, the connection closes before Neovim answers, Neovim raises an
+	/// error, or the result doesn't decode as `M::Response`.
 	pub fn call<M>(&self, params: M::Params) -> Result<M::Response, RpcError>
 	where
 		M: RpcMethod,
@@ -239,6 +244,10 @@ impl RpcClient {
 
 	/// Calls `M` without waiting for a reply. Neovim processes it in order with other messages and reports errors
 	/// from it with `nvim_error_event`.
+	///
+	/// # Errors
+	///
+	/// Fails if the notification can't be encoded, or the connection to Neovim is closed.
 	pub fn notify<M>(&self, params: M::Params) -> Result<(), RpcError>
 	where
 		M: RpcMethod,

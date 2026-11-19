@@ -13,6 +13,10 @@ pub struct GridCell {
 
 impl GridCell {
 	/// An empty cell, shown as a space
+	///
+	/// # Panics
+	///
+	/// Never: a space fits in a cell.
 	pub fn blank() -> Self {
 		Self { text: CellText::from(" ").expect("a space fits in a cell"), hl_id: HlId::DEFAULT }
 	}

@@ -9,10 +9,10 @@ use crate::external::{Place, Relative};
 use crate::{Editor, Placement};
 
 impl Editor {
-	/// The shadows under the floating windows among `placed`, by the grid of the window each is drawn with. Floats at one
-	/// `zindex` with the same shadow share it, so the windows of a plugin's UI read as one; a float attached to another
-	/// counts at that float's level. A level's first shadow is drawn with its first window, under all of them; another,
-	/// for windows with a shadow of their own, with the first window casting it.
+	/// The shadows under the floating windows among `placed`, by the grid of the window each is drawn with. Floats at
+	/// one `zindex` with the same shadow share it, so the windows of a plugin's UI read as one; a float attached to
+	/// another counts at that float's level. A level's first shadow is drawn with its first window, under all of them;
+	/// another, for windows with a shadow of their own, with the first window casting it.
 	pub(crate) fn float_shadows(&self, placed: &[(Grid, &Placement)]) -> HashMap<Grid, LayerShadow> {
 		let floats: Vec<(Grid, Window, u32, [u32; 2])> = placed
 			.iter()
@@ -63,9 +63,9 @@ impl Editor {
 		groups.into_iter().map(|(_, carrier, group)| (carrier, group)).collect()
 	}
 
-	/// The shadows under the external windows among `placed`, by the grid of the window each is drawn with. Like attached
-	/// floats, external windows placed relative to another external window, and so on, share its shadow if it's the same,
-	/// so windows put together read as one; it's drawn with the first of them, under all of them.
+	/// The shadows under the external windows among `placed`, by the grid of the window each is drawn with. Like
+	/// attached floats, external windows placed relative to another external window, and so on, share its shadow if
+	/// it's the same, so windows put together read as one; it's drawn with the first of them, under all of them.
 	pub(crate) fn external_shadows(&self, placed: &[(Grid, &Placement)]) -> HashMap<Grid, LayerShadow> {
 		let grid_of = |win: Window| {
 			let (&grid, _) = self.viewports.iter().find(|(_, viewport)| viewport.win == Some(win))?;

@@ -9,3 +9,6 @@ rpc = { workspace = true }
 rmpv = { workspace = true }
 rmp-serde = { workspace = true }
 serde = { workspace = true }
+
+[lints]
+workspace = true

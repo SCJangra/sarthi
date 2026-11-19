@@ -1,4 +1,5 @@
-//! The fonts text is drawn with: the bundled and system families of `guifont`, their faces and metrics, the size of a cell, and which face draws each character
+//! The fonts text is drawn with: the bundled and system families of `guifont`, their faces and metrics, the size of a
+//! cell, and which face draws each character
 
 use std::sync::Arc;
 
@@ -127,8 +128,10 @@ impl FontId {
 	pub const MAIN: Self = Self(0);
 }
 
-/// The fonts text is drawn with, in sets: the main set (the bundled font unless chosen otherwise) and any others, each
-/// with its own size. The system's fonts are the fallback for characters a set doesn't have (e.g. CJK and emoji).
+/// The fonts text is drawn with, in sets.
+///
+/// The main set is the bundled font unless chosen otherwise; any others, e.g. external windows', each have their own
+/// size. The system's fonts are the fallback for characters a set doesn't have (e.g. CJK and emoji).
 pub struct Fonts {
 	pub(crate) system: FontSystem,
 
@@ -187,6 +190,10 @@ impl Face {
 impl Fonts {
 	/// Loads the bundled font and finds the system's fonts, which takes a few milliseconds. The main set is the bundled
 	/// font at 14 pixels until chosen and sized otherwise.
+	///
+	/// # Panics
+	///
+	/// Never: the bundled font is part of the binary.
 	pub fn new() -> Self {
 		let mut system = FontSystem::new();
 		for face in FACES {
@@ -202,6 +209,10 @@ impl Fonts {
 	/// Draws the main set's text with the fonts of `choice`. Families that aren't installed are skipped, like in a list
 	/// of alternatives; `monospace` is the bundled font. If none is installed, or the main font can't be used, nothing
 	/// changes.
+	///
+	/// # Errors
+	///
+	/// Fails if none of the fonts is installed, or the main one has no usable metrics.
 	pub fn choose(&mut self, choice: &FontChoice) -> Result<(), FontError> {
 		let (faces, em) = resolve(&mut self.system, choice)?;
 		let main = &mut self.sets[0];
@@ -212,6 +223,10 @@ impl Fonts {
 	}
 
 	/// A set of the fonts of `choice` at `size`, chosen like [`Fonts::choose`] does: an equal set if there's one already
+	///
+	/// # Errors
+	///
+	/// Fails like [`Fonts::choose`], or if there are as many sets as [`FontId`] can number.
 	pub fn add(&mut self, choice: &FontChoice, size: TextSize) -> Result<FontId, FontError> {
 		if let Some(index) = self.sets.iter().position(|set| set.choice == *choice && set.size == size) {
 			return Ok(FontId(index as u16));

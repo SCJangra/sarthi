@@ -31,6 +31,10 @@ impl Nvim {
 	/// Starts Neovim, `program`, embedded, with `args` too, e.g. files to edit, in environment `env`, or sarthi's for
 	/// `None`. Returns it and what it sends unasked (notifications, and requests from sarthi's Lua), which ends once
 	/// Neovim exits.
+	///
+	/// # Errors
+	///
+	/// Fails if Neovim can't be started.
 	pub fn start(
 		program: &OsStr,
 		args: &[impl AsRef<OsStr>],
@@ -67,26 +71,46 @@ impl Nvim {
 	}
 
 	/// The id of the channel sarthi and Neovim talk on, e.g. for Lua code that calls back with `rpcrequest()`
+	///
+	/// # Errors
+	///
+	/// Fails if the connection to Neovim closes before it answers, or Neovim raises an error.
 	pub fn channel(&self) -> Result<u64, Error> {
 		Ok(self.rpc.call::<GetChanInfo>([0]).map_err(Error::Rpc)?.id)
 	}
 
 	/// Sets the global variable `g:name` (`vim.g.name` in Lua) to `value`, without waiting for Neovim
+	///
+	/// # Errors
+	///
+	/// Fails once the connection to Neovim is closed.
 	pub fn set_var<V: Serialize>(&self, name: &str, value: V) -> Result<(), Error> {
 		self.rpc.notify::<SetVar<V>>((name.to_owned(), value)).map_err(Error::Rpc)
 	}
 
 	/// Identifies the client to Neovim, e.g. for Lua code looking for its channel
+	///
+	/// # Errors
+	///
+	/// Fails once the connection to Neovim is closed.
 	pub fn set_client_info(&self, info: ClientInfo) -> Result<(), Error> {
 		self.rpc.notify::<SetClientInfo>(info).map_err(Error::Rpc)
 	}
 
 	/// Shows `message` as an error in Neovim (`vim.notify()` at ERROR level), without waiting for it
+	///
+	/// # Errors
+	///
+	/// Fails once the connection to Neovim is closed.
 	pub fn show_error(&self, message: &str) -> Result<(), Error> {
 		self.show("ERROR", message)
 	}
 
 	/// Shows `message` as a warning in Neovim (`vim.notify()` at WARN level), without waiting for it
+	///
+	/// # Errors
+	///
+	/// Fails once the connection to Neovim is closed.
 	pub fn show_warning(&self, message: &str) -> Result<(), Error> {
 		self.show("WARN", message)
 	}
@@ -97,6 +121,11 @@ impl Nvim {
 	}
 
 	/// Runs Lua `code` in Neovim with `args`, a tuple (`()` for none) the code gets as `...`, and waits for its result
+	///
+	/// # Errors
+	///
+	/// Fails if the connection to Neovim closes before it answers, or Neovim raises an error Also if the result doesn't
+	/// decode as `R`.
 	pub fn exec_lua<R: DeserializeOwned>(&self, code: &str, args: impl Serialize) -> Result<R, Error> {
 		let args = match rmpv::ext::to_value(args).map_err(|error| Error::Rpc(error.into()))? {
 			rmpv::Value::Array(args) => args,
@@ -108,37 +137,65 @@ impl Nvim {
 	}
 
 	/// Attaches as a UI and waits until Neovim accepted it
+	///
+	/// # Errors
+	///
+	/// Fails if the connection to Neovim closes before it answers, or Neovim raises an error.
 	pub fn ui_attach(&self, params: UiAttachParams) -> Result<rmpv::Value, Error> {
 		self.rpc.call::<UiAttach>(params).map_err(Error::Rpc)
 	}
 
 	/// Asks Neovim to resize the UI, without waiting for it: the new size arrives with the redraws
+	///
+	/// # Errors
+	///
+	/// Fails once the connection to Neovim is closed.
 	pub fn ui_try_resize(&self, params: UiTryResizeParams) -> Result<(), Error> {
 		self.rpc.notify::<UiTryResize>(params).map_err(Error::Rpc)
 	}
 
 	/// Asks Neovim to resize the window of a grid, without waiting for it: the new size arrives with the redraws
+	///
+	/// # Errors
+	///
+	/// Fails once the connection to Neovim is closed.
 	pub fn ui_try_resize_grid(&self, params: UiTryResizeGridParams) -> Result<(), Error> {
 		self.rpc.notify::<UiTryResizeGrid>(params).map_err(Error::Rpc)
 	}
 
 	/// Types `keys`, in `:help key-notation`, without waiting for Neovim to process them
+	///
+	/// # Errors
+	///
+	/// Fails once the connection to Neovim is closed.
 	pub fn input(&self, keys: &str) -> Result<(), Error> {
 		self.rpc.notify::<Input>([keys.to_owned()]).map_err(Error::Rpc)
 	}
 
 	/// Asks Neovim to quit as `:confirm qa` does, like gVim's close button: it asks about unsaved changes first, and
 	/// may not quit. Typed as keys, so Neovim takes it in any mode, without waiting for it.
+	///
+	/// # Errors
+	///
+	/// Fails once the connection to Neovim is closed.
 	pub fn ask_to_quit(&self) -> Result<(), Error> {
 		self.input("<Cmd>confirm qa<CR>")
 	}
 
 	/// Sends a mouse event, without waiting for Neovim to process it
+	///
+	/// # Errors
+	///
+	/// Fails once the connection to Neovim is closed.
 	pub fn input_mouse(&self, params: InputMouseParams) -> Result<(), Error> {
 		self.rpc.notify::<InputMouse>(params).map_err(Error::Rpc)
 	}
 
 	/// Tells Neovim whether the UI has focus, for `FocusGained` and `FocusLost` autocommands
+	///
+	/// # Errors
+	///
+	/// Fails once the connection to Neovim is closed.
 	pub fn ui_set_focus(&self, focused: bool) -> Result<(), Error> {
 		self.rpc.notify::<UiSetFocus>([focused]).map_err(Error::Rpc)
 	}

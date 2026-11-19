@@ -14,3 +14,6 @@ thiserror = { workspace = true }
 flume = { workspace = true }
 sarthi-derive = { path = "../derive" }
 tracing = { workspace = true }
+
+[lints]
+workspace = true

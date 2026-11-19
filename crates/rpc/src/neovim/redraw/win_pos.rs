@@ -20,7 +20,9 @@ pub struct WinPosEvent {
 	pub height: u32,
 }
 
-/// Shows `grid` as a floating window. Neovim places it at `screen_row`, `screen_col` and orders the floats by
+/// Shows `grid` as a floating window.
+///
+/// Neovim places it at `screen_row`, `screen_col` and orders the floats by
 /// `compindex`; the anchor describes how it's positioned relative to `anchor_grid`, for UIs placing it themselves.
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -48,8 +50,10 @@ pub struct WinFloatPosEvent {
 	pub screen_col: u32,
 }
 
-/// Shows `grid` as an external window (`nvim_open_win` with `external`), which the UI places and sizes itself; its size
-/// comes with `grid_resize`. Sent again on resizes and tab switches: external windows show on every tab.
+/// Shows `grid` as an external window (`nvim_open_win` with `external`).
+///
+/// The UI places and sizes it itself; its size comes with `grid_resize`. Sent again on resizes and tab switches:
+/// external windows show on every tab.
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinExternalPosEvent {

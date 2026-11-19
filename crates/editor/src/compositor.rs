@@ -7,8 +7,10 @@ use crate::cursor::CursorStyle;
 use crate::grid::GridState;
 use crate::highlight::HighlightState;
 
-/// A snapshot of `grid` for the renderer, in the main fonts' cells of `cell`, with every cell's highlight resolved and,
-/// unless `cursor` is `None`, the cursor at the grid's cursor position. It's at the window's top-left corner with id 0, until placed and named.
+/// A snapshot of `grid` for the renderer, with every cell's highlight resolved.
+///
+/// Its cells are the main fonts' cells of `cell`; unless `cursor` is `None`, the cursor is at the grid's cursor
+/// position. It's at the window's top-left corner with id 0, until placed and named.
 pub fn cell_layer(grid: &GridState, highlights: &HighlightState, cursor: Option<CursorStyle>, cell: CellSize) -> Layer {
 	let cells = grid
 		.cells

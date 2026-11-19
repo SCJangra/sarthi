@@ -43,8 +43,8 @@ impl Editor {
 		self.grid_at_cell(row, col)
 	}
 
-	/// The grid shown at cell `row`, `col` of the screen, and that cell in it, among the grids on the screen's cells (not
-	/// the external windows)
+	/// The grid shown at cell `row`, `col` of the screen, and that cell in it, among the grids on the screen's cells
+	/// (not the external windows)
 	fn grid_at_cell(&self, row: u32, col: u32) -> Option<GridPosition> {
 		let screen_height = self.grids.get(&Grid::GLOBAL).map_or(0, |grid| grid.height);
 		let covers = |id: Grid, top: u32, left: u32, bottom: u32| {
@@ -80,8 +80,8 @@ impl Editor {
 		})
 	}
 
-	/// The cell of grid `id` at `x`, `y` in pixels from the window's top-left corner, as (row, column): negative or past
-	/// the grid's edges when outside it, e.g. while dragging. `None` if the grid isn't shown.
+	/// The cell of grid `id` at `x`, `y` in pixels from the window's top-left corner, as (row, column): negative or
+	/// past the grid's edges when outside it, e.g. while dragging. `None` if the grid isn't shown.
 	pub fn grid_cell(&self, id: Grid, x: f64, y: f64) -> Option<(i64, i64)> {
 		let ([left, top], cell) = match self.placements.get(&id) {
 			Some(Placement::External { win, .. }) => {

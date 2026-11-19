@@ -13,7 +13,7 @@ pub struct Window(pub i64);
 /// Neovim's extension type for window handles (`nvim_get_api_info()`'s `types`)
 const WINDOW_EXT: i8 = 1;
 
-/// The name rmp_serde and rmpv decode msgpack extensions through, as `(type, bytes)`
+/// The name `rmp_serde` and `rmpv` decode msgpack extensions through, as `(type, bytes)`
 const EXT_STRUCT: &str = "_ExtStruct";
 
 impl<'de> Deserialize<'de> for Window {

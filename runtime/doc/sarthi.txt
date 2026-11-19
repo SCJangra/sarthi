@@ -158,10 +158,10 @@ shadow.exclude_filetypes                     *sarthi-shadow.exclude_filetypes*
 ------------------------------------------------------------------------------
 OUTLINE                                                       *sarthi-outline*
 
-A line around external windows, just outside them, in logical pixels: not
-floating windows, which Neovim places without room for it. For windows whose
-`w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have one only
-if their `w:sarthi` turns it on.
+A line around external windows, just outside them, in logical pixels. Not
+around floating windows, which Neovim places without room for it. For windows
+whose `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have one
+only if their `w:sarthi` turns it on.
 
 Per window too, in `w:sarthi.outline` or `sarthi.outline` (|sarthi.api|):
 `enabled`, `width`, `highlight`. Each is the window's, whatever the setting's,
@@ -192,10 +192,10 @@ outline.exclude_filetypes                   *sarthi-outline.exclude_filetypes*
 ------------------------------------------------------------------------------
 CORNERS                                                       *sarthi-corners*
 
-Rounded corners of external windows, in logical pixels: not floating windows,
-whose text would be cut by them. The outline follows them. For windows whose
-`w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have them only
-if their `w:sarthi` turns them on.
+Rounded corners of external windows, in logical pixels. Not of floating
+windows, whose text would be cut by them. The outline follows them. For
+windows whose `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others
+have them only if their `w:sarthi` turns them on.
 
 Per window too, in `w:sarthi.corners` or `sarthi.corners` (|sarthi.api|):
 `enabled`, `radius`. Each is the window's, whatever the setting's, but
@@ -221,10 +221,10 @@ corners.exclude_filetypes                   *sarthi-corners.exclude_filetypes*
 ------------------------------------------------------------------------------
 PADDING                                                       *sarthi-padding*
 
-Space around external windows' cells, in their background, in logical pixels:
-not floating windows, which Neovim places without room for it. For windows
-whose `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others have it
-only if their `w:sarthi` turns it on.
+Space around external windows' cells, in their background, in logical pixels.
+Not around floating windows, which Neovim places without room for it. For
+windows whose `w:sarthi` is `managed`, e.g. opened with |sarthi.api|; others
+have it only if their `w:sarthi` turns it on.
 
 Per window too, in `w:sarthi.padding` or `sarthi.padding` (|sarthi.api|):
 `enabled`, `size`. Each is the window's, whatever the setting's, but

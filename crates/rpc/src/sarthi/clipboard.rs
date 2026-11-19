@@ -11,8 +11,10 @@ pub struct Copied {
 	pub regtype: String,
 }
 
-/// What a paste returns to Neovim: the lines and their type when sarthi copied them, so e.g. lines copied linewise
-/// paste linewise; otherwise only the lines, and Neovim takes a trailing empty line as linewise.
+/// What a paste returns to Neovim.
+///
+/// The lines and their type when sarthi copied them, so e.g. lines copied linewise paste linewise; otherwise only the
+/// lines, and Neovim takes a trailing empty line as linewise.
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Paste {
