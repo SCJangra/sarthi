@@ -1,10 +1,11 @@
+use crate::HlId;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct HlAttrDefineEvent {
 	/// Highlight id.
-	pub id: u32,
+	pub id: HlId,
 
 	/// RGB attributes.
 	pub rgb_attr: HlAttrs,
@@ -134,7 +135,7 @@ mod tests {
 	#[test]
 	fn de_hl_attr_define() {
 		let expected = RedrawNotification::HlAttrDefine(vec![HlAttrDefineEvent {
-			id: 1,
+			id: crate::HlId(1),
 			rgb_attr: HlAttrs {
 				foreground: Some(10),
 				background: None,

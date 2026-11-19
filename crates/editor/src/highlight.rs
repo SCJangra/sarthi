@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use renderer::Underline;
-use rpc::neovim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent};
+use rpc::neovim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, HlId};
 
 /// Default colors until Neovim sends its own, matching what Neovim uses when none are set
 const INITIAL_DEFAULT_COLORS: DefaultColors =
@@ -41,9 +41,9 @@ pub struct CellStyle {
 pub struct HighlightState {
 	/// RGB attributes by highlight id. Colors a highlight doesn't set stay `None`, so they follow the
 	/// default colors even when those change later.
-	attrs: HashMap<u32, HlAttrs>,
+	attrs: HashMap<HlId, HlAttrs>,
 	defaults: DefaultColors,
-	groups: HashMap<String, u32>,
+	groups: HashMap<String, HlId>,
 }
 
 impl Default for HighlightState {
@@ -80,15 +80,15 @@ impl HighlightState {
 
 	/// The highlight id of Neovim's UI highlight group `name` (`:help highlight-groups`), or 0, the default highlight,
 	/// until Neovim sends it with `hl_group_set`
-	pub fn group(&self, name: &str) -> u32 {
-		self.groups.get(name).copied().unwrap_or(0)
+	pub fn group(&self, name: &str) -> HlId {
+		self.groups.get(name).copied().unwrap_or_default()
 	}
 
 	/// The style of cells with highlight `hl_id`. Id 0 is the default highlight: the default colors and no
 	/// styles. An id that hasn't been defined is treated the same way.
-	pub fn resolve(&self, hl_id: u32) -> CellStyle {
+	pub fn resolve(&self, hl_id: HlId) -> CellStyle {
 		let defaults = self.defaults;
-		let attrs = (hl_id != 0).then(|| self.attrs.get(&hl_id)).flatten();
+		let attrs = (hl_id != HlId::DEFAULT).then(|| self.attrs.get(&hl_id)).flatten();
 
 		let Some(attrs) = attrs else {
 			return CellStyle {
@@ -139,7 +139,7 @@ fn underline(attrs: &HlAttrs) -> Option<Underline> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-	use rpc::neovim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs};
+	use rpc::neovim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs, HlId};
 
 	use super::{CellStyle, DefaultColors, HighlightState, INITIAL_DEFAULT_COLORS};
 	use renderer::Underline;
@@ -153,7 +153,7 @@ pub(crate) mod tests {
 	}
 
 	fn define(id: u32, rgb_attr: HlAttrs) -> HlAttrDefineEvent {
-		HlAttrDefineEvent { id, rgb_attr: rgb_attr.clone(), cterm_attr: rgb_attr, info: vec![] }
+		HlAttrDefineEvent { id: HlId(id), rgb_attr: rgb_attr.clone(), cterm_attr: rgb_attr, info: vec![] }
 	}
 
 	/// Attributes that set nothing
@@ -205,7 +205,7 @@ pub(crate) mod tests {
 	fn initial_defaults() {
 		let state = HighlightState::new();
 		assert_eq!(state.defaults(), INITIAL_DEFAULT_COLORS);
-		assert_eq!(state.resolve(0).background, 0x000000);
+		assert_eq!(state.resolve(HlId(0)).background, 0x000000);
 	}
 
 	#[test]
@@ -217,19 +217,19 @@ pub(crate) mod tests {
 
 	#[test]
 	fn default_highlight() {
-		assert_eq!(state().resolve(0), plain(FG, BG));
+		assert_eq!(state().resolve(HlId(0)), plain(FG, BG));
 	}
 
 	#[test]
 	fn id_zero_ignores_a_definition() {
 		let mut state = state();
 		state.set_attrs(vec![define(0, HlAttrs { foreground: Some(0x123456), bold: true, ..attrs() })]);
-		assert_eq!(state.resolve(0), plain(FG, BG));
+		assert_eq!(state.resolve(HlId(0)), plain(FG, BG));
 	}
 
 	#[test]
 	fn undefined_id() {
-		assert_eq!(state().resolve(42), plain(FG, BG));
+		assert_eq!(state().resolve(HlId(42)), plain(FG, BG));
 	}
 
 	#[test]
@@ -245,14 +245,14 @@ pub(crate) mod tests {
 		};
 		state.set_attrs(vec![define(5, highlight)]);
 		let expected = CellStyle { special: 0x778899, bold: true, italic: true, ..plain(0x112233, 0x445566) };
-		assert_eq!(state.resolve(5), expected);
+		assert_eq!(state.resolve(HlId(5)), expected);
 	}
 
 	#[test]
 	fn missing_colors_use_defaults() {
 		let mut state = state();
 		state.set_attrs(vec![define(5, HlAttrs { foreground: Some(0x112233), ..attrs() })]);
-		assert_eq!(state.resolve(5), plain(0x112233, BG));
+		assert_eq!(state.resolve(HlId(5)), plain(0x112233, BG));
 	}
 
 	#[test]
@@ -262,9 +262,9 @@ pub(crate) mod tests {
 			define(1, HlAttrs { blend: Some(30), ..attrs() }),
 			define(2, HlAttrs { blend: Some(250), ..attrs() }),
 		]);
-		assert_eq!((state.resolve(0).blend, state.resolve(1).blend), (0, 30));
+		assert_eq!((state.resolve(HlId(0)).blend, state.resolve(HlId(1)).blend), (0, 30));
 		// At most all of it
-		assert_eq!(state.resolve(2).blend, 100);
+		assert_eq!(state.resolve(HlId(2)).blend, 100);
 	}
 
 	#[test]
@@ -275,8 +275,8 @@ pub(crate) mod tests {
 			define(1, HlAttrs { reverse: true, ..attrs() }),
 			define(2, HlAttrs { foreground: Some(0x112233), reverse: true, ..attrs() }),
 		]);
-		assert_eq!(state.resolve(1), plain(BG, FG));
-		assert_eq!(state.resolve(2), plain(BG, 0x112233));
+		assert_eq!(state.resolve(HlId(1)), plain(BG, FG));
+		assert_eq!(state.resolve(HlId(2)), plain(BG, 0x112233));
 	}
 
 	#[test]
@@ -285,7 +285,7 @@ pub(crate) mod tests {
 		state.set_attrs(vec![define(5, HlAttrs { foreground: Some(0x112233), ..attrs() })]);
 		state.set_default_colors(vec![colors(0xEEEEEE, 0x222222, 0x00FF00)]);
 		let expected = CellStyle { special: 0x00FF00, ..plain(0x112233, 0x222222) };
-		assert_eq!(state.resolve(5), expected);
+		assert_eq!(state.resolve(HlId(5)), expected);
 	}
 
 	#[test]
@@ -293,20 +293,20 @@ pub(crate) mod tests {
 		let mut state = state();
 		state.set_attrs(vec![define(5, HlAttrs { bold: true, ..attrs() })]);
 		state.set_attrs(vec![define(5, HlAttrs { italic: true, ..attrs() })]);
-		assert_eq!(state.resolve(5), CellStyle { italic: true, ..plain(FG, BG) });
+		assert_eq!(state.resolve(HlId(5)), CellStyle { italic: true, ..plain(FG, BG) });
 	}
 
 	#[test]
 	fn uses_rgb_attributes() {
 		let mut state = state();
 		let event = HlAttrDefineEvent {
-			id: 5,
+			id: HlId(5),
 			rgb_attr: HlAttrs { foreground: Some(0x112233), ..attrs() },
 			cterm_attr: HlAttrs { foreground: Some(9), bold: true, ..attrs() },
 			info: vec![],
 		};
 		state.set_attrs(vec![event]);
-		assert_eq!(state.resolve(5), plain(0x112233, BG));
+		assert_eq!(state.resolve(HlId(5)), plain(0x112233, BG));
 	}
 
 	#[test]
@@ -323,16 +323,19 @@ pub(crate) mod tests {
 		]);
 
 		assert_eq!(
-			state.resolve(1),
+			state.resolve(HlId(1)),
 			CellStyle { underline: Some(Underline::Single), special: 0x00FF00, ..plain(FG, BG) }
 		);
 		assert_eq!(
-			state.resolve(2),
+			state.resolve(HlId(2)),
 			CellStyle { underline: Some(Underline::Curly), strikethrough: true, ..plain(FG, BG) }
 		);
-		assert_eq!(state.resolve(3), CellStyle { underline: Some(Underline::Double), overline: true, ..plain(FG, BG) });
-		assert_eq!(state.resolve(4).underline, Some(Underline::Dotted));
-		assert_eq!(state.resolve(5).underline, Some(Underline::Dashed));
-		assert_eq!(state.resolve(6).underline, Some(Underline::Curly));
+		assert_eq!(
+			state.resolve(HlId(3)),
+			CellStyle { underline: Some(Underline::Double), overline: true, ..plain(FG, BG) }
+		);
+		assert_eq!(state.resolve(HlId(4)).underline, Some(Underline::Dotted));
+		assert_eq!(state.resolve(HlId(5)).underline, Some(Underline::Dashed));
+		assert_eq!(state.resolve(HlId(6)).underline, Some(Underline::Curly));
 	}
 }

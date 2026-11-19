@@ -1,5 +1,5 @@
 use renderer::{BarOrientation, CellSize, Cursor, Decoration, FontId, Layer, RenderCell, TextStyle};
-use rpc::neovim::CursorShape;
+use rpc::neovim::{CursorShape, HlId};
 
 use crate::cursor::CursorStyle;
 use crate::grid::GridState;
@@ -61,7 +61,7 @@ fn draw_cursor(layer: &mut Layer, row: u32, col: u32, style: CursorStyle, highli
 	// A double-width character also covers the next cell, which is empty.
 	let double_width = col + 1 < width && layer.cells[index + 1].text.is_empty();
 
-	let (text_color, color) = if style.attr_id == 0 {
+	let (text_color, color) = if style.attr_id == HlId::DEFAULT {
 		(cell.background, cell.style.foreground)
 	} else {
 		let colors = highlights.resolve(style.attr_id);
@@ -83,7 +83,7 @@ fn draw_cursor(layer: &mut Layer, row: u32, col: u32, style: CursorStyle, highli
 #[cfg(test)]
 mod tests {
 	use renderer::{BarOrientation, CellSize, Cursor, TextStyle};
-	use rpc::neovim::{CellText, CursorShape, DefaultColorsSetEvent, GridCell, HlAttrDefineEvent, HlAttrs};
+	use rpc::neovim::{CellText, CursorShape, DefaultColorsSetEvent, GridCell, HlAttrDefineEvent, HlAttrs, HlId};
 
 	use super::cell_layer;
 	use crate::cursor::CursorStyle;
@@ -106,15 +106,15 @@ mod tests {
 		let reverse = HlAttrs { reverse: true, italic: true, ..attrs() };
 		let cursor = HlAttrs { foreground: Some(CURSOR_FG), background: Some(CURSOR_BG), ..attrs() };
 		state.set_attrs(vec![
-			HlAttrDefineEvent { id: 1, rgb_attr: bold.clone(), cterm_attr: bold, info: vec![] },
-			HlAttrDefineEvent { id: 2, rgb_attr: reverse.clone(), cterm_attr: reverse, info: vec![] },
-			HlAttrDefineEvent { id: 3, rgb_attr: cursor.clone(), cterm_attr: cursor, info: vec![] },
+			HlAttrDefineEvent { id: HlId(1), rgb_attr: bold.clone(), cterm_attr: bold, info: vec![] },
+			HlAttrDefineEvent { id: HlId(2), rgb_attr: reverse.clone(), cterm_attr: reverse, info: vec![] },
+			HlAttrDefineEvent { id: HlId(3), rgb_attr: cursor.clone(), cterm_attr: cursor, info: vec![] },
 		]);
 		state
 	}
 
 	fn cell(text: &str, hl_id: Option<u32>) -> GridCell {
-		GridCell { text: CellText::from(text).unwrap(), hl_id, repeat: None }
+		GridCell { text: CellText::from(text).unwrap(), hl_id: hl_id.map(HlId), repeat: None }
 	}
 
 	#[test]
@@ -146,7 +146,7 @@ mod tests {
 	}
 
 	fn style(shape: CursorShape, percentage: u32, attr_id: u32) -> CursorStyle {
-		CursorStyle { shape, percentage, attr_id, animate: true, outline: false }
+		CursorStyle { shape, percentage, attr_id: HlId(attr_id), animate: true, outline: false }
 	}
 
 	/// A 4×1 grid "ab漢" (the last cell is the right half of 漢) with the cursor at `col`

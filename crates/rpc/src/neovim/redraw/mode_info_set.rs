@@ -41,7 +41,11 @@ mod tests {
 		let expected = RedrawNotification::ModeInfoSet(vec![ModeInfoSetEvent {
 			cursor_style_enabled: true,
 			mode_info: vec![
-				ModeInfo { cursor_shape: Some(CursorShape::Block), cell_percentage: Some(0), attr_id: Some(7) },
+				ModeInfo {
+					cursor_shape: Some(CursorShape::Block),
+					cell_percentage: Some(0),
+					attr_id: Some(crate::HlId(7)),
+				},
 				ModeInfo { cursor_shape: Some(CursorShape::Vertical), cell_percentage: Some(25), attr_id: None },
 			],
 		}]);

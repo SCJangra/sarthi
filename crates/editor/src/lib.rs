@@ -1115,9 +1115,9 @@ mod tests {
 	use renderer::{CellSize, Cursor, CursorShape, Edges, FontId, Layer, Motion, Shadow};
 	use rpc::neovim::{
 		CellText, DefaultColorsSetEvent, Grid, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
-		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, MsgSetPosEvent, OptionSetEvent, OptionValue,
-		RedrawNotification, WinCloseEvent, WinExternalPosEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent,
-		WinViewportEvent, WinViewportMarginsEvent, Window,
+		GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, HlId, MsgSetPosEvent, OptionSetEvent,
+		OptionValue, RedrawNotification, WinCloseEvent, WinExternalPosEvent, WinFloatPosEvent, WinHideEvent,
+		WinPosEvent, WinViewportEvent, WinViewportMarginsEvent, Window,
 	};
 	use serde::de::IgnoredAny;
 
@@ -1332,12 +1332,15 @@ mod tests {
 		let separator = HlAttrs { foreground: Some(0x00FF00), ..crate::highlight::tests::attrs() };
 		let events = vec![
 			RedrawNotification::HlAttrDefine(vec![HlAttrDefineEvent {
-				id: 9,
+				id: HlId(9),
 				rgb_attr: separator.clone(),
 				cterm_attr: separator,
 				info: vec![],
 			}]),
-			RedrawNotification::HlGroupSet(vec![HlGroupSetEvent { name: String::from("MsgSeparator"), hl_id: 9 }]),
+			RedrawNotification::HlGroupSet(vec![HlGroupSetEvent {
+				name: String::from("MsgSeparator"),
+				hl_id: HlId(9),
+			}]),
 			messages(2, true, 1),
 		];
 		let redraw = flush(&mut editor, events);
@@ -1459,8 +1462,8 @@ mod tests {
 		// In the window, a cell with its own background stays opaque.
 		let attrs = crate::highlight::tests::attrs;
 		let rgb_attr = HlAttrs { background: Some(0x123456), ..attrs() };
-		let colored = HlAttrDefineEvent { id: 1, rgb_attr, cterm_attr: attrs(), info: vec![] };
-		let cell = GridCell { text: CellText::from("a").unwrap(), hl_id: Some(1), repeat: None };
+		let colored = HlAttrDefineEvent { id: HlId(1), rgb_attr, cterm_attr: attrs(), info: vec![] };
+		let cell = GridCell { text: CellText::from("a").unwrap(), hl_id: Some(HlId(1)), repeat: None };
 		let line = GridLineEvent { grid: Grid(2), row: 0, col_start: 0, cells: vec![cell], wrap: false };
 		let events = vec![RedrawNotification::HlAttrDefine(vec![colored]), RedrawNotification::GridLine(vec![line])];
 		let redraw = flush(&mut editor, events);

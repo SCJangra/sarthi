@@ -1,4 +1,5 @@
 use crate::Grid;
+use crate::HlId;
 use arrayvec::ArrayString;
 use serde::Deserialize;
 
@@ -23,7 +24,7 @@ pub struct GridLineEvent {
 pub struct GridCell {
 	pub text: CellText,
 	#[serde(default)]
-	pub hl_id: Option<u32>,
+	pub hl_id: Option<HlId>,
 	#[serde(default)]
 	pub repeat: Option<u32>,
 }
@@ -40,9 +41,9 @@ mod tests {
 			row: 0,
 			col_start: 0,
 			cells: vec![
-				GridCell { text: CellText::from("a").unwrap(), hl_id: Some(1), repeat: Some(2) },
+				GridCell { text: CellText::from("a").unwrap(), hl_id: Some(crate::HlId(1)), repeat: Some(2) },
 				GridCell { text: CellText::from("b").unwrap(), hl_id: None, repeat: None },
-				GridCell { text: CellText::from("c").unwrap(), hl_id: Some(3), repeat: None },
+				GridCell { text: CellText::from("c").unwrap(), hl_id: Some(crate::HlId(3)), repeat: None },
 			],
 			wrap: true,
 		}]);
@@ -64,7 +65,7 @@ mod tests {
 			row: 0,
 			col_start: 0,
 			cells: vec![
-				GridCell { text: CellText::from("中").unwrap(), hl_id: Some(1), repeat: None },
+				GridCell { text: CellText::from("中").unwrap(), hl_id: Some(crate::HlId(1)), repeat: None },
 				GridCell { text: CellText::new(), hl_id: None, repeat: None },
 				GridCell { text: CellText::from("e\u{301}").unwrap(), hl_id: None, repeat: None },
 			],

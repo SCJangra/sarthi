@@ -1,4 +1,4 @@
-use rpc::neovim::{CursorShape, ModeInfo};
+use rpc::neovim::{CursorShape, HlId, ModeInfo};
 
 /// How Neovim wants the cursor drawn, from `mode_info_set`, `mode_change`, `busy_start` and `busy_stop`
 /// (`:help ui-event-mode_info_set`)
@@ -49,7 +49,7 @@ pub struct CursorStyle {
 	pub percentage: u32,
 
 	/// Highlight for the cursor's colors; 0 means the cell's colors swapped
-	pub attr_id: u32,
+	pub attr_id: HlId,
 
 	/// Whether moving here animates
 	pub animate: bool,
@@ -96,7 +96,8 @@ impl CursorState {
 		}
 
 		let (animate, outline) = (self.focused && self.animates(), !self.focused);
-		let block = CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: 0, animate, outline };
+		let block =
+			CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: HlId::DEFAULT, animate, outline };
 		let Some(mode) = self.modes.get(self.mode).filter(|_| self.style_enabled) else {
 			return Some(block);
 		};
@@ -120,16 +121,16 @@ impl CursorState {
 
 #[cfg(test)]
 mod tests {
-	use rpc::neovim::{CursorShape, ModeInfo};
+	use rpc::neovim::{CursorShape, HlId, ModeInfo};
 
 	use super::{CursorState, CursorStyle};
 
 	const BLOCK: CursorStyle =
-		CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: 0, animate: true, outline: false };
+		CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: HlId(0), animate: true, outline: false };
 
 	fn modes() -> Vec<ModeInfo> {
 		vec![
-			ModeInfo { cursor_shape: Some(CursorShape::Block), cell_percentage: Some(0), attr_id: Some(7) },
+			ModeInfo { cursor_shape: Some(CursorShape::Block), cell_percentage: Some(0), attr_id: Some(HlId(7)) },
 			ModeInfo { cursor_shape: Some(CursorShape::Vertical), cell_percentage: Some(25), attr_id: None },
 			ModeInfo { cursor_shape: None, cell_percentage: None, attr_id: None },
 		]
@@ -145,7 +146,10 @@ mod tests {
 		let mut cursor = CursorState::default();
 		cursor.set_modes(true, modes());
 
-		assert_eq!(cursor.style(), Some(CursorStyle { shape: CursorShape::Block, percentage: 0, attr_id: 7, ..BLOCK }));
+		assert_eq!(
+			cursor.style(),
+			Some(CursorStyle { shape: CursorShape::Block, percentage: 0, attr_id: HlId(7), ..BLOCK })
+		);
 
 		cursor.set_mode(1, "insert");
 		assert_eq!(cursor.style(), Some(CursorStyle { shape: CursorShape::Vertical, percentage: 25, ..BLOCK }));

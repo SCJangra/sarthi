@@ -14,7 +14,7 @@ use editor::Editor;
 use flume::Receiver;
 use rpc::client::{Error as RpcError, Message, Nvim};
 use rpc::neovim::{
-	CellText, DefaultColorsSetEvent, Grid, GridCell, GridLineEvent, GridResizeEvent, HlAttrDefineEvent, HlAttrs,
+	CellText, DefaultColorsSetEvent, Grid, GridCell, GridLineEvent, GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlId,
 	RedrawNotification, WinExternalPosEvent, Window,
 };
 use rpc::sarthi::{FloatWindow, Settings, WindowOptions, WindowVariable};
@@ -157,15 +157,20 @@ const COMMENT_FG: u32 = 0x9B9EA4;
 
 /// The grid and window of the error, which no Neovim uses
 const GRID: Grid = Grid(2);
+
+/// The highlights the message is drawn with
+const ERROR: HlId = HlId(1);
+const NORMAL: HlId = HlId(2);
+const COMMENT: HlId = HlId(3);
 const WIN: Window = Window(1000);
 
 /// Shows `error` on a `width` × `height` cell screen: centered, in an external window framed like Neovim's floats
 pub fn show(editor: &mut Editor, error: &StartError, width: u32, height: u32) {
 	let (heading, body) = error.text();
 	let text_width = width.saturating_sub(8).clamp(20, 64) as usize;
-	let mut lines = vec![(heading, 1), (String::new(), 2)];
-	lines.extend(wrap(&body, text_width).into_iter().map(|line| (line, 2)));
-	lines.extend([(String::new(), 2), (String::from("Press Enter, Esc or q to close"), 3)]);
+	let mut lines = vec![(heading, ERROR), (String::new(), NORMAL)];
+	lines.extend(wrap(&body, text_width).into_iter().map(|line| (line, NORMAL)));
+	lines.extend([(String::new(), NORMAL), (String::from("Press Enter, Esc or q to close"), COMMENT)]);
 	let grid_width = lines.iter().map(|(line, _)| line.chars().count()).max().unwrap_or(0) as u32;
 
 	let attrs = |foreground, bold| HlAttrs {
@@ -196,9 +201,9 @@ pub fn show(editor: &mut Editor, error: &StartError, width: u32, height: u32) {
 			cterm_bg: 0,
 		}]),
 		RedrawNotification::HlAttrDefine(vec![
-			define(1, attrs(ERROR_FG, true)),
-			define(2, attrs(NORMAL_FG, false)),
-			define(3, attrs(COMMENT_FG, false)),
+			define(ERROR, attrs(ERROR_FG, true)),
+			define(NORMAL, attrs(NORMAL_FG, false)),
+			define(COMMENT, attrs(COMMENT_FG, false)),
 		]),
 		RedrawNotification::GridResize(vec![
 			GridResizeEvent { grid: Grid::GLOBAL, width, height },

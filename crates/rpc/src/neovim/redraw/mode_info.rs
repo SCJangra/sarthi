@@ -1,3 +1,4 @@
+use crate::HlId;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -18,5 +19,5 @@ pub struct ModeInfo {
 	pub cell_percentage: Option<u32>,
 
 	/// Highlight for the cursor's colors; 0 means the cell's colors swapped
-	pub attr_id: Option<u32>,
+	pub attr_id: Option<HlId>,
 }
