@@ -1,13 +1,21 @@
 //! Where an external window goes, as `require('sarthi').api` takes it in `sarthi.place`
 
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::Window;
 use crate::sarthi::notifications::optional_window_number;
 
-/// `sarthi.place`: `{ center = true }`, or `{ relative = …, anchor = …, row = …, col = … }` like a floating window's
-/// config. Which of them it is, sarthi checks once decoded.
-#[derive(Debug, Default, Deserialize)]
+/// Where Sarthi places an external window, over Neovim's screen (`sarthi.place`).
+///
+/// `{ center = true }` centers it, as it is until placed; otherwise it's placed like a floating window, with its
+/// `anchor` corner at `row`, `col` of what it's `relative` to. Like a floating window with a border, whose frame, its
+/// padding and outline ([padding](#sarthi-padding), [outline](#sarthi-outline)), takes the border's place: the frame's
+/// `anchor` corner is at `row`, `col`, and the window's cells are inside it. `row` and `col` are whole cells, a
+/// fraction dropped. A window it's relative to counts from its text, inside its frame, border and winbar, like Neovim's
+/// floats do. Like those, it's kept on the screen with its frame, above the command line, and with `fixed` not moved
+/// sideways unless anchored on the right. `offset` moves it further by logical pixels.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(default, deny_unknown_fields)]
 pub struct WindowPlace {
@@ -35,7 +43,7 @@ pub struct WindowPlace {
 }
 
 /// `sarthi.place.offset`, right and down in logical pixels, or left and up if negative; either left out is 0
-#[derive(Debug, Default, Clone, Copy, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(default, deny_unknown_fields)]
 pub struct PlaceOffset {
@@ -46,8 +54,9 @@ pub struct PlaceOffset {
 }
 
 /// What a window's `row` and `col` count from, named like a float's `relative`
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[schemars(inline)]
 pub enum PlaceRelative {
 	/// The screen's top-left corner
 	Editor,
@@ -58,7 +67,8 @@ pub enum PlaceRelative {
 }
 
 /// Which corner is at `row`, `col`, named like Neovim's `anchor`
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[schemars(inline)]
 pub enum PlaceAnchor {
 	/// The top-left corner
 	#[serde(rename = "NW")]

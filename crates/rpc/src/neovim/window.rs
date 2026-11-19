@@ -16,6 +16,17 @@ const WINDOW_EXT: i8 = 1;
 /// The name `rmp_serde` and `rmpv` decode msgpack extensions through, as `(type, bytes)`
 const EXT_STRUCT: &str = "_ExtStruct";
 
+/// A number, as Lua passes a window
+impl schemars::JsonSchema for Window {
+	fn schema_name() -> std::borrow::Cow<'static, str> {
+		"Window".into()
+	}
+
+	fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+		schemars::json_schema!({ "type": "integer", "description": "A window's handle, or 0 for the current window" })
+	}
+}
+
 /// As a number, which Neovim's API functions take for a window too
 impl Serialize for Window {
 	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

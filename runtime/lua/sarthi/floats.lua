@@ -130,4 +130,12 @@ vim.api.nvim_create_autocmd({ 'OptionSet', 'TabEnter' }, {
   end,
 })
 
+-- So Sarthi forgets what the window functions kept about a window that closed
+vim.api.nvim_create_autocmd('WinClosed', {
+  group = vim.api.nvim_create_augroup('sarthi.api', {}),
+  callback = function(args)
+    rpc.notify('win_closed', tonumber(args.match))
+  end,
+})
+
 return M

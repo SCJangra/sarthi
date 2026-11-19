@@ -32,6 +32,22 @@
         xorg.libXrandr
         xorg.libXi
       ];
+
+      # `cargo xtask docs` renders the help file with pandoc's vimdoc writer, new in 3.8.1, which nixpkgs doesn't have
+      # yet: pandoc's own static release, as built by pandoc, not from source. Elsewhere nixpkgs', without the writer.
+      pandocRelease = {
+        x86_64-linux = { arch = "amd64"; hash = "sha256-MlLF/YI0kl9Glz9PF/hSzNpkd3oMYx1XNYYcfrTWkTI="; };
+        aarch64-linux = { arch = "arm64"; hash = "sha256-iYtcH2vKuKYCU8yhAn5DR276ItHOmSMruVjNEYA7y5A="; };
+      }.${system} or null;
+      pandoc = if pandocRelease == null then pkgs.pandoc else pkgs.stdenvNoCC.mkDerivation rec {
+        pname = "pandoc";
+        version = "3.8.2";
+        src = pkgs.fetchurl {
+          url = "https://github.com/jgm/pandoc/releases/download/${version}/pandoc-${version}-linux-${pandocRelease.arch}.tar.gz";
+          inherit (pandocRelease) hash;
+        };
+        installPhase = "install -Dm755 bin/pandoc -t $out/bin";
+      };
     in
     {
       packages.default = rustPlatform.buildRustPackage {
@@ -58,8 +74,8 @@
           rustToolchain
           wgsl-analyzer
           nil
-          # `cargo xtask docs`: the help file's Lua functions, from their annotations
-          vimcats
+          # `cargo xtask docs`: renders the help file
+          pandoc
         ];
 
         env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibraries;

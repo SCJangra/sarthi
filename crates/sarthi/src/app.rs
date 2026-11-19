@@ -26,7 +26,7 @@ use rpc::neovim::{
 	UiTryResizeParams,
 };
 use rpc::sarthi::{
-	CmdheightChangedArgs, FloatsChangedArgs, HELP, MODULES, STARTUP, Settings, WinClosedArgs, WinScrolledArgs,
+	CmdheightChangedArgs, FILES, FloatsChangedArgs, MODULES, STARTUP, Settings, WinClosedArgs, WinScrolledArgs,
 	WindowFont, WindowOptions, WindowVariable,
 };
 
@@ -369,7 +369,7 @@ impl App {
 		// check for sarthi (`if vim.g.sarthi then … end`) and use `require("sarthi")`.
 		nvim.set_var("sarthi", true)?;
 		let channel = nvim.channel()?;
-		if let Err(error) = nvim.exec_lua::<()>(STARTUP, (channel, MODULES, HELP)) {
+		if let Err(error) = nvim.exec_lua::<()>(STARTUP, (channel, MODULES, FILES)) {
 			tracing::warn!("Couldn't set up sarthi's Lua: {error}");
 		}
 		nvim.ui_attach(params)?;

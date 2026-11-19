@@ -1,4 +1,8 @@
 //! sarthi's own API, between sarthi and its Lua: the requests and notifications the Lua sends, and the Lua itself
+//!
+//! What the help file (`:help sarthi`) says about Sarthi first:
+//!
+#![doc = include_str!("doc/intro.md")]
 
 mod clipboard;
 mod font;
@@ -14,7 +18,7 @@ pub use place::*;
 pub use requests::*;
 pub use settings::*;
 
-/// What sarthi runs before the user's config (`runtime/startup.lua`), with its channel, [`MODULES`] and [`HELP`] as
+/// What sarthi runs before the user's config (`runtime/startup.lua`), with its channel, [`MODULES`] and [`FILES`] as
 /// the arguments
 pub const STARTUP: &str = include_str!("../../../../runtime/startup.lua");
 
@@ -28,8 +32,12 @@ pub const MODULES: [(&str, &str); 6] = [
 	("sarthi.floats", include_str!("../../../../runtime/lua/sarthi/floats.lua")),
 ];
 
-/// sarthi's help file (`:help sarthi`), which `cargo xtask docs` writes
-pub const HELP: &str = include_str!("../../../../runtime/doc/sarthi.txt");
+/// Files sarthi writes where 'runtimepath' finds them, by path in it: its help file (`:help sarthi`), and the types of
+/// its Lua module for lua-language-server. `cargo xtask docs` writes both.
+pub const FILES: [(&str, &str); 2] = [
+	("doc/sarthi.txt", include_str!("../../../../runtime/doc/sarthi.txt")),
+	("lua/sarthi/_meta.lua", include_str!("../../../../runtime/lua/sarthi/_meta.lua")),
+];
 
 #[cfg(test)]
 mod tests {
@@ -43,6 +51,8 @@ mod tests {
 		let mut files: Vec<String> = std::fs::read_dir(dir.join("sarthi"))
 			.unwrap()
 			.map(|entry| entry.unwrap().file_name().into_string().unwrap())
+			// Not modules: types for lua-language-server
+			.filter(|name| !name.starts_with('_'))
 			.collect();
 		files.sort();
 

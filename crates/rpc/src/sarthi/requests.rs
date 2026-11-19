@@ -1,93 +1,135 @@
 //! Sarthi's API: what Lua asks of Sarthi, decoded straight from Neovim's requests. The method is the variant's name in
 //! snake case, e.g. `rpcrequest(channel, "nvim_open_win", buf, enter, config)`, and the arguments are decoded in order
 //! into the variant's struct. `runtime/lua/sarthi/` only wraps these calls.
+//!
+//! What the help file (`:help sarthi`) says about the Lua module and the window functions:
+//!
+#![doc = include_str!("doc/lua.md")]
+//!
+#![doc = include_str!("doc/api.md")]
 
-#![allow(missing_docs, reason = "the arguments of sarthi's Lua API, which `runtime/lua/sarthi/api.lua` documents")]
-
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
 use crate::sarthi::notifications::window_number;
-use crate::{Buffer, DeserializeTaggedEnum, Register, Settings, Window};
+use crate::{Buffer, DeserializeTaggedEnum, Register, Settings, Window, WindowConfig};
 
-#[derive(Debug, DeserializeTaggedEnum)]
+/// What Lua asks of Sarthi: a variant each, named like its Rust method in snake case. Those with `x-lua` are the Lua
+/// module's functions, which call them.
+#[derive(Debug, DeserializeTaggedEnum, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
+#[schemars(rename_all = "snake_case")]
 pub enum Request {
-	/// `require("sarthi").setup(opts)`, with the settings given
+	/// Sets Sarthi's settings: those given, and the defaults of the rest, in place of what an earlier call gave.
+	/// Applies at once, so it can be called again later, e.g. from a keymap. A mistake is an error at the call.
+	#[schemars(extend("x-lua" = "setup"))]
 	Setup(SetupArgs),
 
-	/// `require("sarthi").settings()`; answered with the settings in effect: those given to `setup()`, and the defaults
-	/// of the rest
+	/// The settings in effect: those given to `setup()`, and the defaults of the rest, e.g. to place a window past
+	/// another's padding when it has the user's. A copy: changing it changes nothing.
+	#[schemars(extend("x-lua" = "settings", "x-returns" = "sarthi.Settings"))]
 	GetSettings(GetSettingsArgs),
 
-	/// `require("sarthi").set_font_size(points)`, which sets `guifont`
+	/// Sets the font size, in points (4 to 96), by setting `:h` in `guifont`.
+	#[schemars(extend("x-lua" = "set_font_size"))]
 	SetFontSize(SetFontSizeArgs),
 
-	/// `require("sarthi").change_font_size(delta)`, which sets `guifont`
+	/// Makes the font `delta` points bigger, or smaller if negative, by setting `:h` in `guifont`. The size stays
+	/// within 4 to 96 points.
+	#[schemars(extend("x-lua" = "change_font_size"))]
 	ChangeFontSize(ChangeFontSizeArgs),
 
-	/// `require("sarthi").reset_font_size()`, which sets `guifont`
+	/// Sets `guifont` back to its value before the font size was first changed, unless it was set otherwise since.
+	#[schemars(extend("x-lua" = "reset_font_size"))]
 	ResetFontSize(ResetFontSizeArgs),
 
-	/// `require("sarthi").api.nvim_open_win(buf, enter, config)`; answered with the window
+	/// Like `vim.api.nvim_open_win()`, with a `sarthi` table in `config` ([`WindowConfig`](#sarthi.WindowConfig)).
+	/// Managed even without one: it has the settings' outline, corners and padding. A mistake in the `sarthi` table
+	/// closes the window again, so the call does nothing but fail.
+	#[schemars(extend("x-lua" = "api.nvim_open_win", "x-returns" = "integer"))]
 	NvimOpenWin(NvimOpenWinArgs),
 
-	/// `require("sarthi").api.nvim_win_set_config(win, config)`
+	/// Like `vim.api.nvim_win_set_config()`, with a `sarthi` table in `config`: what it gives replaces what was given
+	/// before, key by key, and a section's values key by key too.
+	#[schemars(extend("x-lua" = "api.nvim_win_set_config"))]
 	NvimWinSetConfig(NvimWinSetConfigArgs),
 
-	/// `require("sarthi").api.nvim_win_get_config(win)`; answered with the window's config
+	/// Like `vim.api.nvim_win_get_config()`, with the window's `sarthi` table: its `w:sarthi`, and what else was given.
+	#[schemars(extend("x-lua" = "api.nvim_win_get_config", "x-returns" = "vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig }"))]
 	NvimWinGetConfig(NvimWinGetConfigArgs),
 
 	/// The clipboard provider copying to `+` or `*`
+	#[schemars(skip)]
 	SetClipboard(SetClipboardArgs),
 
 	/// The clipboard provider pasting from `+` or `*`
+	#[schemars(skip)]
 	GetClipboard(GetClipboardArgs),
 
 	/// A method sarthi doesn't know
-	Other { method: String, value: IgnoredAny },
+	#[schemars(skip)]
+	Other {
+		/// Its name
+		method: String,
+
+		/// Its arguments, skipped
+		value: IgnoredAny,
+	},
 }
 
-#[derive(Debug, Deserialize)]
+/// The arguments of [`Request::Setup`]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SetupArgs {
-	/// The settings given, or none for all the defaults. Boxed: the settings are large, and other messages shouldn't
-	/// take their room.
+	/// The settings ([Settings](#sarthi-settings)); left out, all the defaults
+	// Boxed: the settings are large, and other messages shouldn't take their room.
 	pub settings: Option<Box<Settings>>,
 }
 
-#[derive(Debug, Deserialize)]
+/// The arguments of [`Request::GetSettings`]: none
+#[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct GetSettingsArgs {}
 
-#[derive(Debug, Deserialize)]
+/// The arguments of [`Request::SetFontSize`]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SetFontSizeArgs {
+	/// Size in points
 	pub points: f32,
 }
 
-#[derive(Debug, Deserialize)]
+/// The arguments of [`Request::ChangeFontSize`]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct ChangeFontSizeArgs {
-	/// In points
+	/// Points to add, or to take away if negative
 	pub delta: f32,
 }
 
-#[derive(Debug, Deserialize)]
+/// The arguments of [`Request::ResetFontSize`]: none
+#[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct ResetFontSizeArgs {}
 
-#[derive(Debug, Deserialize)]
+/// The arguments of [`Request::NvimOpenWin`]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct NvimOpenWinArgs {
+	/// The buffer it shows
 	pub buf: Buffer,
+
+	/// Whether it becomes the current window
 	pub enter: bool,
 
 	/// Neovim's window config, with a `sarthi` table in it
+	#[schemars(with = "NvimWinConfig")]
 	pub config: rmpv::Value,
 }
 
-#[derive(Debug, Deserialize)]
+/// The arguments of [`Request::NvimWinSetConfig`]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct NvimWinSetConfigArgs {
 	/// The window, or 0 for the current one
@@ -95,10 +137,12 @@ pub struct NvimWinSetConfigArgs {
 	pub win: Window,
 
 	/// Neovim's window config, with a `sarthi` table in it
+	#[schemars(with = "NvimWinConfig")]
 	pub config: rmpv::Value,
 }
 
-#[derive(Debug, Deserialize)]
+/// The arguments of [`Request::NvimWinGetConfig`]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct NvimWinGetConfigArgs {
 	/// The window, or 0 for the current one
@@ -106,20 +150,49 @@ pub struct NvimWinGetConfigArgs {
 	pub win: Window,
 }
 
+/// The clipboard provider's copy
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SetClipboardArgs {
+	/// `+` or `*`
 	pub register: Register,
+	/// The lines copied
 	pub lines: Vec<String>,
 
 	/// `v`, `V` or a block like `^V10`
 	pub regtype: String,
 }
 
+/// The clipboard provider's paste
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct GetClipboardArgs {
+	/// `+` or `*`
 	pub register: Register,
+}
+
+/// The schema of the window functions' `config`: Neovim's window config (`:help nvim_open_win()`), with a `sarthi`
+/// table in it ([`WindowConfig`]). Decoded as a value, since Neovim's part goes on to Neovim as given.
+struct NvimWinConfig;
+
+impl JsonSchema for NvimWinConfig {
+	/// Written where it's used, so its Lua type goes with it
+	fn inline_schema() -> bool {
+		true
+	}
+
+	fn schema_name() -> std::borrow::Cow<'static, str> {
+		"NvimWinConfig".into()
+	}
+
+	fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+		json_schema!({
+			"type": "object",
+			"description": "Neovim's window config (`:help nvim_open_win()`), with a `sarthi` table in it",
+			"properties": { "sarthi": generator.subschema_for::<WindowConfig>() },
+			"x-lua-type": "vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig }",
+		})
+	}
 }
 
 #[cfg(test)]

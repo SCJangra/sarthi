@@ -1,272 +1,140 @@
-//! sarthi's settings, set from Lua with `require("sarthi").setup({ … })`. Each section and value is optional: what
-//! isn't given keeps its default. Fonts aren't here: they're Neovim's own `guifont` and `linespace` options.
+//! sarthi's settings, set from Lua with `require("sarthi").setup({ … })`, and a window's own values of them
+//! ([`WindowOptions`]).
 //!
-//! The sections about a window can be set for one window too, in its `w:sarthi` table ([`WindowOptions`]): the same
-//! sections with the same keys, each replacing the setting's value for that window, e.g.
-//! `vim.w[win].sarthi = { shadow = { opacity = 0.6 } }`.
+#![doc = include_str!("doc/settings.md")]
 //!
-//! Each section is declared with `section!`, which also keeps what the help file (`:help sarthi`) says about it: its
-//! doc comments, its keys' types, and which keys a window can have its own values of. The help file's defaults are what
-//! serde gives for an empty table.
+//! Each section is a plain struct: its doc comments, types and defaults (`#[default(…)]`) are what the help file
+//! (`:help sarthi`) and the Lua types say about it, through its schema ([`JsonSchema`]).
 
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
+use smart_default::SmartDefault;
 
-/// A key of a section of the settings, as declared, for the help file
-#[derive(Debug)]
-pub struct Key {
-	/// Its name in the section
-	pub name: &'static str,
+use crate::{WindowFont, WindowPlace};
 
-	/// Its Rust type, as written
-	pub rust_type: &'static str,
-
-	/// Its Lua type where the Rust type doesn't say it, e.g. `number|false`; empty otherwise
-	pub lua_type: &'static str,
-
-	/// Its doc comment, line by line
-	pub doc: &'static [&'static str],
-}
-
-/// A section of the settings, as declared with `section!`, for the help file
-pub trait Section {
-	/// Its doc comment, line by line
-	const DOC: &'static [&'static str];
-
-	/// Its keys, in order
-	const KEYS: &'static [Key];
-
-	/// The keys a window can have its own values of, in `w:sarthi`
-	const WINDOW_KEYS: &'static [&'static str];
-}
-
-/// A section of the settings, by its name in them (see [`SECTIONS`])
-#[derive(Debug)]
-pub struct SectionDoc {
-	/// Its name in the settings
-	pub name: &'static str,
-	/// Its doc comment, line by line
-	pub doc: &'static [&'static str],
-	/// Its keys, in order
-	pub keys: &'static [Key],
-	/// The keys a window can have its own values of
-	pub window_keys: &'static [&'static str],
-}
-
-/// Declares `$options`, the values of settings section `$settings` that one window can have of its own: each optional,
-/// left out keeping the setting's
-macro_rules! window_options {
-	($(#[$doc:meta])* $options:ident for $settings:ident { $($field:ident: $type:ty),* $(,)? }) => {
-		$(#[$doc])*
-		#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
-		#[serde(default, deny_unknown_fields)]
-		pub struct $options {
-			$(
-				#[doc = concat!("The window's own `", stringify!($field), "`, if it has one")]
-				pub $field: Option<$type>,
-			)*
-		}
-
-		impl $settings {
-			/// These settings, with the values `options` gives in their place
-			pub fn with(&self, options: &$options) -> Self {
-				let mut settings = self.clone();
-				$(if let Some(value) = &options.$field {
-					settings.$field = value.clone();
-				})*
-				settings
-			}
-		}
-	};
-}
-
-/// Declares a section of the settings: a struct with each key's doc comment, type, Lua type if its Rust type doesn't say
-/// it (`as "number|false"`), and default (`= …`), which serde gives for a key left out. `window $options { … }` names
-/// the keys a window can have its own values of (see [`window_options!`]).
-macro_rules! section {
-	(
-		$(#[doc = $doc:literal])*
-		$name:ident $(, window $options:ident { $($window:ident: $window_type:ty),* $(,)? })? {
-			$(
-				$(#[doc = $key_doc:literal])*
-				$(#[serde($($serde:tt)*)])?
-				$key:ident: $type:ty $(as $lua:literal)? = $default:expr
-			),* $(,)?
-		}
-	) => {
-		$(#[doc = $doc])*
-		#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-		#[serde(default, deny_unknown_fields)]
-		pub struct $name {
-			$(
-				$(#[doc = $key_doc])*
-				$(#[serde($($serde)*)])?
-				pub $key: $type,
-			)*
-		}
-
-		impl Default for $name {
-			fn default() -> Self {
-				Self { $($key: $default,)* }
-			}
-		}
-
-		impl Section for $name {
-			const DOC: &'static [&'static str] = &[$($doc),*];
-			const KEYS: &'static [Key] = &[$(Key {
-				name: stringify!($key),
-				rust_type: stringify!($type),
-				lua_type: concat!("" $(, $lua)?),
-				doc: &[$($key_doc),*],
-			}),*];
-			const WINDOW_KEYS: &'static [&'static str] = &[$($(stringify!($window)),*)?];
-		}
-
-		$(window_options! {
-			#[doc = concat!("A window's own [`", stringify!($name), "`]")]
-			$options for $name { $($window: $window_type),* }
-		})?
-	};
-}
-
-/// Declares [`Settings`], with the sections in the order the help file lists them, and [`SECTIONS`]
-macro_rules! settings {
-	($($section:ident: $type:ident),* $(,)?) => {
-		/// The settings `require('sarthi').setup()` takes, a section each
-		#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
-		#[serde(default, deny_unknown_fields)]
-		pub struct Settings {
-			$(
-				#[doc = concat!("The `", stringify!($section), "` section")]
-				pub $section: $type,
-			)*
-		}
-
-		/// Every section of the settings, in order, for the help file
-		pub const SECTIONS: &[SectionDoc] = &[$(SectionDoc {
-			name: stringify!($section),
-			doc: <$type as Section>::DOC,
-			keys: <$type as Section>::KEYS,
-			window_keys: <$type as Section>::WINDOW_KEYS,
-		}),*];
-	};
-}
-
-settings! {
-	scroll: ScrollSettings,
-	cursor: CursorSettings,
-	shadow: ShadowSettings,
-	outline: OutlineSettings,
-	corners: CornerSettings,
-	padding: PaddingSettings,
-	underline: UnderlineSettings,
-	touchpad: TouchpadSettings,
-	window: WindowSettings,
-	ime: ImeSettings,
-}
-
-section! {
+/// The settings `require('sarthi').setup()` takes, a section each, in the order the help file lists them
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Settings {
 	/// How text that scrolled moves to its new place
-	ScrollSettings, window ScrollOptions { enabled: bool, animation: Animation } {
-		/// Whether text that scrolled slides to its new place, or jumps there
-		enabled: bool = true,
+	pub scroll: ScrollSettings,
 
-		/// How it moves to its new place
-		animation: Animation = Animation::default(),
+	/// How the cursor moves to a new place
+	pub cursor: CursorSettings,
 
-		/// Windows showing these filetypes jump to their new place, e.g. menus whose selected line is highlighted text,
-		/// whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
-		exclude_filetypes: Filetypes as "string[]" = Filetypes::default(),
+	/// The shadow under floating and external windows
+	pub shadow: ShadowSettings,
+
+	/// A line around external windows
+	pub outline: OutlineSettings,
+
+	/// Rounded corners of external windows
+	pub corners: CornerSettings,
+
+	/// Space around external windows' cells
+	pub padding: PaddingSettings,
+
+	/// How underlines are drawn
+	pub underline: UnderlineSettings,
+
+	/// Scrolling with a touchpad
+	pub touchpad: TouchpadSettings,
+
+	/// The OS window
+	pub window: WindowSettings,
+
+	/// Typing through an input method
+	pub ime: ImeSettings,
+}
+
+/// How text that scrolled moves to its new place
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScrollSettings {
+	/// Whether text that scrolled slides to its new place, or jumps there
+	#[default(true)]
+	pub enabled: bool,
+
+	/// How it moves to its new place
+	pub animation: Animation,
+
+	/// Windows showing these filetypes jump to their new place, e.g. menus whose selected line is highlighted text,
+	/// whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
+	pub exclude_filetypes: Filetypes,
+}
+
+/// A window's own `scroll` values (see [`ScrollSettings`])
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScrollOptions {
+	/// Whether its text slides
+	pub enabled: Option<bool>,
+
+	/// How its text slides
+	pub animation: Option<Animation>,
+}
+
+impl ScrollSettings {
+	/// These settings, with the values `options` gives in their place
+	pub fn with(&self, options: &ScrollOptions) -> Self {
+		Self {
+			enabled: options.enabled.unwrap_or(self.enabled),
+			animation: options.animation.unwrap_or(self.animation),
+			..self.clone()
+		}
 	}
 }
 
-/// An animation's curve, e.g. `{ curve = "spring", stiffness = 400, damping = 32 }`, one of [`Animation::CURVES`].
-/// Durations are in milliseconds; a value left out is serde's default.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+/// An animation's curve, e.g. `{ curve = "spring", stiffness = 400, damping = 32 }`. Durations are in milliseconds; a
+/// value left out has its default.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "curve", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Animation {
-	/// No animation: the value jumps to its target
+	/// No animation: it's in its new place at once
 	None,
-	/// Like a weight on a spring
+
+	/// Like a weight on a spring: pulled by `stiffness`, slowed by `damping`. With less damping than 2 × √stiffness it
+	/// overshoots and bounces back.
 	Spring {
 		/// How hard the spring pulls
 		#[serde(default = "default_stiffness")]
 		stiffness: f32,
-		/// How much the spring slows the value down
+
+		/// How much the spring slows it down
 		#[serde(default = "default_damping")]
 		damping: f32,
 	},
-	/// At a constant speed
+
+	/// At an even speed over `duration`
 	Linear {
 		/// How long it takes, in milliseconds
 		#[serde(default = "default_duration")]
 		duration: f32,
 	},
-	/// Slowing down at the end
+
+	/// Fast at first, then slowing down, over `duration`
 	EaseOut {
 		/// How long it takes, in milliseconds
 		#[serde(default = "default_duration")]
 		duration: f32,
 	},
-	/// Speeding up, then slowing down
+
+	/// Speeding up, then slowing down, over `duration`
 	EaseInOut {
 		/// How long it takes, in milliseconds
 		#[serde(default = "default_duration")]
 		duration: f32,
 	},
-	/// Along a cubic Bézier curve, like CSS's `cubic-bezier()`
+
+	/// Like CSS's `cubic-bezier()` over `duration`
 	CubicBezier {
-		/// The curve's control points: x1, y1, x2, y2
+		/// The curve's control points: x1, y1, x2, y2, with the x values from 0 to 1, e.g. `{ 0.25, 0.1, 0.25, 1 }`
 		points: [f32; 4],
+
 		/// How long it takes, in milliseconds
 		#[serde(default = "default_duration")]
 		duration: f32,
 	},
-}
-
-/// A curve of [`Animation`], for the help file
-#[derive(Debug)]
-pub struct Curve {
-	/// Its `curve` value
-	pub name: &'static str,
-
-	/// What it does
-	pub doc: &'static str,
-
-	/// Its keys without a default, with example values, as Lua
-	pub required: &'static str,
-}
-
-impl Animation {
-	/// Every curve, described
-	pub const CURVES: [Curve; 6] = [
-		Curve { name: "none", doc: "No animation: it's in its new place at once.", required: "" },
-		Curve {
-			name: "spring",
-			doc: "Like a weight on a spring: pulled by `stiffness`, slowed by `damping`. With less damping than \
-			      2 × √stiffness it overshoots and bounces back.",
-			required: "",
-		},
-		Curve { name: "linear", doc: "At an even speed over `duration`", required: "" },
-		Curve { name: "ease_out", doc: "Fast at first, then slowing down, over `duration`", required: "" },
-		Curve { name: "ease_in_out", doc: "Speeding up, then slowing down, over `duration`", required: "" },
-		Curve {
-			name: "cubic_bezier",
-			doc: "Like CSS's `cubic-bezier()` over `duration`: `points` are x1, y1, x2, y2, with the x values from 0 to 1.",
-			required: "points = { 0.25, 0.1, 0.25, 1 }",
-		},
-	];
-
-	/// Its `curve` value, one of [`Animation::CURVES`]'
-	pub fn curve(&self) -> &'static str {
-		match self {
-			Self::None => "none",
-			Self::Spring { .. } => "spring",
-			Self::Linear { .. } => "linear",
-			Self::EaseOut { .. } => "ease_out",
-			Self::EaseInOut { .. } => "ease_in_out",
-			Self::CubicBezier { .. } => "cubic_bezier",
-		}
-	}
 }
 
 fn default_stiffness() -> f32 {
@@ -287,177 +155,302 @@ impl Default for Animation {
 	}
 }
 
-section! {
-	/// How the cursor moves to a new place: its corners each on their way, the leading ones faster, so it stretches
-	/// towards where it goes and shrinks back as it arrives
-	CursorSettings {
-		/// For moves farther than a couple of cells along a row
-		animation: Animation = Animation::Spring { stiffness: 700.0, damping: 53.0 },
+/// How the cursor moves to a new place: its corners each on their way, the leading ones faster, so it stretches
+/// towards where it goes and shrinks back as it arrives
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
+#[serde(default, deny_unknown_fields)]
+pub struct CursorSettings {
+	/// For moves farther than a couple of cells along a row
+	#[default(Animation::Spring { stiffness: 700.0, damping: 53.0 })]
+	pub animation: Animation,
 
-		/// For short moves along a row, like typing
-		short_animation: Animation = Animation::EaseOut { duration: 40.0 },
+	/// For short moves along a row, like typing
+	#[default(Animation::EaseOut { duration: 40.0 })]
+	pub short_animation: Animation,
 
-		/// How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1,
-		/// where its leading edge is there at once
-		trail: f32 = 1.0,
+	/// How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1, where
+	/// its leading edge is there at once
+	#[default(1.0)]
+	pub trail: f32,
 
-		/// Whether moves in insert and replace mode animate, e.g. while typing
-		animate_insert_mode: bool = true,
+	/// Whether moves in insert and replace mode animate, e.g. while typing
+	#[default(true)]
+	pub animate_insert_mode: bool,
 
-		/// Whether moves into and out of the command line animate
-		animate_cmdline: bool = true,
+	/// Whether moves into and out of the command line animate
+	#[default(true)]
+	pub animate_cmdline: bool,
+}
+
+/// The shadow under floating and external windows, in logical pixels
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
+#[serde(default, deny_unknown_fields)]
+pub struct ShadowSettings {
+	/// Whether windows cast one
+	#[default(true)]
+	pub enabled: bool,
+
+	/// How far the edge fades out, like CSS's blur radius
+	#[default(8.0)]
+	pub blur: f32,
+
+	/// How far the shadow is moved from the window: right and down, or left and up if negative
+	#[default([0.0, 2.0])]
+	pub offset: [f32; 2],
+
+	/// From 0, invisible, to 1, black where fully shadowed
+	#[default(1.0)]
+	pub opacity: f32,
+
+	/// Windows showing these filetypes have no shadow, e.g. scrollbars, whatever their `w:sarthi` gives. Glob patterns,
+	/// e.g. `cmp_*`.
+	pub exclude_filetypes: Filetypes,
+}
+
+/// A window's own `shadow` values (see [`ShadowSettings`])
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct ShadowOptions {
+	/// Whether it casts one
+	pub enabled: Option<bool>,
+
+	/// How far its shadow's edge fades out
+	pub blur: Option<f32>,
+
+	/// How far its shadow is moved
+	pub offset: Option<[f32; 2]>,
+
+	/// How dark its shadow is
+	pub opacity: Option<f32>,
+}
+
+impl ShadowSettings {
+	/// These settings, with the values `options` gives in their place
+	pub fn with(&self, options: &ShadowOptions) -> Self {
+		Self {
+			enabled: options.enabled.unwrap_or(self.enabled),
+			blur: options.blur.unwrap_or(self.blur),
+			offset: options.offset.unwrap_or(self.offset),
+			opacity: options.opacity.unwrap_or(self.opacity),
+			..self.clone()
+		}
 	}
 }
 
-section! {
-	/// The shadow under floating and external windows, in logical pixels
-	ShadowSettings, window ShadowOptions { enabled: bool, blur: f32, offset: [f32; 2], opacity: f32 } {
-		/// Whether windows cast one
-		enabled: bool = true,
+/// A line around external windows, just outside them, in logical pixels.
+///
+/// Not around floating windows, which Neovim places without room for it. For windows whose `w:sarthi` is `managed`,
+/// e.g. opened with the [window functions](#sarthi.api); others have one only if their `w:sarthi` turns it on.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
+#[serde(default, deny_unknown_fields)]
+pub struct OutlineSettings {
+	/// Whether windows have one. Off by default: a window with a border of its own (`nvim_open_win()`'s `border`) would
+	/// have two.
+	pub enabled: bool,
 
-		/// How far the edge fades out, like CSS's blur radius
-		blur: f32 = 8.0,
+	/// How thick the line is
+	#[default(1.0)]
+	pub width: f32,
 
-		/// How far the shadow is moved from the window: right and down, or left and up if negative
-		offset: [f32; 2] = [0.0, 2.0],
+	/// The highlight group whose text color the line has
+	#[default(String::from("FloatBorder"))]
+	pub highlight: String,
 
-		/// From 0, invisible, to 1, black where fully shadowed
-		opacity: f32 = 1.0,
+	/// Windows showing these filetypes have no outline, whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
+	pub exclude_filetypes: Filetypes,
+}
 
-		/// Windows showing these filetypes have no shadow, e.g. scrollbars, whatever their `w:sarthi` gives. Glob
-		/// patterns, e.g. `cmp_*`.
-		exclude_filetypes: Filetypes as "string[]" = Filetypes::default(),
+/// A window's own `outline` values (see [`OutlineSettings`])
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct OutlineOptions {
+	/// Whether it has one
+	pub enabled: Option<bool>,
+
+	/// How thick its line is
+	pub width: Option<f32>,
+
+	/// The highlight group of its line
+	pub highlight: Option<String>,
+}
+
+impl OutlineSettings {
+	/// These settings, with the values `options` gives in their place
+	pub fn with(&self, options: &OutlineOptions) -> Self {
+		Self {
+			enabled: options.enabled.unwrap_or(self.enabled),
+			width: options.width.unwrap_or(self.width),
+			highlight: options.highlight.clone().unwrap_or_else(|| self.highlight.clone()),
+			..self.clone()
+		}
 	}
 }
 
-section! {
-	/// A line around external windows, just outside them, in logical pixels.
-	///
-	/// Not around floating windows, which Neovim places without room for it. For windows whose `w:sarthi` is `managed`,
-	/// e.g. opened with |sarthi.api|; others have one only if their `w:sarthi` turns it on.
-	OutlineSettings, window OutlineOptions { enabled: bool, width: f32, highlight: String } {
-		/// Whether windows have one. Off by default: a window with a border of its own (`nvim_open_win()`'s `border`)
-		/// would have two.
-		enabled: bool = false,
+/// Rounded corners of external windows, in logical pixels.
+///
+/// Not of floating windows, whose text would be cut by them. The outline follows them. For windows whose `w:sarthi` is
+/// `managed`, e.g. opened with the [window functions](#sarthi.api); others have them only if their `w:sarthi` turns
+/// them on.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
+#[serde(default, deny_unknown_fields)]
+pub struct CornerSettings {
+	/// Whether windows have them. Off by default: a window's text in its corner cells isn't cut to them.
+	pub enabled: bool,
 
-		/// How thick the line is
-		width: f32 = 1.0,
+	/// How round they are: the radius of their arcs, in logical pixels.
+	#[default(8.0)]
+	pub radius: f32,
 
-		/// The highlight group whose text color the line has
-		highlight: String = String::from("FloatBorder"),
+	/// Windows showing these filetypes keep square corners, whatever their `w:sarthi` gives. Glob patterns, e.g.
+	/// `cmp_*`.
+	pub exclude_filetypes: Filetypes,
+}
 
-		/// Windows showing these filetypes have no outline, whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
-		exclude_filetypes: Filetypes as "string[]" = Filetypes::default(),
+/// A window's own `corners` values (see [`CornerSettings`])
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct CornerOptions {
+	/// Whether it has them
+	pub enabled: Option<bool>,
+
+	/// How round they are
+	pub radius: Option<f32>,
+}
+
+impl CornerSettings {
+	/// These settings, with the values `options` gives in their place
+	pub fn with(&self, options: &CornerOptions) -> Self {
+		Self {
+			enabled: options.enabled.unwrap_or(self.enabled),
+			radius: options.radius.unwrap_or(self.radius),
+			..self.clone()
+		}
 	}
 }
 
-section! {
-	/// Rounded corners of external windows, in logical pixels.
-	///
-	/// Not of floating windows, whose text would be cut by them. The outline follows them. For windows whose `w:sarthi`
-	/// is `managed`, e.g. opened with |sarthi.api|; others have them only if their `w:sarthi` turns them on.
-	CornerSettings, window CornerOptions { enabled: bool, radius: f32 } {
-		/// Whether windows have them. Off by default: a window's text in its corner cells isn't cut to them.
-		enabled: bool = false,
+/// Space around external windows' cells, in their background, in logical pixels.
+///
+/// Not around floating windows, which Neovim places without room for it. For windows whose `w:sarthi` is `managed`,
+/// e.g. opened with the [window functions](#sarthi.api); others have it only if their `w:sarthi` turns it on.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
+#[serde(default, deny_unknown_fields)]
+pub struct PaddingSettings {
+	/// Whether windows have it
+	pub enabled: bool,
 
-		/// How round they are: the radius of their arcs, in logical pixels.
-		radius: f32 = 8.0,
+	/// In logical pixels: the same on every side, or each side's as numbers, those left out 0, e.g.
+	/// `{ top = 2, left = 8, right = 8 }`
+	#[default(PaddingSize::All(4.0))]
+	pub size: PaddingSize,
 
-		/// Windows showing these filetypes keep square corners, whatever their `w:sarthi` gives. Glob patterns, e.g.
-		/// `cmp_*`.
-		exclude_filetypes: Filetypes as "string[]" = Filetypes::default(),
+	/// Windows showing these filetypes have no padding, whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
+	pub exclude_filetypes: Filetypes,
+}
+
+/// A window's own `padding` values (see [`PaddingSettings`])
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct PaddingOptions {
+	/// Whether it has it
+	pub enabled: Option<bool>,
+
+	/// How much it has
+	pub size: Option<PaddingSize>,
+}
+
+impl PaddingSettings {
+	/// These settings, with the values `options` gives in their place
+	pub fn with(&self, options: &PaddingOptions) -> Self {
+		Self {
+			enabled: options.enabled.unwrap_or(self.enabled),
+			size: options.size.unwrap_or(self.size),
+			..self.clone()
+		}
 	}
 }
 
-section! {
-	/// Space around external windows' cells, in their background, in logical pixels.
-	///
-	/// Not around floating windows, which Neovim places without room for it. For windows whose `w:sarthi` is `managed`,
-	/// e.g. opened with |sarthi.api|; others have it only if their `w:sarthi` turns it on.
-	PaddingSettings, window PaddingOptions { enabled: bool, size: PaddingSize } {
-		/// Whether windows have it
-		enabled: bool = false,
+/// How underlines are drawn, as adjustments to the font's own, in logical pixels
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
+#[serde(default, deny_unknown_fields)]
+pub struct UnderlineSettings {
+	/// Moves underlines down from the font's position, or up if negative
+	pub offset: f32,
 
-		/// In logical pixels: the same on every side, or each side's as numbers, those left out 0, e.g.
-		/// `{ top = 2, left = 8, right = 8 }`
-		size: PaddingSize as "number|{ top?, right?, bottom?, left? }" = PaddingSize::All(4.0),
+	/// Thickness of every line (underlines, overlines, strikethroughs), or `false` for the font's
+	#[serde(with = "number_or_false")]
+	#[schemars(with = "NumberOrFalse")]
+	pub thickness: Option<f32>,
 
-		/// Windows showing these filetypes have no padding, whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
-		exclude_filetypes: Filetypes as "string[]" = Filetypes::default(),
-	}
+	/// Height of an undercurl's wave, in line thicknesses
+	#[default(2.0)]
+	pub wave_height: f32,
+
+	/// Space kept between underlines and the text's ink where it crosses them, or `false` to draw through it
+	#[serde(with = "number_or_false")]
+	#[schemars(with = "NumberOrFalse")]
+	pub ink_gaps: Option<f32>,
 }
 
-section! {
-	/// How underlines are drawn, as adjustments to the font's own, in logical pixels
-	UnderlineSettings {
-		/// Moves underlines down from the font's position, or up if negative
-		offset: f32 = 0.0,
-
-		/// Thickness of every line (underlines, overlines, strikethroughs), or `false` for the font's
-		#[serde(with = "number_or_false")]
-		thickness: Option<f32> as "number|false" = None,
-
-		/// Height of an undercurl's wave, in line thicknesses
-		wave_height: f32 = 2.0,
-
-		/// Space kept between underlines and the text's ink where it crosses them, or `false` to draw through it
-		#[serde(with = "number_or_false")]
-		ink_gaps: Option<f32> as "number|false" = None,
-	}
+/// Scrolling with a touchpad
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
+#[serde(default, deny_unknown_fields)]
+pub struct TouchpadSettings {
+	/// Lines scrolled per row of finger movement: 1 follows the fingers, more scrolls faster
+	#[default(3.0)]
+	pub scroll_speed: f64,
 }
 
-section! {
-	/// Scrolling with a touchpad
-	TouchpadSettings {
-		/// Lines scrolled per row of finger movement: 1 follows the fingers, more scrolls faster
-		scroll_speed: f64 = 3.0,
-	}
+/// Typing through an input method (IME), e.g. fcitx5 or IBus, for languages a keyboard can't type directly: the text
+/// it composes shows underlined at the cursor until it's committed
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
+#[serde(default, deny_unknown_fields)]
+pub struct ImeSettings {
+	/// Whether text can be typed through an input method. Turned off, keys go to Neovim as typed: e.g. from an
+	/// autocommand while in Normal mode, so the input method doesn't take its keys.
+	#[default(true)]
+	pub enabled: bool,
 }
 
-section! {
-	/// Typing through an input method (IME), e.g. fcitx5 or IBus, for languages a keyboard can't type directly: the
-	/// text it composes shows underlined at the cursor until it's committed
-	ImeSettings {
-		/// Whether text can be typed through an input method. Turned off, keys go to Neovim as typed: e.g. from an
-		/// autocommand while in Normal mode, so the input method doesn't take its keys.
-		enabled: bool = true,
-	}
-}
+/// The OS window: how see-through its background is, and whether the desktop behind it is blurred
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowSettings {
+	/// How opaque the editor's background is, from 0 to 1. Text, highlighted backgrounds and floating windows stay
+	/// opaque. Needs a compositor that shows windows' transparency; on X11, a compositing window manager, and even then
+	/// some GPU drivers can't. Sarthi warns when it can't show it.
+	#[default(1.0)]
+	pub opacity: f32,
 
-section! {
-	/// The OS window: how see-through its background is, and whether the desktop behind it is blurred
-	WindowSettings {
-		/// How opaque the editor's background is, from 0 to 1. Text, highlighted backgrounds and floating windows
-		/// stay opaque. Needs a compositor that shows windows' transparency; on X11, a compositing window manager, and
-		/// even then some GPU drivers can't. Sarthi warns when it can't show it.
-		opacity: f32 = 1.0,
-
-		/// Whether the desktop behind a see-through background is blurred. The compositor does it, where it can (e.g.
-		/// KDE Plasma, macOS); elsewhere the background is only see-through. Never on X11, where Sarthi warns about it.
-		blur: bool = false,
-	}
+	/// Whether the desktop behind a see-through background is blurred. The compositor does it, where it can (e.g. KDE
+	/// Plasma, macOS); elsewhere the background is only see-through. Never on X11, where Sarthi warns about it.
+	pub blur: bool,
 }
 
 /// The size of a window's padding: the same on every side, or each side's
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
 #[serde(untagged)]
+#[schemars(inline)]
 pub enum PaddingSize {
 	/// The same on every side
 	All(f32),
+
 	/// Each side's own
 	Sides(PaddingSides),
 }
 
 /// Each side's padding, in logical pixels; a side left out has none
-#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct PaddingSides {
 	/// Above the cells
 	pub top: f32,
+
 	/// Right of the cells
 	pub right: f32,
+
 	/// Below the cells
 	pub bottom: f32,
+
 	/// Left of the cells
 	pub left: f32,
 }
@@ -555,12 +548,26 @@ impl Serialize for Filetypes {
 	}
 }
 
+/// A list of glob patterns, as Lua gives them
+impl JsonSchema for Filetypes {
+	/// Written where it's used: it's short
+	fn inline_schema() -> bool {
+		true
+	}
+
+	fn schema_name() -> std::borrow::Cow<'static, str> {
+		"Filetypes".into()
+	}
+
+	fn json_schema(_: &mut SchemaGenerator) -> Schema {
+		json_schema!({ "type": "array", "items": { "type": "string" } })
+	}
+}
+
 /// What a window's `w:sarthi` sets for it.
 ///
-/// The sections of the settings about a window, with the same keys. Each value given is the window's, whatever the
-/// settings say; but a window whose filetype a section's `exclude_filetypes` matches never has that section's effect.
-/// `exclude_filetypes` itself is only in the settings.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[doc = include_str!("doc/window-options.md")]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct WindowOptions {
 	/// Whether the settings' `outline`, `corners` and `padding` apply to the window, under its own values, as to one
@@ -577,6 +584,35 @@ pub struct WindowOptions {
 	pub corners: CornerOptions,
 	/// The window's own `padding`
 	pub padding: PaddingOptions,
+}
+
+/// The `sarthi` table of a window's config, which the [window functions](#sarthi.api) take.
+///
+/// The window's own values of the settings' sections about a window, kept in its `w:sarthi`, and an external window's
+/// place and fonts.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowConfig {
+	/// Where an external window goes. External windows only.
+	pub place: Option<WindowPlace>,
+
+	/// The fonts an external window's text is drawn with. External windows only.
+	pub font: Option<WindowFont>,
+
+	/// Its own [shadow](#sarthi-shadow) values
+	pub shadow: Option<ShadowOptions>,
+
+	/// Its own [outline](#sarthi-outline) values. External windows only.
+	pub outline: Option<OutlineOptions>,
+
+	/// Its own [corners](#sarthi-corners) values. External windows only.
+	pub corners: Option<CornerOptions>,
+
+	/// Its own [padding](#sarthi-padding) values. External windows only.
+	pub padding: Option<PaddingOptions>,
+
+	/// Its own [scroll](#sarthi-scroll) values
+	pub scroll: Option<ScrollOptions>,
 }
 
 impl Settings {
@@ -659,6 +695,24 @@ fn validate_animation(name: &str, animation: Animation) -> Result<(), String> {
 /// An error with `message`, unless `valid`
 fn check(valid: bool, message: &str) -> Result<(), String> {
 	if valid { Ok(()) } else { Err(message.to_owned()) }
+}
+
+/// The schema of a number or `false`, for the values [`number_or_false`] decodes
+struct NumberOrFalse;
+
+impl JsonSchema for NumberOrFalse {
+	/// Written where it's used: it's short
+	fn inline_schema() -> bool {
+		true
+	}
+
+	fn schema_name() -> std::borrow::Cow<'static, str> {
+		"NumberOrFalse".into()
+	}
+
+	fn json_schema(_: &mut SchemaGenerator) -> Schema {
+		json_schema!({ "anyOf": [{ "type": "number" }, { "const": false }] })
+	}
 }
 
 /// A number, or `false` for none (Lua can't keep `nil` in a table)

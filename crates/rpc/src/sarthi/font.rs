@@ -1,9 +1,11 @@
 //! The fonts of an external window, as `require('sarthi').api` takes them in `sarthi.font`
 
+use schemars::JsonSchema;
 use serde::Deserialize;
 
-/// `sarthi.font`: the fonts and size an external window's text is drawn with
-#[derive(Debug, Clone, Default, Deserialize)]
+/// The fonts an external window's text is drawn with (`sarthi.font`). Either left out is `guifont`'s. The window is as
+/// many of its own cells as its config says.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(default, deny_unknown_fields)]
 pub struct WindowFont {
@@ -15,9 +17,10 @@ pub struct WindowFont {
 }
 
 /// The fonts of a window's set, as `font.family` takes them: one name or a list
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(untagged)]
+#[schemars(inline)]
 pub enum FontFamilies {
 	/// One font
 	One(String),
