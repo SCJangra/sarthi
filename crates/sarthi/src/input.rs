@@ -138,19 +138,44 @@ fn keypad_key(key: &Key) -> Option<&'static str> {
 
 /// F1 to F35, all that winit reports
 fn function_key(key: &NamedKey) -> Option<&'static str> {
-	macro_rules! function_keys {
-		($($name:ident)*) => {
-			match key {
-				$(NamedKey::$name => Some(stringify!($name)),)*
-				_ => None,
-			}
-		};
+	match key {
+		NamedKey::F1 => Some("F1"),
+		NamedKey::F2 => Some("F2"),
+		NamedKey::F3 => Some("F3"),
+		NamedKey::F4 => Some("F4"),
+		NamedKey::F5 => Some("F5"),
+		NamedKey::F6 => Some("F6"),
+		NamedKey::F7 => Some("F7"),
+		NamedKey::F8 => Some("F8"),
+		NamedKey::F9 => Some("F9"),
+		NamedKey::F10 => Some("F10"),
+		NamedKey::F11 => Some("F11"),
+		NamedKey::F12 => Some("F12"),
+		NamedKey::F13 => Some("F13"),
+		NamedKey::F14 => Some("F14"),
+		NamedKey::F15 => Some("F15"),
+		NamedKey::F16 => Some("F16"),
+		NamedKey::F17 => Some("F17"),
+		NamedKey::F18 => Some("F18"),
+		NamedKey::F19 => Some("F19"),
+		NamedKey::F20 => Some("F20"),
+		NamedKey::F21 => Some("F21"),
+		NamedKey::F22 => Some("F22"),
+		NamedKey::F23 => Some("F23"),
+		NamedKey::F24 => Some("F24"),
+		NamedKey::F25 => Some("F25"),
+		NamedKey::F26 => Some("F26"),
+		NamedKey::F27 => Some("F27"),
+		NamedKey::F28 => Some("F28"),
+		NamedKey::F29 => Some("F29"),
+		NamedKey::F30 => Some("F30"),
+		NamedKey::F31 => Some("F31"),
+		NamedKey::F32 => Some("F32"),
+		NamedKey::F33 => Some("F33"),
+		NamedKey::F34 => Some("F34"),
+		NamedKey::F35 => Some("F35"),
+		_ => None,
 	}
-
-	function_keys!(
-		F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18
-		F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31 F32 F33 F34 F35
-	)
 }
 
 #[cfg(test)]
