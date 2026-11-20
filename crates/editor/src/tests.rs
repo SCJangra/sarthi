@@ -51,7 +51,7 @@ fn rows(redraw: &Redraw) -> Vec<String> {
 
 #[test]
 fn draws_only_when_a_redraw_ends() {
-	let mut editor = Editor::new();
+	let mut editor = Editor::default();
 	assert_eq!(editor.apply(vec![colors(), resize(1, 3, 2), line(1, 0, "abc")]), None);
 
 	let redraw = editor.apply(vec![line(1, 1, "def"), RedrawNotification::Flush]).unwrap();
@@ -61,7 +61,7 @@ fn draws_only_when_a_redraw_ends() {
 
 #[test]
 fn nothing_to_draw_without_changes() {
-	let mut editor = Editor::new();
+	let mut editor = Editor::default();
 	assert!(editor.apply(vec![resize(1, 2, 1), RedrawNotification::Flush]).is_some());
 	assert_eq!(editor.apply(vec![RedrawNotification::Flush]), None);
 	// An unknown grid changes nothing.
@@ -70,7 +70,7 @@ fn nothing_to_draw_without_changes() {
 
 #[test]
 fn the_last_redraw_of_a_batch_wins() {
-	let mut editor = Editor::new();
+	let mut editor = Editor::default();
 	let events =
 		vec![resize(1, 1, 1), line(1, 0, "a"), RedrawNotification::Flush, line(1, 0, "b"), RedrawNotification::Flush];
 	assert_eq!(rows(&editor.apply(events).unwrap()), ["b"]);
@@ -78,7 +78,7 @@ fn the_last_redraw_of_a_batch_wins() {
 
 #[test]
 fn cursor_is_drawn_where_neovim_put_it() {
-	let mut editor = Editor::new();
+	let mut editor = Editor::default();
 	let events = vec![colors(), resize(1, 2, 1), line(1, 0, "ab"), goto(1, 0, 1), RedrawNotification::Flush];
 	let redraw = editor.apply(events).unwrap();
 	let [layer] = redraw.layers.as_slice() else { panic!("expected one layer") };
@@ -93,7 +93,7 @@ fn cursor_is_drawn_where_neovim_put_it() {
 
 #[test]
 fn an_input_methods_text_is_drawn_over_the_cursor_until_committed() {
-	let mut editor = Editor::new();
+	let mut editor = Editor::default();
 	editor.apply(vec![colors(), resize(1, 4, 1), line(1, 0, "abcd"), goto(1, 0, 1), RedrawNotification::Flush]);
 
 	editor.set_preedit(Some(Preedit { text: String::from("xy"), caret: None }));
@@ -173,7 +173,7 @@ fn flush(editor: &mut Editor, mut events: Vec<RedrawNotification>) -> Redraw {
 
 /// An editor with a 10×5 screen (grid 1) of [`CELL`]s and a 4×3 window grid 2 that isn't placed yet
 fn screen() -> Editor {
-	let mut editor = Editor::new();
+	let mut editor = Editor::default();
 	editor.set_cell_size(CELL);
 	editor.apply(vec![colors(), resize(1, 10, 5), resize(2, 4, 3)]);
 	editor

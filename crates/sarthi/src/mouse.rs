@@ -210,7 +210,7 @@ mod tests {
 
 	/// A 20×10 screen with window grid 2 (10×5) at row 2, col 4, and mouse input on
 	fn editor() -> Editor {
-		let mut editor = Editor::new();
+		let mut editor = Editor::default();
 		editor.set_cell_size(CELL);
 		let resize = |grid, width, height| {
 			RedrawNotification::GridResize(vec![GridResizeEvent { grid: Grid(grid), width, height }])

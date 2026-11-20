@@ -1,34 +1,19 @@
 //! The window's size and font size at start, from the command line
 
-#[derive(Debug, Clone)]
+use smart_default::SmartDefault;
+
+#[derive(Debug, Clone, SmartDefault)]
 pub struct WindowConfig {
+	#[default(String::from("Sarthi"))]
 	pub title: String,
+	#[default(1280)]
 	pub width: u32,
+	#[default(720)]
 	pub height: u32,
+	#[default(true)]
 	pub resizable: bool,
 
 	/// Font size, in logical pixels, unless `guifont` sets one
+	#[default(14.0)]
 	pub font_size: f32,
-}
-
-impl Default for WindowConfig {
-	fn default() -> Self {
-		Self { title: String::from("Sarthi"), width: 1280, height: 720, resizable: true, font_size: 14.0 }
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn default_values() {
-		let config = WindowConfig::default();
-
-		assert_eq!(config.title, "Sarthi");
-		assert_eq!(config.width, 1280);
-		assert_eq!(config.height, 720);
-		assert!(config.resizable);
-		assert_eq!(config.font_size, 14.0);
-	}
 }

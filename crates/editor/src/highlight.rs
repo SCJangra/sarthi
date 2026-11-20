@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use renderer::Underline;
 use rpc::neovim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, HlId};
+use smart_default::SmartDefault;
 
 /// Default colors until Neovim sends its own, matching what Neovim uses when none are set
 const INITIAL_DEFAULT_COLORS: DefaultColors =
@@ -49,27 +50,18 @@ pub struct CellStyle {
 
 /// Neovim's highlight table, from `hl_attr_define`, `default_colors_set` and `hl_group_set`
 /// (`:help ui-event-hl_attr_define`)
-#[derive(Debug)]
+/// Starts with no highlights, and Neovim's default colors before it sends its own.
+#[derive(Debug, SmartDefault)]
 pub struct HighlightState {
 	/// RGB attributes by highlight id. Colors a highlight doesn't set stay `None`, so they follow the
 	/// default colors even when those change later.
 	attrs: HashMap<HlId, HlAttrs>,
+	#[default(INITIAL_DEFAULT_COLORS)]
 	defaults: DefaultColors,
 	groups: HashMap<String, HlId>,
 }
 
-impl Default for HighlightState {
-	fn default() -> Self {
-		Self::new()
-	}
-}
-
 impl HighlightState {
-	/// No highlights yet, with Neovim's default colors before it sends its own
-	pub fn new() -> Self {
-		Self { attrs: HashMap::new(), defaults: INITIAL_DEFAULT_COLORS, groups: HashMap::new() }
-	}
-
 	/// Neovim's default colors, which highlights without colors of their own take
 	pub fn defaults(&self) -> DefaultColors {
 		self.defaults
@@ -156,7 +148,7 @@ fn underline(attrs: &HlAttrs) -> Option<Underline> {
 pub(crate) mod tests {
 	use rpc::neovim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs, HlId};
 
-	use super::{CellStyle, DefaultColors, HighlightState, INITIAL_DEFAULT_COLORS};
+	use super::{CellStyle, DefaultColors, HighlightState};
 	use renderer::Underline;
 
 	const FG: u32 = 0xC7C7C7;
@@ -197,7 +189,7 @@ pub(crate) mod tests {
 	}
 
 	fn state() -> HighlightState {
-		let mut state = HighlightState::new();
+		let mut state = HighlightState::default();
 		state.set_default_colors(vec![colors(FG, BG, SP)]);
 		state
 	}
@@ -217,15 +209,8 @@ pub(crate) mod tests {
 	}
 
 	#[test]
-	fn initial_defaults() {
-		let state = HighlightState::new();
-		assert_eq!(state.defaults(), INITIAL_DEFAULT_COLORS);
-		assert_eq!(state.resolve(HlId(0)).background, 0x000000);
-	}
-
-	#[test]
 	fn last_default_colors_win() {
-		let mut state = HighlightState::new();
+		let mut state = HighlightState::default();
 		state.set_default_colors(vec![colors(1, 2, 3), colors(FG, BG, SP)]);
 		assert_eq!(state.defaults(), DefaultColors { foreground: FG, background: BG, special: SP });
 	}

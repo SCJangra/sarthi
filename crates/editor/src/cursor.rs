@@ -1,10 +1,11 @@
 //! The cursor's style from Neovim's modes (`:help ui-event-mode_info_set`), and when its moves animate
 
 use rpc::neovim::{CursorShape, HlId, ModeInfo};
+use smart_default::SmartDefault;
 
 /// How Neovim wants the cursor drawn, from `mode_info_set`, `mode_change`, `busy_start` and `busy_stop`
 /// (`:help ui-event-mode_info_set`)
-#[derive(Debug)]
+#[derive(Debug, SmartDefault)]
 pub struct CursorState {
 	/// Whether to use the modes' styles; otherwise the cursor is always a block
 	style_enabled: bool,
@@ -19,27 +20,14 @@ pub struct CursorState {
 	hidden: bool,
 
 	/// Whether moves animate in insert and replace mode, and into and out of the command line
+	#[default(true)]
 	animate_insert_mode: bool,
+	#[default(true)]
 	animate_cmdline: bool,
 
 	/// Whether the window has the focus
+	#[default(true)]
 	focused: bool,
-}
-
-impl Default for CursorState {
-	fn default() -> Self {
-		Self {
-			style_enabled: false,
-			modes: Vec::new(),
-			mode: 0,
-			mode_name: String::new(),
-			drawn_mode: String::new(),
-			hidden: false,
-			animate_insert_mode: true,
-			animate_cmdline: true,
-			focused: true,
-		}
-	}
 }
 
 /// The cursor's look in the current mode

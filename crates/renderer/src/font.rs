@@ -10,6 +10,7 @@ use glyphon::cosmic_text::skrifa::metrics::Decoration;
 use glyphon::cosmic_text::skrifa::{FontRef, MetadataProvider, Tag};
 use glyphon::fontdb::{Family, Query, Source, Style, Weight};
 use rustc_hash::FxHashMap;
+use smart_default::SmartDefault;
 
 /// sarthi draws text with JetBrains Mono unless told otherwise, bundled so it looks the same everywhere (license:
 /// `assets/fonts/OFL.txt`). Both faces are variable fonts, so every weight is available.
@@ -52,7 +53,7 @@ impl TextSize {
 }
 
 /// How underlines are drawn, in pixels, as adjustments to what the font says. The default follows the font.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, SmartDefault)]
 pub struct UnderlineSize {
 	/// Moves underlines down from the font's position, or up if negative
 	pub offset: f32,
@@ -61,17 +62,12 @@ pub struct UnderlineSize {
 	pub thickness: Option<f32>,
 
 	/// Height of an undercurl's wave, in line thicknesses
+	#[default(2.0)]
 	pub wave_height: f32,
 
 	/// Space kept between underlines and the text's ink where it crosses them, like CSS's
 	/// `text-decoration-skip-ink`; `None`, the default, draws underlines through the ink.
 	pub ink_gaps: Option<f32>,
-}
-
-impl Default for UnderlineSize {
-	fn default() -> Self {
-		Self { offset: 0.0, thickness: None, wave_height: 2.0, ink_gaps: None }
-	}
 }
 
 impl UnderlineSize {

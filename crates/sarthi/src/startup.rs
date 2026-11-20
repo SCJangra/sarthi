@@ -312,7 +312,7 @@ mod tests {
 
 	#[test]
 	fn shown_in_an_external_window() {
-		let mut editor = Editor::new();
+		let mut editor = Editor::default();
 		let error = StartError::NotFound { nvim: "nvim".into() };
 		show(&mut editor, &error, 80, 24);
 		let redraw = editor.refresh().expect("drawn");

@@ -4,6 +4,7 @@ version = { workspace = true }
 edition = { workspace = true }
 
 [dependencies]
+smart-default = { workspace = true }
 rpc = { workspace = true }
 renderer = { workspace = true }
 tracing = { workspace = true }

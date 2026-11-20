@@ -4,6 +4,7 @@ version = { workspace = true }
 edition = { workspace = true }
 
 [dependencies]
+smart-default = { workspace = true }
 clap = { workspace = true }
 flume = { workspace = true }
 rayon = { workspace = true }

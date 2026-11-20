@@ -102,7 +102,7 @@ mod tests {
 	const CURSOR_BG: u32 = 0x00FF00;
 
 	fn highlights() -> HighlightState {
-		let mut state = HighlightState::new();
+		let mut state = HighlightState::default();
 		let colors = DefaultColorsSetEvent { rgb_fg: FG, rgb_bg: BG, rgb_sp: 0xFF0000, cterm_fg: 0, cterm_bg: 0 };
 		state.set_default_colors(vec![colors]);
 

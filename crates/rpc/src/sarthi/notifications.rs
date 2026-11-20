@@ -5,6 +5,7 @@
 
 use serde::de::IgnoredAny;
 use serde::{Deserialize, Deserializer};
+use smart_default::SmartDefault;
 
 use crate::{Window, WindowOptions};
 
@@ -85,18 +86,13 @@ pub struct FloatWindow {
 
 /// A window's `w:sarthi`, or a value that isn't one, e.g. with a key sarthi doesn't know: a mistake in one window's
 /// table doesn't lose what's sent about the others.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, SmartDefault)]
 #[serde(untagged)]
 pub enum WindowVariable {
+	/// Not set by default: nothing of the window's own
+	#[default]
 	Options(WindowOptions),
 	Invalid(IgnoredAny),
-}
-
-impl Default for WindowVariable {
-	/// Not set: nothing of the window's own
-	fn default() -> Self {
-		Self::Options(WindowOptions::default())
-	}
 }
 
 /// Lua's window handles are plain numbers.

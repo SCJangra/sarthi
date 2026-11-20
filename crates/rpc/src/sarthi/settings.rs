@@ -87,7 +87,7 @@ impl ScrollSettings {
 
 /// An animation's curve, e.g. `{ curve = "spring", stiffness = 400, damping = 32 }`. Durations are in milliseconds; a
 /// value left out has its default.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
 #[serde(tag = "curve", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Animation {
 	/// No animation: it's in its new place at once
@@ -95,13 +95,16 @@ pub enum Animation {
 
 	/// Like a weight on a spring: pulled by `stiffness`, slowed by `damping`. With less damping than 2 × √stiffness it
 	/// overshoots and bounces back.
+	#[default]
 	Spring {
 		/// How hard the spring pulls
 		#[serde(default = "default_stiffness")]
+		#[default(default_stiffness())]
 		stiffness: f32,
 
 		/// How much the spring slows it down
 		#[serde(default = "default_damping")]
+		#[default(default_damping())]
 		damping: f32,
 	},
 
@@ -147,12 +150,6 @@ fn default_damping() -> f32 {
 
 fn default_duration() -> f32 {
 	150.0
-}
-
-impl Default for Animation {
-	fn default() -> Self {
-		Self::Spring { stiffness: default_stiffness(), damping: default_damping() }
-	}
 }
 
 /// How the cursor moves to a new place: its corners each on their way, the leading ones faster, so it stretches

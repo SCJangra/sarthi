@@ -17,6 +17,7 @@ use std::collections::HashMap;
 
 use renderer::{CellSize, Edges, FontId, Layer, Motion, Outline, Rect, Shadow};
 use rpc::neovim::{CellText, Grid, Window};
+use smart_default::SmartDefault;
 
 use crate::cursor::CursorState;
 use crate::external::at_cursor;
@@ -27,7 +28,7 @@ pub use crate::pointer::{GridPosition, Pointer};
 use crate::preedit::Preedit;
 
 /// Neovim's UI state, kept up to date from its redraw events (`:help ui-events`)
-#[derive(Debug)]
+#[derive(Debug, SmartDefault)]
 pub struct Editor {
 	/// Neovim's grids (`:help ui-multigrid`). The global grid, [`Grid::GLOBAL`], is the screen: it holds what isn't in
 	/// a window, like window separators, status lines and the command line, and the windows' grids are placed on it.
@@ -51,12 +52,14 @@ pub struct Editor {
 	default_float: FloatStyle,
 
 	/// Physical pixels in a logical one, which the float styles are in
+	#[default(1.0)]
 	scale: f32,
 
 	highlights: HighlightState,
 	cursor: CursorState,
 
 	/// The grid the cursor is in
+	#[default(Grid::GLOBAL)]
 	cursor_grid: Grid,
 
 	/// The `guifont` option, as Neovim sent it, or empty while it's Neovim's default
@@ -75,6 +78,8 @@ pub struct Editor {
 	mouse_move_events: bool,
 
 	/// Size of the screen's cells, in pixels, which places the layers in the window
+	/// Until set, a cell is a pixel.
+	#[default(CellSize { width: 1, height: 1 })]
 	cell: CellSize,
 
 	/// The `order` of the next external window shown (see [`Placement::External`])
@@ -188,43 +193,7 @@ pub struct Redraw {
 	pub layers: Vec<Layer>,
 }
 
-impl Default for Editor {
-	fn default() -> Self {
-		Self::new()
-	}
-}
-
 impl Editor {
-	/// An editor with no grids yet, as before Neovim's first redraw
-	pub fn new() -> Self {
-		Self {
-			grids: HashMap::new(),
-			placements: HashMap::new(),
-			viewports: HashMap::new(),
-			scroll_motions: HashMap::new(),
-			floats: HashMap::new(),
-			default_float: FloatStyle::default(),
-			scale: 1.0,
-			see_through: false,
-			highlights: HighlightState::new(),
-			cursor: CursorState::default(),
-			cursor_grid: Grid::GLOBAL,
-			guifont: String::new(),
-			default_guifont: None,
-			linespace: 0,
-			mouse: false,
-			mouse_move_events: false,
-			// Until set, a cell is a pixel.
-			cell: CellSize { width: 1, height: 1 },
-			external_order: 0,
-			places: HashMap::new(),
-			command_rows: 0,
-			external_fonts: HashMap::new(),
-			preedit: None,
-			stale: false,
-		}
-	}
-
 	/// Sets the size of the screen's cells, in pixels: what the text is drawn with
 	pub fn set_cell_size(&mut self, cell: CellSize) {
 		self.stale |= self.cell != cell;

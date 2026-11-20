@@ -3,31 +3,26 @@
 
 use std::time::{Duration, Instant};
 
+use smart_default::SmartDefault;
+
 use crate::animation::{Approach, Easing, Motion};
 use crate::{BarOrientation, CellSize, Cursor, CursorShape, Layer, Rect};
 
 /// How the cursor moves to a new place
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, SmartDefault)]
 pub struct CursorMotion {
 	/// For moves farther than a couple of cells along a row
+	#[default(Motion::Spring { stiffness: 700.0, damping: 53.0 })]
 	pub motion: Motion,
 
 	/// For short moves along a row, like typing
+	#[default(Motion::Ease { easing: Easing::EaseOut, duration: Duration::from_millis(40) })]
 	pub short: Motion,
 
 	/// How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1, where
 	/// the leading corners are there at once
+	#[default(0.7)]
 	pub trail: f32,
-}
-
-impl Default for CursorMotion {
-	fn default() -> Self {
-		Self {
-			motion: Motion::Spring { stiffness: 700.0, damping: 53.0 },
-			short: Motion::Ease { easing: Easing::EaseOut, duration: Duration::from_millis(40) },
-			trail: 0.7,
-		}
-	}
 }
 
 /// Cells along a row that still make a short move
