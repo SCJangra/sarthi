@@ -8,16 +8,12 @@
 Introduction .................................................... |sarthi-intro|
 Settings ..................................................... |sarthi-settings|
   Per-window settings ........................................ |sarthi-w:sarthi|
-  scroll ....................................................... |sarthi-scroll|
-  cursor ....................................................... |sarthi-cursor|
-  shadow ....................................................... |sarthi-shadow|
-  outline ..................................................... |sarthi-outline|
-  corners ..................................................... |sarthi-corners|
-  padding ..................................................... |sarthi-padding|
+  window ....................................................... |sarthi-window|
+  cursor_animation ................................... |sarthi-cursor_animation|
   underline ................................................. |sarthi-underline|
   touchpad ................................................... |sarthi-touchpad|
-  window ....................................................... |sarthi-window|
   ime ............................................................. |sarthi-ime|
+  background ............................................... |sarthi-background|
   Animations ................................................ |sarthi.Animation|
 Lua module ............................................................ |sarthi|
 Window functions .................................................. |sarthi.api|
@@ -43,8 +39,11 @@ Set with `require('sarthi').setup({ … })`, by section, e.g.
 
 >lua
     require('sarthi').setup({
-      shadow = { opacity = 0.5 },
-      outline = { enabled = true, highlight = 'Comment' },
+      window = {
+        shadow = { opacity = 0.5 },
+        outline = { enabled = true, highlight = 'Comment' },
+      },
+      background = { opacity = 0.9 },
     })
 <
 Each section and key is optional: what isn't given has its default. `setup()`
@@ -59,22 +58,23 @@ if not.
 ------------------------------------------------------------------------------
 Per-window settings                                            *sarthi-w:sarthi*
 
-The sections about a window (`scroll`, `shadow`, `outline`, `corners`,
-`padding`) can be set for one window too, in its `w:sarthi` table: the same
-sections with the same keys, but `exclude_filetypes`. Each key given is the
-window's, whatever the setting's; only the filetypes a setting excludes win
-over it: such a window never has that effect, even with `enabled = true`.
+The sections of the settings' `window` (`scroll_animation`, `shadow`,
+`outline`, `rounded_corners`, `padding`) can be set for one window too, in its
+`w:sarthi` table: the same sections with the same keys, but
+`exclude_filetypes`. Each key given is the window's, whatever the setting's;
+only the filetypes a setting excludes win over it: such a window never has
+that effect, even with `enabled = true`.
 
 >lua
     vim.w[win].sarthi = { outline = { enabled = true, width = 2 } }
 <
-For a key it doesn't give, a window has the setting's `scroll` and `shadow`
-(every window scrolls, and every floating and external window casts a shadow).
-`outline`, `corners` and `padding` are only ever around external windows:
-Neovim places floating windows in its cells, without room for them. The
-settings' are for windows whose `w:sarthi` has `managed = true`; others have
-them only if their `w:sarthi` turns them on, with the defaults for the keys it
-doesn't give.
+For a key it doesn't give, a window has the setting's `scroll_animation` and
+`shadow` (every window scrolls, and every floating and external window casts a
+shadow). `outline`, `rounded_corners` and `padding` are only ever around
+external windows: Neovim places floating windows in its cells, without room
+for them. The settings' are for windows whose `w:sarthi` has `managed = true`;
+others have them only if their `w:sarthi` turns them on, with the defaults for
+the keys it doesn't give.
 
 >lua
     vim.w[win].sarthi = { managed = true, padding = { size = 2 } }
@@ -84,24 +84,29 @@ config, marked `managed`. A mistake in a table set directly is shown once, and
 the window gets nothing of its own until it's fixed.
 
 ------------------------------------------------------------------------------
-scroll                                                           *sarthi-scroll*
+window                                                           *sarthi-window*
+
+Neovim's windows: how their text scrolls and what's drawn around them. Each
+window can have its own values in its `w:sarthi`.
+
+WINDOW.SCROLL_ANIMATION                         *sarthi-window.scroll_animation*
 
 How text that scrolled moves to its new place
 
-scroll.enabled                                           *sarthi-scroll.enabled*
+window.scroll_animation.enabled         *sarthi-window.scroll_animation.enabled*
 
 `boolean`, default `true` · global, or per window
 
 Whether text that scrolled slides to its new place, or jumps there
 
-scroll.animation                                       *sarthi-scroll.animation*
+window.scroll_animation.curve             *sarthi-window.scroll_animation.curve*
 
 `sarthi.Animation`, default
-`{ curve = "spring", stiffness = 400, damping = 32 }` · global, or per window
+`{ type = "spring", stiffness = 400, damping = 32 }` · global, or per window
 
 How it moves to its new place
 
-scroll.exclude_filetypes                       *sarthi-scroll.exclude_filetypes*
+window.scroll_animation.exclude_filetypes *sarthi-window.scroll_animation.exclude_filetypes*
 
 `string[]`, default `{}` · global only
 
@@ -109,85 +114,43 @@ Windows showing these filetypes jump to their new place, e.g. menus whose
 selected line is highlighted text, whatever their `w:sarthi` gives. Glob
 patterns, e.g. `cmp_*`.
 
-------------------------------------------------------------------------------
-cursor                                                           *sarthi-cursor*
-
-How the cursor moves to a new place: its corners each on their way, the
-leading ones faster, so it stretches towards where it goes and shrinks back as
-it arrives
-
-cursor.animation                                       *sarthi-cursor.animation*
-
-`sarthi.Animation`, default
-`{ curve = "spring", stiffness = 700, damping = 53 }` · global only
-
-For moves farther than a couple of cells along a row
-
-cursor.short_animation                           *sarthi-cursor.short_animation*
-
-`sarthi.Animation`, default `{ curve = "ease_out", duration = 40 }` · global
-only
-
-For short moves along a row, like typing
-
-cursor.trail                                               *sarthi-cursor.trail*
-
-`number`, default `1` · global only
-
-How much the trailing corners lag behind the leading ones: from 0, where the
-cursor moves as it is, to 1, where its leading edge is there at once
-
-cursor.animate_insert_mode                   *sarthi-cursor.animate_insert_mode*
-
-`boolean`, default `true` · global only
-
-Whether moves in insert and replace mode animate, e.g. while typing
-
-cursor.animate_cmdline                           *sarthi-cursor.animate_cmdline*
-
-`boolean`, default `true` · global only
-
-Whether moves into and out of the command line animate
-
-------------------------------------------------------------------------------
-shadow                                                           *sarthi-shadow*
+WINDOW.SHADOW                                             *sarthi-window.shadow*
 
 The shadow under floating and external windows, in logical pixels
 
-shadow.enabled                                           *sarthi-shadow.enabled*
+window.shadow.enabled                             *sarthi-window.shadow.enabled*
 
 `boolean`, default `true` · global, or per window
 
 Whether windows cast one
 
-shadow.blur                                                 *sarthi-shadow.blur*
+window.shadow.blur                                   *sarthi-window.shadow.blur*
 
 `number`, default `8` · global, or per window
 
 How far the edge fades out, like CSS's blur radius
 
-shadow.offset                                             *sarthi-shadow.offset*
+window.shadow.offset                               *sarthi-window.shadow.offset*
 
 `number[]`, default `{ 0, 2 }` · global, or per window
 
 How far the shadow is moved from the window: right and down, or left and up if
 negative
 
-shadow.opacity                                           *sarthi-shadow.opacity*
+window.shadow.opacity                             *sarthi-window.shadow.opacity*
 
 `number`, default `1` · global, or per window
 
 From 0, invisible, to 1, black where fully shadowed
 
-shadow.exclude_filetypes                       *sarthi-shadow.exclude_filetypes*
+window.shadow.exclude_filetypes         *sarthi-window.shadow.exclude_filetypes*
 
 `string[]`, default `{}` · global only
 
 Windows showing these filetypes have no shadow, e.g. scrollbars, whatever
 their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
 
-------------------------------------------------------------------------------
-outline                                                         *sarthi-outline*
+WINDOW.OUTLINE                                           *sarthi-window.outline*
 
 A line around external windows, just outside them, in logical pixels.
 
@@ -195,34 +158,33 @@ Not around floating windows, which Neovim places without room for it. For
 windows whose `w:sarthi` is `managed`, e.g. opened with the window functions
 |sarthi.api|; others have one only if their `w:sarthi` turns it on.
 
-outline.enabled                                         *sarthi-outline.enabled*
+window.outline.enabled                           *sarthi-window.outline.enabled*
 
 `boolean`, default `false` · global, or per window
 
 Whether windows have one. Off by default: a window with a border of its own
 (`nvim_open_win()`'s `border`) would have two.
 
-outline.width                                             *sarthi-outline.width*
+window.outline.width                               *sarthi-window.outline.width*
 
 `number`, default `1` · global, or per window
 
 How thick the line is
 
-outline.highlight                                     *sarthi-outline.highlight*
+window.outline.highlight                       *sarthi-window.outline.highlight*
 
 `string`, default `"FloatBorder"` · global, or per window
 
 The highlight group whose text color the line has
 
-outline.exclude_filetypes                     *sarthi-outline.exclude_filetypes*
+window.outline.exclude_filetypes       *sarthi-window.outline.exclude_filetypes*
 
 `string[]`, default `{}` · global only
 
 Windows showing these filetypes have no outline, whatever their `w:sarthi`
 gives. Glob patterns, e.g. `cmp_*`.
 
-------------------------------------------------------------------------------
-corners                                                         *sarthi-corners*
+WINDOW.ROUNDED_CORNERS                           *sarthi-window.rounded_corners*
 
 Rounded corners of external windows, in logical pixels.
 
@@ -231,28 +193,27 @@ them. For windows whose `w:sarthi` is `managed`, e.g. opened with the window
 functions |sarthi.api|; others have them only if their `w:sarthi` turns them
 on.
 
-corners.enabled                                         *sarthi-corners.enabled*
+window.rounded_corners.enabled           *sarthi-window.rounded_corners.enabled*
 
 `boolean`, default `false` · global, or per window
 
 Whether windows have them. Off by default: a window's text in its corner cells
 isn't cut to them.
 
-corners.radius                                           *sarthi-corners.radius*
+window.rounded_corners.radius             *sarthi-window.rounded_corners.radius*
 
 `number`, default `8` · global, or per window
 
 How round they are: the radius of their arcs, in logical pixels.
 
-corners.exclude_filetypes                     *sarthi-corners.exclude_filetypes*
+window.rounded_corners.exclude_filetypes *sarthi-window.rounded_corners.exclude_filetypes*
 
 `string[]`, default `{}` · global only
 
 Windows showing these filetypes keep square corners, whatever their `w:sarthi`
 gives. Glob patterns, e.g. `cmp_*`.
 
-------------------------------------------------------------------------------
-padding                                                         *sarthi-padding*
+WINDOW.PADDING                                           *sarthi-window.padding*
 
 Space around external windows' cells, in their background, in logical pixels.
 
@@ -260,25 +221,65 @@ Not around floating windows, which Neovim places without room for it. For
 windows whose `w:sarthi` is `managed`, e.g. opened with the window functions
 |sarthi.api|; others have it only if their `w:sarthi` turns it on.
 
-padding.enabled                                         *sarthi-padding.enabled*
+window.padding.enabled                           *sarthi-window.padding.enabled*
 
 `boolean`, default `false` · global, or per window
 
 Whether windows have it
 
-padding.size                                               *sarthi-padding.size*
+window.padding.size                                 *sarthi-window.padding.size*
 
 `number|sarthi.PaddingSides`, default `4` · global, or per window
 
 In logical pixels: the same on every side, or each side's as numbers, those
 left out 0, e.g. `{ top = 2, left = 8, right = 8 }`
 
-padding.exclude_filetypes                     *sarthi-padding.exclude_filetypes*
+window.padding.exclude_filetypes       *sarthi-window.padding.exclude_filetypes*
 
 `string[]`, default `{}` · global only
 
 Windows showing these filetypes have no padding, whatever their `w:sarthi`
 gives. Glob patterns, e.g. `cmp_*`.
+
+------------------------------------------------------------------------------
+cursor_animation                                       *sarthi-cursor_animation*
+
+How the cursor moves to a new place: its corners each on their way, the
+leading ones faster, so it stretches towards where it goes and shrinks back as
+it arrives
+
+cursor_animation.curve                           *sarthi-cursor_animation.curve*
+
+`sarthi.Animation`, default
+`{ type = "spring", stiffness = 700, damping = 53 }` · global only
+
+For moves farther than a couple of cells along a row
+
+cursor_animation.short_curve               *sarthi-cursor_animation.short_curve*
+
+`sarthi.Animation`, default `{ type = "ease_out", duration = 40 }` · global
+only
+
+For short moves along a row, like typing
+
+cursor_animation.trail                           *sarthi-cursor_animation.trail*
+
+`number`, default `1` · global only
+
+How much the trailing corners lag behind the leading ones: from 0, where the
+cursor moves as it is, to 1, where its leading edge is there at once
+
+cursor_animation.animate_insert_mode *sarthi-cursor_animation.animate_insert_mode*
+
+`boolean`, default `true` · global only
+
+Whether moves in insert and replace mode animate, e.g. while typing
+
+cursor_animation.animate_cmdline       *sarthi-cursor_animation.animate_cmdline*
+
+`boolean`, default `true` · global only
+
+Whether moves into and out of the command line animate
 
 ------------------------------------------------------------------------------
 underline                                                     *sarthi-underline*
@@ -324,29 +325,6 @@ Lines scrolled per row of finger movement: 1 follows the fingers, more scrolls
 faster
 
 ------------------------------------------------------------------------------
-window                                                           *sarthi-window*
-
-The OS window: how see-through its background is, and whether the desktop
-behind it is blurred
-
-window.opacity                                           *sarthi-window.opacity*
-
-`number`, default `1` · global only
-
-How opaque the editor's background is, from 0 to 1. Text, highlighted
-backgrounds and floating windows stay opaque. Needs a compositor that shows
-windows' transparency; on X11, a compositing window manager, and even then
-some GPU drivers can't. Sarthi warns when it can't show it.
-
-window.blur                                                 *sarthi-window.blur*
-
-`boolean`, default `false` · global only
-
-Whether the desktop behind a see-through background is blurred. The compositor
-does it, where it can (e.g. KDE Plasma, macOS); elsewhere the background is
-only see-through. Never on X11, where Sarthi warns about it.
-
-------------------------------------------------------------------------------
 ime                                                                 *sarthi-ime*
 
 Typing through an input method (IME), e.g. fcitx5 or IBus, for languages a
@@ -362,17 +340,40 @@ Neovim as typed: e.g. from an autocommand while in Normal mode, so the input
 method doesn't take its keys.
 
 ------------------------------------------------------------------------------
+background                                                   *sarthi-background*
+
+The editor's background in the OS window: how see-through it is, and whether
+the desktop behind it is blurred
+
+background.opacity                                   *sarthi-background.opacity*
+
+`number`, default `1` · global only
+
+How opaque the editor's background is, from 0 to 1. Text, highlighted
+backgrounds and floating windows stay opaque. Needs a compositor that shows
+windows' transparency; on X11, a compositing window manager, and even then
+some GPU drivers can't. Sarthi warns when it can't show it.
+
+background.blur                                         *sarthi-background.blur*
+
+`boolean`, default `false` · global only
+
+Whether the desktop behind a see-through background is blurred. The compositor
+does it, where it can (e.g. KDE Plasma, macOS); elsewhere the background is
+only see-through. Never on X11, where Sarthi warns about it.
+
+------------------------------------------------------------------------------
 Animations                                                    *sarthi.Animation*
 
 An animation's curve,
-e.g. `{ curve = "spring", stiffness = 400, damping = 32 }`. Durations are in
+e.g. `{ type = "spring", stiffness = 400, damping = 32 }`. Durations are in
 milliseconds; a value left out has its default.
 
-curve = "none"                                           *sarthi.Animation.none*
+type = "none"                                            *sarthi.Animation.none*
 
 No animation: it's in its new place at once
 
-curve = "spring"                                       *sarthi.Animation.spring*
+type = "spring"                                        *sarthi.Animation.spring*
 
 Like a weight on a spring: pulled by `stiffness`, slowed by `damping`. With
 less damping than 2 × √stiffness it overshoots and bounces back.
@@ -380,25 +381,25 @@ less damping than 2 × √stiffness it overshoots and bounces back.
 - `stiffness`: `number`, default `400`. How hard the spring pulls
 - `damping`: `number`, default `32`. How much the spring slows it down
 
-curve = "linear"                                       *sarthi.Animation.linear*
+type = "linear"                                        *sarthi.Animation.linear*
 
 At an even speed over `duration`
 
 - `duration`: `number`, default `150`. How long it takes, in milliseconds
 
-curve = "ease_out"                                   *sarthi.Animation.ease_out*
+type = "ease_out"                                    *sarthi.Animation.ease_out*
 
 Fast at first, then slowing down, over `duration`
 
 - `duration`: `number`, default `150`. How long it takes, in milliseconds
 
-curve = "ease_in_out"                             *sarthi.Animation.ease_in_out*
+type = "ease_in_out"                              *sarthi.Animation.ease_in_out*
 
 Speeding up, then slowing down, over `duration`
 
 - `duration`: `number`, default `150`. How long it takes, in milliseconds
 
-curve = "cubic_bezier"                           *sarthi.Animation.cubic_bezier*
+type = "cubic_bezier"                            *sarthi.Animation.cubic_bezier*
 
 Like CSS's `cubic-bezier()` over `duration`
 
@@ -473,10 +474,10 @@ otherwise.
     })
 <
 The `sarthi` table (`WindowConfig` |sarthi.WindowConfig|) takes the window's
-own values of the settings' sections about a window, with the same keys
+own values of the sections of the settings' `window`, with the same keys
 (Settings |sarthi-settings|), each in place of the setting's; for those it
-doesn't give, the settings'. `shadow` and `scroll` apply to any window;
-`outline`, `corners` and `padding` only to external windows
+doesn't give, the settings'. `shadow` and `scroll_animation` apply to any
+window; `outline`, `rounded_corners` and `padding` only to external windows
 (`external = true`), as do `place` and `font`. The values are kept in the
 window's `w:sarthi`, marked `managed`, which a plugin can also set itself
 (Per-window settings |sarthi-w:sarthi|).
@@ -526,7 +527,7 @@ The `sarthi` table                                         *sarthi.WindowConfig*
 The `sarthi` table of a window's config, which the window functions
 |sarthi.api| take.
 
-The window's own values of the settings' sections about a window, kept in its
+The window's own values of the settings' `window` sections, kept in its
 `w:sarthi`, and an external window's place and fonts.
 
 sarthi.place                                         *sarthi.WindowConfig.place*
@@ -545,31 +546,32 @@ sarthi.shadow                                       *sarthi.WindowConfig.shadow*
 
 `sarthi.ShadowOptions`
 
-Its own shadow |sarthi-shadow| values
+Its own shadow |sarthi-window.shadow| values
 
 sarthi.outline                                     *sarthi.WindowConfig.outline*
 
 `sarthi.OutlineOptions`
 
-Its own outline |sarthi-outline| values. External windows only.
+Its own outline |sarthi-window.outline| values. External windows only.
 
-sarthi.corners                                     *sarthi.WindowConfig.corners*
+sarthi.rounded_corners                     *sarthi.WindowConfig.rounded_corners*
 
-`sarthi.CornerOptions`
+`sarthi.RoundedCornerOptions`
 
-Its own corners |sarthi-corners| values. External windows only.
+Its own rounded corners |sarthi-window.rounded_corners| values. External
+windows only.
 
 sarthi.padding                                     *sarthi.WindowConfig.padding*
 
 `sarthi.PaddingOptions`
 
-Its own padding |sarthi-padding| values. External windows only.
+Its own padding |sarthi-window.padding| values. External windows only.
 
-sarthi.scroll                                       *sarthi.WindowConfig.scroll*
+sarthi.scroll_animation                   *sarthi.WindowConfig.scroll_animation*
 
-`sarthi.ScrollOptions`
+`sarthi.ScrollAnimationOptions`
 
-Its own scroll |sarthi-scroll| values
+Its own scroll animation |sarthi-window.scroll_animation| values
 
 ------------------------------------------------------------------------------
 sarthi.place                                                *sarthi.WindowPlace*
@@ -579,14 +581,14 @@ Where Sarthi places an external window, over Neovim's screen (`sarthi.place`).
 `{ center = true }` centers it, as it is until placed; otherwise it's placed
 like a floating window, with its `anchor` corner at `row`, `col` of what it's
 `relative` to. Like a floating window with a border, whose frame, its padding
-and outline (padding |sarthi-padding|, outline |sarthi-outline|), takes the
-border's place: the frame's `anchor` corner is at `row`, `col`, and the
-window's cells are inside it. `row` and `col` are whole cells, a fraction
-dropped. A window it's relative to counts from its text, inside its frame,
-border and winbar, like Neovim's floats do. Like those, it's kept on the
-screen with its frame, above the command line, and with `fixed` not moved
-sideways unless anchored on the right. `offset` moves it further by logical
-pixels.
+and outline (padding |sarthi-window.padding|, outline
+|sarthi-window.outline|), takes the border's place: the frame's `anchor`
+corner is at `row`, `col`, and the window's cells are inside it. `row` and
+`col` are whole cells, a fraction dropped. A window it's relative to counts
+from its text, inside its frame, border and winbar, like Neovim's floats do.
+Like those, it's kept on the screen with its frame, above the command line,
+and with `fixed` not moved sideways unless anchored on the right. `offset`
+moves it further by logical pixels.
 
 place.center                                         *sarthi.WindowPlace.center*
 

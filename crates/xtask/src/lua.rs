@@ -102,17 +102,17 @@ fn animation(out: &mut String, schema: &Value) {
 	let curves = schema.get("oneOf").and_then(Value::as_array).cloned().unwrap_or_default();
 	let names: Vec<String> = curves
 		.iter()
-		.filter_map(|curve| curve.pointer("/properties/curve/const").map(schema::lua_value))
+		.filter_map(|curve| curve.pointer("/properties/type/const").map(schema::lua_value))
 		.map(|name| name.replace('"', "'"))
 		.collect();
 	out.push('\n');
 	comment(out, "---", &schema::doc(schema));
 	out.push_str("---@class sarthi.Animation\n");
-	let _ = writeln!(out, "---@field curve {} Which curve", names.join("|"));
+	let _ = writeln!(out, "---@field type {} Which curve", names.join("|"));
 	let mut keys: Vec<&str> = Vec::new();
 	for curve in &curves {
 		for (key, field) in schema::properties(curve) {
-			if key != "curve" && !keys.contains(&key) {
+			if key != "type" && !keys.contains(&key) {
 				keys.push(key);
 				comment(out, "---", &format!("@field {key}? {} {}", schema::lua_type(field), schema::doc(field)));
 			}

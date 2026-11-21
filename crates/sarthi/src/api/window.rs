@@ -18,14 +18,14 @@ use crate::place;
 type Table = Vec<(Value, Value)>;
 
 /// The sections of the settings a window can have its own values of, kept in `w:sarthi`
-const OPTIONS: [&str; 5] = ["shadow", "outline", "corners", "padding", "scroll"];
+const OPTIONS: [&str; 5] = ["shadow", "outline", "rounded_corners", "padding", "scroll_animation"];
 
 /// What only external windows take, and why
 const EXTERNAL_ONLY: [(&str, &str); 5] = [
 	("place", "floating windows are placed by Neovim"),
 	("font", "floating windows share the main grid's cells"),
 	("outline", "Neovim places floating windows without room for it"),
-	("corners", "they'd cut a floating window's text"),
+	("rounded_corners", "they'd cut a floating window's text"),
 	("padding", "Neovim places floating windows without room for it"),
 ];
 
@@ -169,7 +169,7 @@ fn check(ctx: &Ctx, sarthi: Option<&Value>, options: Table, external: bool) -> R
 	// Sarthi decodes and checks the options, against the settings they go over.
 	let merged = Value::Map(merged);
 	let options: WindowOptions = decode(merged.clone()).map_err(|mistake| format!("`sarthi`: {mistake}"))?;
-	ctx.on_main(move |app| app.settings.for_window(&options).validate())?
+	ctx.on_main(move |app| app.settings.window.with(&options).validate())?
 		.map_err(|mistake| format!("`sarthi`: {mistake}"))?;
 	Ok(merged)
 }

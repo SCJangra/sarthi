@@ -10,7 +10,7 @@ use crate::sarthi::notifications::optional_window_number;
 ///
 /// `{ center = true }` centers it, as it is until placed; otherwise it's placed like a floating window, with its
 /// `anchor` corner at `row`, `col` of what it's `relative` to. Like a floating window with a border, whose frame, its
-/// padding and outline ([padding](#sarthi-padding), [outline](#sarthi-outline)), takes the border's place: the frame's
+/// padding and outline ([padding](#sarthi-window.padding), [outline](#sarthi-window.outline)), takes the border's place: the frame's
 /// `anchor` corner is at `row`, `col`, and the window's cells are inside it. `row` and `col` are whole cells, a
 /// fraction dropped. A window it's relative to counts from its text, inside its frame, border and winbar, like Neovim's
 /// floats do. Like those, it's kept on the screen with its frame, above the command line, and with `fixed` not moved

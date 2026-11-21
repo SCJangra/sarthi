@@ -120,7 +120,7 @@ pub fn handle(ctx: &Ctx, IncomingRequest { request, responder }: IncomingRequest
 /// Uses `settings` from now on, if their values make sense, and sends the floating windows open again, which get them
 /// too
 fn setup(ctx: &Ctx, settings: Settings) -> Result<(), String> {
-	let highlight = settings.outline.highlight.clone();
+	let highlight = settings.window.outline.highlight.clone();
 	ctx.on_main(move |app| app.apply_settings(settings))??;
 	ctx.nvim
 		.exec_lua::<()>("require('sarthi.floats').resend(...)", (highlight,))

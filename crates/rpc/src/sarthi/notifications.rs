@@ -110,7 +110,7 @@ mod tests {
 	use serde::de::IgnoredAny;
 
 	use super::{FloatWindow, FloatsChangedArgs, ScrolledWindow, WinScrolledArgs, WindowVariable};
-	use crate::{Notification, ScrollOptions, ShadowOptions, Window, WindowOptions};
+	use crate::{Notification, ScrollAnimationOptions, ShadowOptions, Window, WindowOptions};
 
 	fn decode(method: &str, windows: Vec<Value>) -> Notification {
 		let notification = Value::Array(vec![Value::from(method), Value::Array(vec![Value::Array(windows)])]);
@@ -124,14 +124,14 @@ mod tests {
 	#[test]
 	fn win_scrolled() {
 		// `rpcnotify(channel, 'win_scrolled', { { win = 1000, filetype = 'lua' }, … })`
-		let scroll = map(vec![("scroll", map(vec![("enabled", Value::from(false))]))]);
+		let scroll = map(vec![("scroll_animation", map(vec![("enabled", Value::from(false))]))]);
 		let windows = vec![
 			map(vec![("win", Value::from(1000)), ("filetype", Value::from("lua"))]),
 			map(vec![("win", Value::from(1001)), ("filetype", Value::from("")), ("sarthi", scroll)]),
 		];
 
 		let off = WindowOptions {
-			scroll: ScrollOptions { enabled: Some(false), ..Default::default() },
+			scroll_animation: ScrollAnimationOptions { enabled: Some(false), ..Default::default() },
 			..Default::default()
 		};
 		let expected = WinScrolledArgs {

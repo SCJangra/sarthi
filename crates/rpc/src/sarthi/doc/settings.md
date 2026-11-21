@@ -2,8 +2,11 @@ Set with `require('sarthi').setup({ … })`, by section, e.g.
 
 ```lua
 require('sarthi').setup({
-  shadow = { opacity = 0.5 },
-  outline = { enabled = true, highlight = 'Comment' },
+  window = {
+    shadow = { opacity = 0.5 },
+    outline = { enabled = true, highlight = 'Comment' },
+  },
+  background = { opacity = 0.9 },
 })
 ```
 

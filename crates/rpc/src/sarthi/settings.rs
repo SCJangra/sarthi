@@ -16,11 +16,33 @@ use crate::{WindowFont, WindowPlace};
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
-	/// How text that scrolled moves to its new place
-	pub scroll: ScrollSettings,
+	/// Neovim's windows: how their text scrolls and what's drawn around them. Each window can have its own values in
+	/// its `w:sarthi`.
+	pub window: WindowSettings,
 
 	/// How the cursor moves to a new place
-	pub cursor: CursorSettings,
+	pub cursor_animation: CursorAnimationSettings,
+
+	/// How underlines are drawn
+	pub underline: UnderlineSettings,
+
+	/// Scrolling with a touchpad
+	pub touchpad: TouchpadSettings,
+
+	/// Typing through an input method
+	pub ime: ImeSettings,
+
+	/// The editor's background in the OS window
+	pub background: BackgroundSettings,
+}
+
+/// Neovim's windows: how their text scrolls and what's drawn around them. Each window can have its own values in its
+/// `w:sarthi`.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowSettings {
+	/// How text that scrolled moves to its new place
+	pub scroll_animation: ScrollAnimationSettings,
 
 	/// The shadow under floating and external windows
 	pub shadow: ShadowSettings,
@@ -29,66 +51,54 @@ pub struct Settings {
 	pub outline: OutlineSettings,
 
 	/// Rounded corners of external windows
-	pub corners: CornerSettings,
+	pub rounded_corners: RoundedCornerSettings,
 
 	/// Space around external windows' cells
 	pub padding: PaddingSettings,
-
-	/// How underlines are drawn
-	pub underline: UnderlineSettings,
-
-	/// Scrolling with a touchpad
-	pub touchpad: TouchpadSettings,
-
-	/// The OS window
-	pub window: WindowSettings,
-
-	/// Typing through an input method
-	pub ime: ImeSettings,
 }
 
 /// How text that scrolled moves to its new place
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
 #[serde(default, deny_unknown_fields)]
-pub struct ScrollSettings {
+pub struct ScrollAnimationSettings {
 	/// Whether text that scrolled slides to its new place, or jumps there
 	#[default(true)]
 	pub enabled: bool,
 
 	/// How it moves to its new place
-	pub animation: Animation,
+	pub curve: Animation,
 
 	/// Windows showing these filetypes jump to their new place, e.g. menus whose selected line is highlighted text,
 	/// whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
 	pub exclude_filetypes: Filetypes,
 }
 
-/// A window's own `scroll` values (see [`ScrollSettings`])
+/// A window's own `scroll_animation` values (see [`ScrollAnimationSettings`])
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
-pub struct ScrollOptions {
+pub struct ScrollAnimationOptions {
 	/// Whether its text slides
 	pub enabled: Option<bool>,
 
 	/// How its text slides
-	pub animation: Option<Animation>,
+	pub curve: Option<Animation>,
 }
 
-impl ScrollSettings {
+impl ScrollAnimationSettings {
 	/// These settings, with the values `options` gives in their place
-	pub fn with(&self, options: &ScrollOptions) -> Self {
+	pub fn with(&self, options: &ScrollAnimationOptions) -> Self {
 		Self {
 			enabled: options.enabled.unwrap_or(self.enabled),
-			animation: options.animation.unwrap_or(self.animation),
+			curve: options.curve.unwrap_or(self.curve),
 			..self.clone()
 		}
 	}
 }
 
-/// An animation's curve, e.g. `{ curve = "spring", stiffness = 400, damping = 32 }`. Durations are in milliseconds; a
+/// An animation's curve, e.g. `{ type = "spring", stiffness = 400, damping = 32 }`. Durations are in milliseconds; a
 /// value left out has its default.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
-#[serde(tag = "curve", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Animation {
 	/// No animation: it's in its new place at once
 	None,
@@ -156,14 +166,14 @@ fn default_duration() -> f32 {
 /// towards where it goes and shrinks back as it arrives
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
 #[serde(default, deny_unknown_fields)]
-pub struct CursorSettings {
+pub struct CursorAnimationSettings {
 	/// For moves farther than a couple of cells along a row
 	#[default(Animation::Spring { stiffness: 700.0, damping: 53.0 })]
-	pub animation: Animation,
+	pub curve: Animation,
 
 	/// For short moves along a row, like typing
 	#[default(Animation::EaseOut { duration: 40.0 })]
-	pub short_animation: Animation,
+	pub short_curve: Animation,
 
 	/// How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1, where
 	/// its leading edge is there at once
@@ -290,7 +300,7 @@ impl OutlineSettings {
 /// them on.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
 #[serde(default, deny_unknown_fields)]
-pub struct CornerSettings {
+pub struct RoundedCornerSettings {
 	/// Whether windows have them. Off by default: a window's text in its corner cells isn't cut to them.
 	pub enabled: bool,
 
@@ -303,10 +313,10 @@ pub struct CornerSettings {
 	pub exclude_filetypes: Filetypes,
 }
 
-/// A window's own `corners` values (see [`CornerSettings`])
+/// A window's own `rounded_corners` values (see [`RoundedCornerSettings`])
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
-pub struct CornerOptions {
+pub struct RoundedCornerOptions {
 	/// Whether it has them
 	pub enabled: Option<bool>,
 
@@ -314,9 +324,9 @@ pub struct CornerOptions {
 	pub radius: Option<f32>,
 }
 
-impl CornerSettings {
+impl RoundedCornerSettings {
 	/// These settings, with the values `options` gives in their place
-	pub fn with(&self, options: &CornerOptions) -> Self {
+	pub fn with(&self, options: &RoundedCornerOptions) -> Self {
 		Self {
 			enabled: options.enabled.unwrap_or(self.enabled),
 			radius: options.radius.unwrap_or(self.radius),
@@ -408,10 +418,10 @@ pub struct ImeSettings {
 	pub enabled: bool,
 }
 
-/// The OS window: how see-through its background is, and whether the desktop behind it is blurred
+/// The editor's background in the OS window: how see-through it is, and whether the desktop behind it is blurred
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
 #[serde(default, deny_unknown_fields)]
-pub struct WindowSettings {
+pub struct BackgroundSettings {
 	/// How opaque the editor's background is, from 0 to 1. Text, highlighted backgrounds and floating windows stay
 	/// opaque. Needs a compositor that shows windows' transparency; on X11, a compositing window manager, and even then
 	/// some GPU drivers can't. Sarthi warns when it can't show it.
@@ -567,26 +577,26 @@ impl JsonSchema for Filetypes {
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct WindowOptions {
-	/// Whether the settings' `outline`, `corners` and `padding` apply to the window, under its own values, as to one
-	/// opened with `require('sarthi').api`, which sets it. Without it, the window has only what it gives of those; the
-	/// settings' `scroll` and `shadow` apply to every window.
+	/// Whether the settings' `outline`, `rounded_corners` and `padding` apply to the window, under its own values, as
+	/// to one opened with `require('sarthi').api`, which sets it. Without it, the window has only what it gives of
+	/// those; the settings' `scroll_animation` and `shadow` apply to every window.
 	pub managed: Option<bool>,
-	/// The window's own `scroll`
-	pub scroll: ScrollOptions,
+	/// The window's own `scroll_animation`
+	pub scroll_animation: ScrollAnimationOptions,
 	/// The window's own `shadow`
 	pub shadow: ShadowOptions,
 	/// The window's own `outline`
 	pub outline: OutlineOptions,
-	/// The window's own `corners`
-	pub corners: CornerOptions,
+	/// The window's own `rounded_corners`
+	pub rounded_corners: RoundedCornerOptions,
 	/// The window's own `padding`
 	pub padding: PaddingOptions,
 }
 
 /// The `sarthi` table of a window's config, which the [window functions](#sarthi.api) take.
 ///
-/// The window's own values of the settings' sections about a window, kept in its `w:sarthi`, and an external window's
-/// place and fonts.
+/// The window's own values of the settings' `window` sections, kept in its `w:sarthi`, and an external window's place
+/// and fonts.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct WindowConfig {
@@ -596,37 +606,38 @@ pub struct WindowConfig {
 	/// The fonts an external window's text is drawn with. External windows only.
 	pub font: Option<WindowFont>,
 
-	/// Its own [shadow](#sarthi-shadow) values
+	/// Its own [shadow](#sarthi-window.shadow) values
 	pub shadow: Option<ShadowOptions>,
 
-	/// Its own [outline](#sarthi-outline) values. External windows only.
+	/// Its own [outline](#sarthi-window.outline) values. External windows only.
 	pub outline: Option<OutlineOptions>,
 
-	/// Its own [corners](#sarthi-corners) values. External windows only.
-	pub corners: Option<CornerOptions>,
+	/// Its own [rounded corners](#sarthi-window.rounded_corners) values. External windows only.
+	pub rounded_corners: Option<RoundedCornerOptions>,
 
-	/// Its own [padding](#sarthi-padding) values. External windows only.
+	/// Its own [padding](#sarthi-window.padding) values. External windows only.
 	pub padding: Option<PaddingOptions>,
 
-	/// Its own [scroll](#sarthi-scroll) values
-	pub scroll: Option<ScrollOptions>,
+	/// Its own [scroll animation](#sarthi-window.scroll_animation) values
+	pub scroll_animation: Option<ScrollAnimationOptions>,
 }
 
-impl Settings {
-	/// The settings a window has with `options` from its `w:sarthi`: its own values, and for those it doesn't give, the
-	/// settings' `scroll` and `shadow`, and their `outline`, `corners` and `padding` if it's managed, or else those
-	/// sections' defaults. The filetypes each excludes are the settings'.
-	pub fn for_window(&self, options: &WindowOptions) -> Self {
+impl WindowSettings {
+	/// The settings a window has with `options` from its `w:sarthi`: its own values, and for those it doesn't give,
+	/// these `scroll_animation` and `shadow`, and these `outline`, `rounded_corners` and `padding` if it's managed, or
+	/// else those sections' defaults. The filetypes each excludes are these settings'.
+	pub fn with(&self, options: &WindowOptions) -> Self {
 		let managed = options.managed.unwrap_or(false);
 		let outline = if managed {
 			self.outline.clone()
 		} else {
 			OutlineSettings { exclude_filetypes: self.outline.exclude_filetypes.clone(), ..Default::default() }
 		};
-		let corners = if managed {
-			self.corners.clone()
+		let rounded_corners = if managed {
+			self.rounded_corners.clone()
 		} else {
-			CornerSettings { exclude_filetypes: self.corners.exclude_filetypes.clone(), ..Default::default() }
+			let exclude_filetypes = self.rounded_corners.exclude_filetypes.clone();
+			RoundedCornerSettings { exclude_filetypes, ..Default::default() }
 		};
 		let padding = if managed {
 			self.padding.clone()
@@ -634,37 +645,50 @@ impl Settings {
 			PaddingSettings { exclude_filetypes: self.padding.exclude_filetypes.clone(), ..Default::default() }
 		};
 		Self {
-			scroll: self.scroll.with(&options.scroll),
+			scroll_animation: self.scroll_animation.with(&options.scroll_animation),
 			shadow: self.shadow.with(&options.shadow),
 			outline: outline.with(&options.outline),
-			corners: corners.with(&options.corners),
+			rounded_corners: rounded_corners.with(&options.rounded_corners),
 			padding: padding.with(&options.padding),
-			..self.clone()
 		}
 	}
 
+	/// Whether the values make sense, beyond their types; the error names the first that doesn't by its key in a
+	/// window's `w:sarthi`, e.g. `shadow.opacity`
+	///
+	/// # Errors
+	///
+	/// Fails with what doesn't make sense, e.g. a negative size.
+	pub fn validate(&self) -> Result<(), String> {
+		validate_animation("scroll_animation.curve", self.scroll_animation.curve)?;
+		check(self.shadow.blur >= 0.0, "shadow.blur can't be negative")?;
+		check((0.0..=1.0).contains(&self.shadow.opacity), "shadow.opacity must be from 0 to 1")?;
+		check(self.outline.width > 0.0, "outline.width must be more than 0")?;
+		check(self.rounded_corners.radius >= 0.0, "rounded_corners.radius can't be negative")?;
+		check(self.padding.size.sides().iter().all(|size| *size >= 0.0), "padding.size can't be negative")
+	}
+}
+
+impl Settings {
 	/// Whether the values make sense, beyond their types; the error names the first that doesn't
 	///
 	/// # Errors
 	///
 	/// Fails with what doesn't make sense, e.g. a negative size.
 	pub fn validate(&self) -> Result<(), String> {
-		validate_animation("scroll.animation", self.scroll.animation)?;
-		validate_animation("cursor.animation", self.cursor.animation)?;
-		validate_animation("cursor.short_animation", self.cursor.short_animation)?;
-		check((0.0..=1.0).contains(&self.cursor.trail), "cursor.trail must be from 0 to 1")?;
-		check(self.shadow.blur >= 0.0, "shadow.blur can't be negative")?;
-		check((0.0..=1.0).contains(&self.shadow.opacity), "shadow.opacity must be from 0 to 1")?;
-		check(self.outline.width > 0.0, "outline.width must be more than 0")?;
-		check(self.corners.radius >= 0.0, "corners.radius can't be negative")?;
-		check(self.padding.size.sides().iter().all(|size| *size >= 0.0), "padding.size can't be negative")?;
+		self.window.validate().map_err(|error| format!("window.{error}"))?;
+
+		let cursor = &self.cursor_animation;
+		validate_animation("cursor_animation.curve", cursor.curve)?;
+		validate_animation("cursor_animation.short_curve", cursor.short_curve)?;
+		check((0.0..=1.0).contains(&cursor.trail), "cursor_animation.trail must be from 0 to 1")?;
 
 		let underline = &self.underline;
 		check(underline.thickness.is_none_or(|thickness| thickness > 0.0), "underline.thickness must be more than 0")?;
 		check(underline.wave_height > 0.0, "underline.wave_height must be more than 0")?;
 		check(underline.ink_gaps.is_none_or(|clearance| clearance >= 0.0), "underline.ink_gaps can't be negative")?;
 		check(self.touchpad.scroll_speed > 0.0, "touchpad.scroll_speed must be more than 0")?;
-		check((0.0..=1.0).contains(&self.window.opacity), "window.opacity must be from 0 to 1")?;
+		check((0.0..=1.0).contains(&self.background.opacity), "background.opacity must be from 0 to 1")?;
 		Ok(())
 	}
 }
@@ -759,7 +783,7 @@ mod number_or_false {
 mod tests {
 	use rmpv::Value;
 
-	use super::{Animation, CornerOptions, Filetypes, Settings, WindowOptions};
+	use super::{Animation, Filetypes, RoundedCornerOptions, Settings, WindowOptions};
 
 	/// A Lua table as Neovim sends it: a map, or an array when empty
 	fn table(pairs: Vec<(&str, Value)>) -> Value {
@@ -775,10 +799,16 @@ mod tests {
 		Ok(settings)
 	}
 
+	/// Settings with only `window`'s section `name` given, as `pairs`
+	fn window_section(name: &str, pairs: Vec<(&str, Value)>) -> Result<Settings, String> {
+		parse(table(vec![("window", table(vec![(name, table(pairs))]))]))
+	}
+
 	#[test]
 	fn nothing_given_keeps_the_defaults() {
 		assert_eq!(parse(table(vec![])).unwrap(), Settings::default());
-		assert_eq!(parse(table(vec![("scroll", table(vec![]))])).unwrap(), Settings::default());
+		assert_eq!(parse(table(vec![("window", table(vec![]))])).unwrap(), Settings::default());
+		assert_eq!(window_section("scroll_animation", vec![]).unwrap(), Settings::default());
 	}
 
 	#[test]
@@ -796,37 +826,33 @@ mod tests {
 
 	#[test]
 	fn curves() {
-		let animation = |pairs| parse(table(vec![("scroll", table(vec![("animation", table(pairs))]))]));
-		let curve = |name: &str| ("curve", Value::from(name));
+		let curve = |pairs| window_section("scroll_animation", vec![("curve", table(pairs))]);
+		let kind = |name: &str| ("type", Value::from(name));
+		let scrolled = |settings: Settings| settings.window.scroll_animation.curve;
 
-		assert_eq!(animation(vec![curve("none")]).unwrap().scroll.animation, Animation::None);
+		assert_eq!(scrolled(curve(vec![kind("none")]).unwrap()), Animation::None);
 		assert_eq!(
-			animation(vec![curve("spring"), ("damping", Value::from(40))])
-				.unwrap()
-				.scroll
-				.animation,
+			scrolled(curve(vec![kind("spring"), ("damping", Value::from(40))]).unwrap()),
 			Animation::Spring { stiffness: 400.0, damping: 40.0 },
 		);
-		assert_eq!(
-			animation(vec![curve("ease_out")]).unwrap().scroll.animation,
-			Animation::EaseOut { duration: 150.0 }
-		);
+		assert_eq!(scrolled(curve(vec![kind("ease_out")]).unwrap()), Animation::EaseOut { duration: 150.0 });
 		let points = Value::Array([0.25, 0.1, 0.25, 1.0].into_iter().map(Value::from).collect());
-		let bezier =
-			animation(vec![curve("cubic_bezier"), ("points", points), ("duration", Value::from(200))]).unwrap();
-		assert_eq!(bezier.scroll.animation, Animation::CubicBezier { points: [0.25, 0.1, 0.25, 1.0], duration: 200.0 });
+		let bezier = curve(vec![kind("cubic_bezier"), ("points", points), ("duration", Value::from(200))]).unwrap();
+		assert_eq!(scrolled(bezier), Animation::CubicBezier { points: [0.25, 0.1, 0.25, 1.0], duration: 200.0 });
 	}
 
 	#[test]
 	fn mistakes_are_named() {
-		let error = parse(table(vec![("scrol", table(vec![]))])).unwrap_err();
-		assert!(error.contains("unknown field `scrol`") && error.contains("`scroll`"), "{error}");
+		let error = parse(table(vec![("windw", table(vec![]))])).unwrap_err();
+		assert!(error.contains("unknown field `windw`") && error.contains("`window`"), "{error}");
+		let error = window_section("scrol_animation", vec![]).unwrap_err();
+		assert!(error.contains("unknown field `scrol_animation`") && error.contains("`scroll_animation`"), "{error}");
 
-		let animation = |pairs| parse(table(vec![("scroll", table(vec![("animation", table(pairs))]))]));
-		let error = animation(vec![("curve", Value::from("sprng"))]).unwrap_err();
+		let curve = |pairs| window_section("scroll_animation", vec![("curve", table(pairs))]);
+		let error = curve(vec![("type", Value::from("sprng"))]).unwrap_err();
 		assert!(error.contains("unknown variant `sprng`") && error.contains("`spring`"), "{error}");
 		// Another curve's value
-		let error = animation(vec![("curve", Value::from("ease_out")), ("stiffness", Value::from(3))]).unwrap_err();
+		let error = curve(vec![("type", Value::from("ease_out")), ("stiffness", Value::from(3))]).unwrap_err();
 		assert!(error.contains("unknown field `stiffness`"), "{error}");
 
 		let underline = |pairs| parse(table(vec![("underline", table(pairs))]));
@@ -840,68 +866,72 @@ mod tests {
 
 	#[test]
 	fn shadow() {
-		let shadow = |pairs| parse(table(vec![("shadow", table(pairs))]));
+		let shadow = |pairs| window_section("shadow", pairs);
 		let offset = Value::Array(vec![Value::from(2), Value::from(6)]);
 		let settings = shadow(vec![("offset", offset), ("enabled", Value::from(false))])
 			.unwrap()
+			.window
 			.shadow;
 		assert_eq!((settings.offset, settings.enabled, settings.blur), ([2.0, 6.0], false, 8.0));
 
 		let error = shadow(vec![("opacity", Value::from(1.5))]).unwrap_err();
-		assert_eq!(error, "shadow.opacity must be from 0 to 1");
+		assert_eq!(error, "window.shadow.opacity must be from 0 to 1");
 		let error = shadow(vec![("offset", Value::from(3))]).unwrap_err();
 		assert!(error.contains("invalid type"), "{error}");
 	}
 
 	#[test]
 	fn outline() {
-		let outline = |pairs| parse(table(vec![("outline", table(pairs))]));
+		let outline = |pairs| window_section("outline", pairs);
 		let settings = outline(vec![("enabled", Value::from(true)), ("highlight", Value::from("Comment"))])
 			.unwrap()
+			.window
 			.outline;
 		assert_eq!((settings.enabled, settings.width, settings.highlight.as_str()), (true, 1.0, "Comment"));
-		assert!(!Settings::default().outline.enabled);
+		assert!(!Settings::default().window.outline.enabled);
 		let error = outline(vec![("width", Value::from(0))]).unwrap_err();
-		assert_eq!(error, "outline.width must be more than 0");
+		assert_eq!(error, "window.outline.width must be more than 0");
 	}
 
 	#[test]
-	fn corners() {
-		let corners = |pairs| parse(table(vec![("corners", table(pairs))]));
-		let settings = corners(vec![("enabled", Value::from(true))]).unwrap().corners;
+	fn rounded_corners() {
+		let corners = |pairs| window_section("rounded_corners", pairs);
+		let settings = corners(vec![("enabled", Value::from(true))]).unwrap().window.rounded_corners;
 		assert_eq!((settings.enabled, settings.radius), (true, 8.0));
-		assert!(!Settings::default().corners.enabled);
+		assert!(!Settings::default().window.rounded_corners.enabled);
 		let error = corners(vec![("radius", Value::from(-1))]).unwrap_err();
-		assert_eq!(error, "corners.radius can't be negative");
+		assert_eq!(error, "window.rounded_corners.radius can't be negative");
 	}
 
 	#[test]
 	fn padding() {
-		let padding = |pairs| parse(table(vec![("padding", table(pairs))]));
+		let padding = |pairs| window_section("padding", pairs);
+		let size = |pairs| padding(vec![("size", table(pairs))]).map(|settings| settings.window.padding.size);
 		let settings = padding(vec![("enabled", Value::from(true)), ("size", Value::from(6))])
 			.unwrap()
+			.window
 			.padding;
 		assert_eq!((settings.enabled, settings.size.sides()), (true, [6.0; 4]));
-		assert!(!Settings::default().padding.enabled);
+		assert!(!Settings::default().window.padding.enabled);
 		let error = padding(vec![("size", Value::from(-1))]).unwrap_err();
-		assert_eq!(error, "padding.size can't be negative");
+		assert_eq!(error, "window.padding.size can't be negative");
 
 		// Each side its own, those left out none; an empty table, none at all
-		let sides = table(vec![("top", Value::from(2)), ("left", Value::from(8.5))]);
-		let size = padding(vec![("size", sides)]).unwrap().padding.size;
-		assert_eq!(size.sides(), [2.0, 0.0, 0.0, 8.5]);
-		assert_eq!(padding(vec![("size", table(vec![]))]).unwrap().padding.size.sides(), [0.0; 4]);
-		let error = padding(vec![("size", table(vec![("lfet", Value::from(1))]))]).unwrap_err();
+		let sides = size(vec![("top", Value::from(2)), ("left", Value::from(8.5))]).unwrap();
+		assert_eq!(sides.sides(), [2.0, 0.0, 0.0, 8.5]);
+		assert_eq!(size(vec![]).unwrap().sides(), [0.0; 4]);
+		let error = size(vec![("lfet", Value::from(1))]).unwrap_err();
 		assert!(error.contains("unknown field `lfet`"), "{error}");
-		let error = padding(vec![("size", table(vec![("right", Value::from(-2))]))]).unwrap_err();
-		assert_eq!(error, "padding.size can't be negative");
+		let error = size(vec![("right", Value::from(-2))]).unwrap_err();
+		assert_eq!(error, "window.padding.size can't be negative");
 	}
 
 	#[test]
 	fn settings_go_to_lua_as_setup_takes_them() {
 		// As `require("sarthi").settings()` gets them: every section and key, by name, which setup() takes back
 		let mut settings = Settings::default();
-		settings.padding.size = super::PaddingSize::Sides(super::PaddingSides { top: 2.0, ..Default::default() });
+		let size = super::PaddingSize::Sides(super::PaddingSides { top: 2.0, ..Default::default() });
+		settings.window.padding.size = size;
 		settings.underline.ink_gaps = Some(1.5);
 		let encoded = rmp_serde::to_vec_named(&settings).unwrap();
 		assert_eq!(rmp_serde::from_slice::<Settings>(&encoded).unwrap(), settings);
@@ -911,61 +941,60 @@ mod tests {
 
 	#[test]
 	fn window_options() {
-		// `w:sarthi`: the same sections and keys, each replacing the setting's
+		// `w:sarthi`: the sections of the settings' `window`, with the same keys, each replacing the setting's
 		let shadow = table(vec![("opacity", Value::from(0.6)), ("offset", Value::Array(vec![1.into(), 2.into()]))]);
 		let scroll = table(vec![("enabled", Value::from(false))]);
 		let options: WindowOptions =
-			rmpv::ext::from_value(table(vec![("shadow", shadow), ("scroll", scroll)])).unwrap();
-		let settings = Settings::default().for_window(&options);
-		assert_eq!((settings.shadow.opacity, settings.shadow.offset, settings.shadow.blur), (0.6, [1.0, 2.0], 8.0));
-		assert!(settings.shadow.enabled && !settings.scroll.enabled);
+			rmpv::ext::from_value(table(vec![("shadow", shadow), ("scroll_animation", scroll)])).unwrap();
+		let window = Settings::default().window.with(&options);
+		assert_eq!((window.shadow.opacity, window.shadow.offset, window.shadow.blur), (0.6, [1.0, 2.0], 8.0));
+		assert!(window.shadow.enabled && !window.scroll_animation.enabled);
 		assert_eq!(rmpv::ext::from_value::<WindowOptions>(table(vec![])).unwrap(), WindowOptions::default());
 
 		// Only the sections about a window, without their filetypes: those are only the settings'
 		let filetypes = table(vec![("exclude_filetypes", Value::Array(vec![]))]);
 		assert!(rmpv::ext::from_value::<WindowOptions>(table(vec![("shadow", filetypes)])).is_err());
-		assert!(rmpv::ext::from_value::<WindowOptions>(table(vec![("cursor", table(vec![]))])).is_err());
+		let cursor = table(vec![("cursor_animation", table(vec![]))]);
+		assert!(rmpv::ext::from_value::<WindowOptions>(cursor).is_err());
 		let opacity = table(vec![("shadow", table(vec![("opacity", Value::from(2))]))]);
 		let options: WindowOptions = rmpv::ext::from_value(opacity).unwrap();
-		let error = Settings::default().for_window(&options).validate().unwrap_err();
+		let error = Settings::default().window.with(&options).validate().unwrap_err();
 		assert_eq!(error, "shadow.opacity must be from 0 to 1");
 
 		// Every value of a section, not only whether it's on
 		let outline = table(vec![("width", Value::from(3)), ("highlight", Value::from("Comment"))]);
 		let options: WindowOptions = rmpv::ext::from_value(table(vec![("outline", outline)])).unwrap();
-		let settings = Settings::default().for_window(&options);
-		assert_eq!(
-			(settings.outline.enabled, settings.outline.width, settings.outline.highlight.as_str()),
-			(false, 3.0, "Comment")
-		);
+		let outline = Settings::default().window.with(&options).outline;
+		assert_eq!((outline.enabled, outline.width, outline.highlight.as_str()), (false, 3.0, "Comment"));
 	}
 
 	#[test]
 	fn managed_windows_have_the_settings_frames() {
 		let mut settings = Settings::default();
-		settings.shadow.opacity = 0.5;
-		settings.outline.enabled = true;
-		settings.outline.width = 2.0;
-		settings.corners.enabled = true;
-		settings.padding.enabled = true;
-		settings.padding.exclude_filetypes = Filetypes::new(["help"]).unwrap();
-		let radius =
-			WindowOptions { corners: CornerOptions { radius: Some(3.0), ..Default::default() }, ..Default::default() };
+		let window = &mut settings.window;
+		window.shadow.opacity = 0.5;
+		window.outline.enabled = true;
+		window.outline.width = 2.0;
+		window.rounded_corners.enabled = true;
+		window.padding.enabled = true;
+		window.padding.exclude_filetypes = Filetypes::new(["help"]).unwrap();
+		let radius = RoundedCornerOptions { radius: Some(3.0), ..Default::default() };
+		let radius = WindowOptions { rounded_corners: radius, ..Default::default() };
 
 		// Not managed: the settings' shadow, but only the window's own outline, corners and padding over the defaults
-		let window = settings.for_window(&radius);
+		let window = settings.window.with(&radius);
 		assert_eq!(window.shadow.opacity, 0.5);
 		assert_eq!((window.outline.enabled, window.outline.width), (false, 1.0));
-		assert_eq!((window.corners.enabled, window.corners.radius), (false, 3.0));
+		assert_eq!((window.rounded_corners.enabled, window.rounded_corners.radius), (false, 3.0));
 		assert!(!window.padding.enabled);
 		// The settings' filetypes, whichever
 		assert!(window.padding.exclude_filetypes.matches("help"));
 
 		// Managed: the settings', under the window's own
 		let managed = WindowOptions { managed: Some(true), ..radius };
-		let window = settings.for_window(&managed);
+		let window = settings.window.with(&managed);
 		assert_eq!((window.outline.enabled, window.outline.width), (true, 2.0));
-		assert_eq!((window.corners.enabled, window.corners.radius), (true, 3.0));
+		assert_eq!((window.rounded_corners.enabled, window.rounded_corners.radius), (true, 3.0));
 		assert!(window.padding.enabled && window.padding.exclude_filetypes.matches("help"));
 
 		let options: WindowOptions = rmpv::ext::from_value(table(vec![("managed", Value::from(true))])).unwrap();
@@ -976,13 +1005,17 @@ mod tests {
 	fn filetypes_are_glob_patterns() {
 		let shadow = |filetypes: Vec<&str>| {
 			let filetypes = Value::Array(filetypes.into_iter().map(Value::from).collect());
-			parse(table(vec![("shadow", table(vec![("exclude_filetypes", filetypes)]))]))
+			window_section("shadow", vec![("exclude_filetypes", filetypes)])
 		};
-		let filetypes = shadow(vec!["help", "cmp_*", "dap-repl?"]).unwrap().shadow.exclude_filetypes;
+		let filetypes = shadow(vec!["help", "cmp_*", "dap-repl?"])
+			.unwrap()
+			.window
+			.shadow
+			.exclude_filetypes;
 		assert!(filetypes.matches("help") && filetypes.matches("cmp_menu") && filetypes.matches("dap-repl2"));
 		assert!(!filetypes.matches("helpx") && !filetypes.matches("lua") && !filetypes.matches("cmp"));
 		assert!(!Filetypes::default().matches(""));
-		assert_eq!(shadow(vec![]).unwrap().shadow.exclude_filetypes, Filetypes::default());
+		assert_eq!(shadow(vec![]).unwrap().window.shadow.exclude_filetypes, Filetypes::default());
 
 		let error = shadow(vec!["[help"]).unwrap_err();
 		assert!(error.contains("`[help` isn't a glob pattern"), "{error}");
@@ -990,34 +1023,40 @@ mod tests {
 		// Back to Lua as given
 		let encoded = rmp_serde::to_vec_named(&shadow(vec!["cmp_*"]).unwrap()).unwrap();
 		assert_eq!(
-			rmp_serde::from_slice::<Settings>(&encoded).unwrap().shadow.exclude_filetypes,
+			rmp_serde::from_slice::<Settings>(&encoded)
+				.unwrap()
+				.window
+				.shadow
+				.exclude_filetypes,
 			Filetypes::new(["cmp_*"]).unwrap()
 		);
 	}
 
 	#[test]
-	fn window() {
-		let window = |pairs| parse(table(vec![("window", table(pairs))]));
-		let settings = window(vec![("opacity", Value::from(0.85)), ("blur", Value::from(true))])
+	fn background() {
+		let background = |pairs| parse(table(vec![("background", table(pairs))]));
+		let settings = background(vec![("opacity", Value::from(0.85)), ("blur", Value::from(true))])
 			.unwrap()
-			.window;
+			.background;
 		assert_eq!((settings.opacity, settings.blur), (0.85, true));
-		assert_eq!(Settings::default().window.opacity, 1.0);
-		let error = window(vec![("opacity", Value::from(1.5))]).unwrap_err();
-		assert_eq!(error, "window.opacity must be from 0 to 1");
+		assert_eq!(Settings::default().background.opacity, 1.0);
+		let error = background(vec![("opacity", Value::from(1.5))]).unwrap_err();
+		assert_eq!(error, "background.opacity must be from 0 to 1");
 	}
 
 	#[test]
-	fn cursor() {
-		let cursor = |pairs| parse(table(vec![("cursor", table(pairs))]));
-		let settings = cursor(vec![("trail", Value::from(0.2)), ("animate_cmdline", Value::from(false))]).unwrap();
-		assert_eq!((settings.cursor.trail, settings.cursor.animate_cmdline), (0.2, false));
-		assert_eq!(settings.cursor.short_animation, Animation::EaseOut { duration: 40.0 });
+	fn cursor_animation() {
+		let cursor = |pairs| parse(table(vec![("cursor_animation", table(pairs))]));
+		let settings = cursor(vec![("trail", Value::from(0.2)), ("animate_cmdline", Value::from(false))])
+			.unwrap()
+			.cursor_animation;
+		assert_eq!((settings.trail, settings.animate_cmdline), (0.2, false));
+		assert_eq!(settings.short_curve, Animation::EaseOut { duration: 40.0 });
 
 		let error = cursor(vec![("trail", Value::from(2))]).unwrap_err();
-		assert_eq!(error, "cursor.trail must be from 0 to 1");
-		let linear = table(vec![("curve", Value::from("linear")), ("duration", Value::from(-1))]);
-		let error = cursor(vec![("short_animation", linear)]).unwrap_err();
-		assert_eq!(error, "cursor.short_animation.duration can't be negative");
+		assert_eq!(error, "cursor_animation.trail must be from 0 to 1");
+		let linear = table(vec![("type", Value::from("linear")), ("duration", Value::from(-1))]);
+		let error = cursor(vec![("short_curve", linear)]).unwrap_err();
+		assert_eq!(error, "cursor_animation.short_curve.duration can't be negative");
 	}
 }

@@ -4,17 +4,19 @@ use std::time::Duration;
 
 use editor::{FloatStyle, OutlineStyle};
 use renderer::{CursorMotion, Easing, Edges, Motion, Shadow, UnderlineSize};
-use rpc::sarthi::{Animation, Filetypes, FloatWindow, ScrolledWindow, Settings, WindowOptions, WindowVariable};
+use rpc::sarthi::{
+	Animation, Filetypes, FloatWindow, ScrolledWindow, Settings, WindowOptions, WindowSettings, WindowVariable,
+};
 
 /// How the renderer moves scrolled text
 pub fn scroll_motion(settings: &Settings) -> Motion {
-	motion(settings.scroll.animation)
+	motion(settings.window.scroll_animation.curve)
 }
 
 /// How the renderer moves the cursor
 pub fn cursor_motion(settings: &Settings) -> CursorMotion {
-	let cursor = &settings.cursor;
-	CursorMotion { motion: motion(cursor.animation), short: motion(cursor.short_animation), trail: cursor.trail }
+	let cursor = &settings.cursor_animation;
+	CursorMotion { motion: motion(cursor.curve), short: motion(cursor.short_curve), trail: cursor.trail }
 }
 
 /// `animation` as the renderer takes it
@@ -40,7 +42,7 @@ pub fn window_options(settings: &Settings, variable: &WindowVariable) -> Result<
 		return Err(String::from("has a key sarthi doesn't know, or a value of the wrong type"));
 	};
 	if *options != WindowOptions::default() {
-		settings.for_window(options).validate()?;
+		settings.window.with(options).validate()?;
 	}
 	Ok(options.clone())
 }
@@ -49,15 +51,15 @@ pub fn window_options(settings: &Settings, variable: &WindowVariable) -> Result<
 /// or jumps to its new place for `None`. It slides if its `w:sarthi`, or else the settings, enable it, and its filetype
 /// isn't excluded.
 pub fn window_scroll(settings: &Settings, window: &ScrolledWindow, options: &WindowOptions) -> Option<Motion> {
-	let scroll = settings.scroll.with(&options.scroll);
+	let scroll = settings.window.scroll_animation.with(&options.scroll_animation);
 	let enabled = scroll.enabled && !scroll.exclude_filetypes.matches(&window.filetype);
-	enabled.then(|| motion(scroll.animation))
+	enabled.then(|| motion(scroll.curve))
 }
 
 /// How floating or external window `window` looks besides its cells, with `options` from its `w:sarthi`, in logical
 /// pixels (see [`style`])
 pub fn float_style(settings: &Settings, window: &FloatWindow, options: &WindowOptions) -> FloatStyle {
-	let mut style = style(&settings.for_window(options), &window.filetype, window.winblend);
+	let mut style = style(&settings.window.with(options), &window.filetype, window.winblend);
 	// In the color Neovim has for its highlight group, which sarthi may not know
 	if let Some(outline) = &mut style.outline {
 		outline.color = window.outline_color;
@@ -69,13 +71,13 @@ pub fn float_style(settings: &Settings, window: &FloatWindow, options: &WindowOp
 
 /// How floating and external windows look until sarthi learns about them: as one with no `w:sarthi`
 pub fn default_float_style(settings: &Settings) -> FloatStyle {
-	style(&settings.for_window(&WindowOptions::default()), "", 0)
+	style(&settings.window.with(&WindowOptions::default()), "", 0)
 }
 
 /// How a floating or external window showing `filetype`, `winblend` transparent, looks besides its cells, with
-/// `settings` for it (see [`Settings::for_window`]). Each part shows if it's enabled and `filetype` isn't excluded; none
+/// `settings` for it (see [`WindowSettings::with`]). Each part shows if it's enabled and `filetype` isn't excluded; none
 /// around a fully transparent window.
-fn style(settings: &Settings, filetype: &str, winblend: u32) -> FloatStyle {
+fn style(settings: &WindowSettings, filetype: &str, winblend: u32) -> FloatStyle {
 	let shows = |enabled: bool, excluded: &Filetypes| winblend < 100 && enabled && !excluded.matches(filetype);
 	let shadow = &settings.shadow;
 	let shadow = shows(shadow.enabled, &shadow.exclude_filetypes).then_some(Shadow {
@@ -90,7 +92,7 @@ fn style(settings: &Settings, filetype: &str, winblend: u32) -> FloatStyle {
 		highlight: outline.highlight.clone(),
 		color: None,
 	});
-	let corners = &settings.corners;
+	let corners = &settings.rounded_corners;
 	let corners = shows(corners.enabled, &corners.exclude_filetypes).then_some(corners.radius);
 	let padding = &settings.padding;
 	let padding = shows(padding.enabled, &padding.exclude_filetypes).then_some(Edges::from(padding.size.sides()));
@@ -113,8 +115,9 @@ mod tests {
 	use renderer::Motion;
 	use rpc::neovim::Window;
 	use rpc::sarthi::{
-		Animation, CornerOptions, Filetypes, FloatWindow, OutlineOptions, PaddingOptions, PaddingSides, PaddingSize,
-		ScrollOptions, ScrolledWindow, Settings, ShadowOptions, WindowOptions, WindowVariable,
+		Animation, Filetypes, FloatWindow, OutlineOptions, PaddingOptions, PaddingSides, PaddingSize,
+		RoundedCornerOptions, ScrollAnimationOptions, ScrolledWindow, Settings, ShadowOptions, WindowOptions,
+		WindowVariable,
 	};
 	use serde::de::IgnoredAny;
 
@@ -150,14 +153,14 @@ mod tests {
 		assert_eq!((cast.blur, cast.offset, cast.opacity), (8.0, [1.0, 2.0], 0.6));
 
 		// Excluded filetypes win, over the window's `enabled` too.
-		settings.shadow.exclude_filetypes = Filetypes::new(["satellite", "cmp_*"]).unwrap();
+		settings.window.shadow.exclude_filetypes = Filetypes::new(["satellite", "cmp_*"]).unwrap();
 		let on = shadow(ShadowOptions { enabled: Some(true), ..Default::default() });
 		let off = shadow(ShadowOptions { enabled: Some(false), ..Default::default() });
 		assert!(super::float_style(&settings, &float("satellite"), &none).shadow.is_none());
 		assert!(super::float_style(&settings, &float("cmp_menu"), &on).shadow.is_none());
 		assert!(super::float_style(&settings, &float("lua"), &off).shadow.is_none());
 		// The window's `enabled` wins over the setting's.
-		settings.shadow.enabled = false;
+		settings.window.shadow.enabled = false;
 		assert!(super::float_style(&settings, &float("lua"), &none).shadow.is_none());
 		assert!(super::float_style(&settings, &float("lua"), &on).shadow.is_some());
 		// Fully transparent: no shadow, whatever the window says
@@ -168,9 +171,9 @@ mod tests {
 	#[test]
 	fn outlines() {
 		let mut settings = Settings::default();
-		settings.outline.enabled = true;
-		settings.outline.width = 2.0;
-		settings.outline.exclude_filetypes = Filetypes::new(["satellite"]).unwrap();
+		settings.window.outline.enabled = true;
+		settings.window.outline.width = 2.0;
+		settings.window.outline.exclude_filetypes = Filetypes::new(["satellite"]).unwrap();
 		let outline = |options: OutlineOptions| WindowOptions { outline: options, ..Default::default() };
 		let none = WindowOptions::default();
 		let managed = WindowOptions { managed: Some(true), ..Default::default() };
@@ -206,11 +209,14 @@ mod tests {
 	#[test]
 	fn corners() {
 		let mut settings = Settings::default();
-		settings.corners.enabled = true;
-		settings.corners.radius = 6.0;
-		settings.corners.exclude_filetypes = Filetypes::new(["satellite"]).unwrap();
-		let corners =
-			|managed, options: CornerOptions| WindowOptions { managed, corners: options, ..Default::default() };
+		settings.window.rounded_corners.enabled = true;
+		settings.window.rounded_corners.radius = 6.0;
+		settings.window.rounded_corners.exclude_filetypes = Filetypes::new(["satellite"]).unwrap();
+		let corners = |managed, options: RoundedCornerOptions| WindowOptions {
+			managed,
+			rounded_corners: options,
+			..Default::default()
+		};
 		let none = WindowOptions::default();
 
 		// Square, unless managed or the window turns them on, at the settings' radius or the default
@@ -219,22 +225,22 @@ mod tests {
 			super::float_style(&settings, &float("lua"), &corners(Some(true), Default::default())).corners,
 			Some(6.0)
 		);
-		let on = CornerOptions { enabled: Some(true), ..Default::default() };
+		let on = RoundedCornerOptions { enabled: Some(true), ..Default::default() };
 		assert_eq!(super::float_style(&settings, &float("lua"), &corners(None, on.clone())).corners, Some(8.0));
 
-		let radius = corners(Some(true), CornerOptions { radius: Some(4.0), ..Default::default() });
+		let radius = corners(Some(true), RoundedCornerOptions { radius: Some(4.0), ..Default::default() });
 		assert_eq!(super::float_style(&settings, &float("lua"), &radius).corners, Some(4.0));
 		assert_eq!(super::float_style(&settings, &float("satellite"), &corners(None, on)).corners, None);
-		let off = corners(Some(true), CornerOptions { enabled: Some(false), ..Default::default() });
+		let off = corners(Some(true), RoundedCornerOptions { enabled: Some(false), ..Default::default() });
 		assert_eq!(super::float_style(&settings, &float("lua"), &off).corners, None);
 	}
 
 	#[test]
 	fn padding() {
 		let mut settings = Settings::default();
-		settings.padding.enabled = true;
-		settings.padding.size = PaddingSize::All(6.0);
-		settings.padding.exclude_filetypes = Filetypes::new(["satellite"]).unwrap();
+		settings.window.padding.enabled = true;
+		settings.window.padding.size = PaddingSize::All(6.0);
+		settings.window.padding.exclude_filetypes = Filetypes::new(["satellite"]).unwrap();
 		let padding =
 			|managed, options: PaddingOptions| WindowOptions { managed, padding: options, ..Default::default() };
 		let none = WindowOptions::default();
@@ -284,17 +290,18 @@ mod tests {
 	#[test]
 	fn which_windows_slide() {
 		let mut settings = Settings::default();
-		settings.scroll.exclude_filetypes = Filetypes::new(["cmp_*"]).unwrap();
+		settings.window.scroll_animation.exclude_filetypes = Filetypes::new(["cmp_*"]).unwrap();
 		let window = |filetype: &str| ScrolledWindow {
 			win: Window(1000),
 			filetype: filetype.into(),
 			sarthi: WindowVariable::default(),
 		};
-		let scroll = |options: ScrollOptions| WindowOptions { scroll: options, ..Default::default() };
+		let scroll =
+			|options: ScrollAnimationOptions| WindowOptions { scroll_animation: options, ..Default::default() };
 		let (none, on, off) = (
 			WindowOptions::default(),
-			scroll(ScrollOptions { enabled: Some(true), ..Default::default() }),
-			scroll(ScrollOptions { enabled: Some(false), ..Default::default() }),
+			scroll(ScrollAnimationOptions { enabled: Some(true), ..Default::default() }),
+			scroll(ScrollAnimationOptions { enabled: Some(false), ..Default::default() }),
 		);
 		let slides =
 			|settings: &Settings, filetype, options| super::window_scroll(settings, &window(filetype), options);
@@ -306,12 +313,12 @@ mod tests {
 		assert!(slides(&settings, "lua", &off).is_none());
 		// Nothing is excluded by default, and nothing slides with sliding off, unless the window says so.
 		assert!(slides(&Settings::default(), "cmp_menu", &none).is_some());
-		settings.scroll.enabled = false;
+		settings.window.scroll_animation.enabled = false;
 		assert!(slides(&settings, "lua", &none).is_none());
 		assert!(slides(&settings, "lua", &on).is_some());
 
 		// Its own animation
-		let linear = scroll(ScrollOptions { animation: Some(Animation::None), ..Default::default() });
+		let linear = scroll(ScrollAnimationOptions { curve: Some(Animation::None), ..Default::default() });
 		let motion = slides(&Settings::default(), "lua", &linear);
 		assert!(matches!(motion, Some(Motion::Ease { duration, .. }) if duration.is_zero()), "{motion:?}");
 	}

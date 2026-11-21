@@ -120,7 +120,7 @@ fn named_type(name: &str) -> String {
 	}
 }
 
-/// `value` as a Lua literal, e.g. `{ curve = "spring", stiffness = 400 }`
+/// `value` as a Lua literal, e.g. `{ type = "spring", stiffness = 400 }`
 pub fn lua_value(value: &Value) -> String {
 	match value {
 		Value::Null => String::from("nil"),

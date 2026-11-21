@@ -145,11 +145,11 @@ impl WindowState {
 	/// What `settings` ask for that this display can't show
 	fn unsupported(&self, settings: &Settings) -> Vec<&'static str> {
 		let mut messages = Vec::new();
-		if settings.window.opacity < 1.0 && !self.renderer.is_see_through() {
-			messages.push("sarthi: window.opacity: this display can't show see-through windows");
+		if settings.background.opacity < 1.0 && !self.renderer.is_see_through() {
+			messages.push("sarthi: background.opacity: this display can't show see-through windows");
 		}
-		if settings.window.blur && self.blur.method().is_none() {
-			messages.push("sarthi: window.blur: this display (X11) can't blur behind windows");
+		if settings.background.blur && self.blur.method().is_none() {
+			messages.push("sarthi: background.blur: this display (X11) can't blur behind windows");
 		}
 		messages
 	}
@@ -217,7 +217,7 @@ impl App {
 			.with_title(config.title.clone())
 			.with_inner_size(LogicalSize::new(f64::from(config.width), f64::from(config.height)))
 			.with_resizable(config.resizable)
-			// So `window.opacity` can make the background see-through: decided here, before the user's config runs
+			// So `background.opacity` can make the background see-through: decided here, before the user's config runs
 			.with_transparent(true);
 		// Its app ID on Wayland and its class on X11, which desktops match to `sarthi.desktop` and its icon
 		let attributes = WindowAttributesExtWayland::with_name(attributes, APP_ID, "");
@@ -231,7 +231,7 @@ impl App {
 			.inspect_err(|error| tracing::warn!("Couldn't connect to the clipboard: {error}"))
 			.ok();
 		let mut blur = Blur::new(window.clone());
-		blur.set(self.settings.window.blur);
+		blur.set(self.settings.background.blur);
 		window.set_ime_allowed(self.settings.ime.enabled);
 		let state = WindowState {
 			clipboard,
@@ -254,7 +254,7 @@ impl App {
 			background,
 			scroll: settings::scroll_motion(settings),
 			cursor: settings::cursor_motion(settings),
-			opacity: settings.window.opacity,
+			opacity: settings.background.opacity,
 			..RendererConfig::default()
 		};
 		Ok(smol::block_on(Renderer::with_config(window.clone(), size.width, size.height, config))?)
@@ -545,15 +545,15 @@ impl App {
 		settings.validate()?;
 		self.mouse.set_touchpad_scroll(settings.touchpad.scroll_speed);
 		self.editor
-			.set_cursor_animation(settings.cursor.animate_insert_mode, settings.cursor.animate_cmdline);
-		self.editor.set_see_through(settings.window.opacity < 1.0);
+			.set_cursor_animation(settings.cursor_animation.animate_insert_mode, settings.cursor_animation.animate_cmdline);
+		self.editor.set_see_through(settings.background.opacity < 1.0);
 		if let Some(state) = &mut self.window {
 			state.renderer.set_scroll_motion(settings::scroll_motion(&settings));
 			state.renderer.set_cursor_motion(settings::cursor_motion(&settings));
-			state.renderer.set_opacity(settings.window.opacity);
+			state.renderer.set_opacity(settings.background.opacity);
 			state.window.set_ime_allowed(settings.ime.enabled);
 			// The compositor blurs the desktop behind the window, where it can.
-			state.blur.set(settings.window.blur);
+			state.blur.set(settings.background.blur);
 			state.window.request_redraw();
 		}
 		self.settings = settings;

@@ -30,14 +30,7 @@ pub fn markdown(root: &Path) -> String {
 	section(&mut out, 1, "Settings", "sarthi-settings", &prose("settings.md"));
 	section(&mut out, 2, "Per-window settings", "sarthi-w:sarthi", &prose("window-options.md"));
 	for (name, property) in schema::properties(&settings.root) {
-		let section_schema = settings.resolve(property);
-		let window = window_keys(&options, name);
-		section(&mut out, 2, name, &format!("sarthi-{name}"), &schema::doc(section_schema));
-		for (key, key_schema) in schema::properties(section_schema) {
-			let scope = if window.contains(&key) { "global, or per window" } else { "global only" };
-			let default = key_schema.get("default").map(schema::lua_value);
-			key_entry(&mut out, &format!("{name}.{key}"), &format!("sarthi-{name}.{key}"), key_schema, default, scope);
-		}
+		settings_section(&mut out, &settings, &options, name, settings.resolve(property), 2);
 	}
 	animations(&mut out, &settings);
 
@@ -59,6 +52,26 @@ fn section(out: &mut String, level: usize, title: &str, tag: &str, body: &str) {
 	let _ = writeln!(out, "{} {title} {{#{tag}}}\n", "#".repeat(level));
 	if !body.trim().is_empty() {
 		let _ = writeln!(out, "{}\n", body.trim_end());
+	}
+}
+
+/// Settings section `path`, e.g. `window.shadow`, with heading `level`: its keys, and the sections in it. The keys of
+/// `window`'s sections can be a window's own too, in its `w:sarthi` (`options`).
+fn settings_section(out: &mut String, settings: &Schema, options: &Schema, path: &str, schema: &Value, level: usize) {
+	section(out, level, path, &format!("sarthi-{path}"), &schema::doc(schema));
+	let window = path
+		.strip_prefix("window.")
+		.map(|name| window_keys(options, name))
+		.unwrap_or_default();
+	for (key, key_schema) in schema::properties(schema) {
+		let (key_path, resolved) = (format!("{path}.{key}"), settings.resolve(key_schema));
+		if resolved.get("properties").is_some() {
+			settings_section(out, settings, options, &key_path, resolved, level + 1);
+			continue;
+		}
+		let scope = if window.contains(&key) { "global, or per window" } else { "global only" };
+		let default = key_schema.get("default").map(schema::lua_value);
+		key_entry(out, &key_path, &format!("sarthi-{key_path}"), key_schema, default, scope);
 	}
 }
 
@@ -97,12 +110,12 @@ fn animations(out: &mut String, settings: &Schema) {
 		let properties = schema::properties(curve);
 		let name = properties
 			.iter()
-			.find(|(key, _)| *key == "curve")
+			.find(|(key, _)| *key == "type")
 			.and_then(|(_, schema)| schema.get("const"))
 			.and_then(Value::as_str)
 			.unwrap_or_default();
-		let _ = writeln!(out, "#### curve = \"{name}\" {{#sarthi.Animation.{name}}}\n\n{}\n", schema::doc(curve));
-		for (key, schema) in properties.into_iter().filter(|(key, _)| *key != "curve") {
+		let _ = writeln!(out, "#### type = \"{name}\" {{#sarthi.Animation.{name}}}\n\n{}\n", schema::doc(curve));
+		for (key, schema) in properties.into_iter().filter(|(key, _)| *key != "type") {
 			let default = schema.get("default").map(schema::lua_value);
 			let default =
 				default.map_or_else(|| String::from(", required"), |default| format!(", default `{default}`"));

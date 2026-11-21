@@ -3,53 +3,49 @@
 
 ---The settings `require('sarthi').setup()` takes, a section each, in the order the help file lists them
 ---@class sarthi.Settings
----@field scroll? sarthi.ScrollSettings How text that scrolled moves to its new place
----@field cursor? sarthi.CursorSettings How the cursor moves to a new place
----@field shadow? sarthi.ShadowSettings The shadow under floating and external windows
----@field outline? sarthi.OutlineSettings A line around external windows
----@field corners? sarthi.CornerSettings Rounded corners of external windows
----@field padding? sarthi.PaddingSettings Space around external windows' cells
+---@field window? sarthi.WindowSettings Neovim's windows: how their text scrolls and what's drawn around them. Each window can have its own values in its `w:sarthi`.
+---@field cursor_animation? sarthi.CursorAnimationSettings How the cursor moves to a new place
 ---@field underline? sarthi.UnderlineSettings How underlines are drawn
 ---@field touchpad? sarthi.TouchpadSettings Scrolling with a touchpad
----@field window? sarthi.WindowSettings The OS window
 ---@field ime? sarthi.ImeSettings Typing through an input method
+---@field background? sarthi.BackgroundSettings The editor's background in the OS window
 
 ---The `sarthi` table of a window's config, which the window functions take.
 ---
----The window's own values of the settings' sections about a window, kept in its `w:sarthi`, and an external window's
----place and fonts.
+---The window's own values of the settings' `window` sections, kept in its `w:sarthi`, and an external window's place
+---and fonts.
 ---@class sarthi.WindowConfig
 ---@field place? sarthi.WindowPlace Where an external window goes. External windows only.
 ---@field font? sarthi.WindowFont The fonts an external window's text is drawn with. External windows only.
 ---@field shadow? sarthi.ShadowOptions Its own shadow values
 ---@field outline? sarthi.OutlineOptions Its own outline values. External windows only.
----@field corners? sarthi.CornerOptions Its own corners values. External windows only.
+---@field rounded_corners? sarthi.RoundedCornerOptions Its own rounded corners values. External windows only.
 ---@field padding? sarthi.PaddingOptions Its own padding values. External windows only.
----@field scroll? sarthi.ScrollOptions Its own scroll values
+---@field scroll_animation? sarthi.ScrollAnimationOptions Its own scroll animation values
+
+---Neovim's windows: how their text scrolls and what's drawn around them. Each window can have its own values in its
+---`w:sarthi`.
+---@class sarthi.WindowSettings
+---@field scroll_animation? sarthi.ScrollAnimationSettings How text that scrolled moves to its new place
+---@field shadow? sarthi.ShadowSettings The shadow under floating and external windows
+---@field outline? sarthi.OutlineSettings A line around external windows
+---@field rounded_corners? sarthi.RoundedCornerSettings Rounded corners of external windows
+---@field padding? sarthi.PaddingSettings Space around external windows' cells
 
 ---How text that scrolled moves to its new place
----@class sarthi.ScrollSettings
+---@class sarthi.ScrollAnimationSettings
 ---@field enabled? boolean Whether text that scrolled slides to its new place, or jumps there
----@field animation? sarthi.Animation How it moves to its new place
+---@field curve? sarthi.Animation How it moves to its new place
 ---@field exclude_filetypes? string[] Windows showing these filetypes jump to their new place, e.g. menus whose selected line is highlighted text, whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
 
----An animation's curve, e.g. `{ curve = "spring", stiffness = 400, damping = 32 }`. Durations are in milliseconds; a
+---An animation's curve, e.g. `{ type = "spring", stiffness = 400, damping = 32 }`. Durations are in milliseconds; a
 ---value left out has its default.
 ---@class sarthi.Animation
----@field curve 'none'|'spring'|'linear'|'ease_out'|'ease_in_out'|'cubic_bezier' Which curve
+---@field type 'none'|'spring'|'linear'|'ease_out'|'ease_in_out'|'cubic_bezier' Which curve
 ---@field stiffness? number How hard the spring pulls
 ---@field damping? number How much the spring slows it down
 ---@field duration? number How long it takes, in milliseconds
 ---@field points? number[] The curve's control points: x1, y1, x2, y2, with the x values from 0 to 1, e.g. `{ 0.25, 0.1, 0.25, 1 }`
-
----How the cursor moves to a new place: its corners each on their way, the leading ones faster, so it stretches towards
----where it goes and shrinks back as it arrives
----@class sarthi.CursorSettings
----@field animation? sarthi.Animation For moves farther than a couple of cells along a row
----@field short_animation? sarthi.Animation For short moves along a row, like typing
----@field trail? number How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1, where its leading edge is there at once
----@field animate_insert_mode? boolean Whether moves in insert and replace mode animate, e.g. while typing
----@field animate_cmdline? boolean Whether moves into and out of the command line animate
 
 ---The shadow under floating and external windows, in logical pixels
 ---@class sarthi.ShadowSettings
@@ -73,7 +69,7 @@
 ---
 ---Not of floating windows, whose text would be cut by them. The outline follows them. For windows whose `w:sarthi` is
 ---`managed`, e.g. opened with the window functions; others have them only if their `w:sarthi` turns them on.
----@class sarthi.CornerSettings
+---@class sarthi.RoundedCornerSettings
 ---@field enabled? boolean Whether windows have them. Off by default: a window's text in its corner cells isn't cut to them.
 ---@field radius? number How round they are: the radius of their arcs, in logical pixels.
 ---@field exclude_filetypes? string[] Windows showing these filetypes keep square corners, whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
@@ -94,6 +90,15 @@
 ---@field bottom? number Below the cells
 ---@field left? number Left of the cells
 
+---How the cursor moves to a new place: its corners each on their way, the leading ones faster, so it stretches towards
+---where it goes and shrinks back as it arrives
+---@class sarthi.CursorAnimationSettings
+---@field curve? sarthi.Animation For moves farther than a couple of cells along a row
+---@field short_curve? sarthi.Animation For short moves along a row, like typing
+---@field trail? number How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1, where its leading edge is there at once
+---@field animate_insert_mode? boolean Whether moves in insert and replace mode animate, e.g. while typing
+---@field animate_cmdline? boolean Whether moves into and out of the command line animate
+
 ---How underlines are drawn, as adjustments to the font's own, in logical pixels
 ---@class sarthi.UnderlineSettings
 ---@field offset? number Moves underlines down from the font's position, or up if negative
@@ -105,15 +110,15 @@
 ---@class sarthi.TouchpadSettings
 ---@field scroll_speed? number Lines scrolled per row of finger movement: 1 follows the fingers, more scrolls faster
 
----The OS window: how see-through its background is, and whether the desktop behind it is blurred
----@class sarthi.WindowSettings
----@field opacity? number How opaque the editor's background is, from 0 to 1. Text, highlighted backgrounds and floating windows stay opaque. Needs a compositor that shows windows' transparency; on X11, a compositing window manager, and even then some GPU drivers can't. Sarthi warns when it can't show it.
----@field blur? boolean Whether the desktop behind a see-through background is blurred. The compositor does it, where it can (e.g. KDE Plasma, macOS); elsewhere the background is only see-through. Never on X11, where Sarthi warns about it.
-
 ---Typing through an input method (IME), e.g. fcitx5 or IBus, for languages a keyboard can't type directly: the text it
 ---composes shows underlined at the cursor until it's committed
 ---@class sarthi.ImeSettings
 ---@field enabled? boolean Whether text can be typed through an input method. Turned off, keys go to Neovim as typed: e.g. from an autocommand while in Normal mode, so the input method doesn't take its keys.
+
+---The editor's background in the OS window: how see-through it is, and whether the desktop behind it is blurred
+---@class sarthi.BackgroundSettings
+---@field opacity? number How opaque the editor's background is, from 0 to 1. Text, highlighted backgrounds and floating windows stay opaque. Needs a compositor that shows windows' transparency; on X11, a compositing window manager, and even then some GPU drivers can't. Sarthi warns when it can't show it.
+---@field blur? boolean Whether the desktop behind a see-through background is blurred. The compositor does it, where it can (e.g. KDE Plasma, macOS); elsewhere the background is only see-through. Never on X11, where Sarthi warns about it.
 
 ---Where Sarthi places an external window, over Neovim's screen (`sarthi.place`).
 ---
@@ -158,8 +163,8 @@
 ---@field width? number How thick its line is
 ---@field highlight? string The highlight group of its line
 
----A window's own `corners` values (see [`CornerSettings`])
----@class sarthi.CornerOptions
+---A window's own `rounded_corners` values (see [`RoundedCornerSettings`])
+---@class sarthi.RoundedCornerOptions
 ---@field enabled? boolean Whether it has them
 ---@field radius? number How round they are
 
@@ -168,7 +173,7 @@
 ---@field enabled? boolean Whether it has it
 ---@field size? number|sarthi.PaddingSides How much it has
 
----A window's own `scroll` values (see [`ScrollSettings`])
----@class sarthi.ScrollOptions
+---A window's own `scroll_animation` values (see [`ScrollAnimationSettings`])
+---@class sarthi.ScrollAnimationOptions
 ---@field enabled? boolean Whether its text slides
----@field animation? sarthi.Animation How its text slides
+---@field curve? sarthi.Animation How its text slides
