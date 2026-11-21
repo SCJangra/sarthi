@@ -106,9 +106,6 @@ pub struct WindowState {
 	pub window: Arc<Window>,
 	pub renderer: Renderer,
 
-	/// Settings this display can't show that the user was told about, each told once: `window.opacity`, `window.blur`
-	pub unsupported_told: (bool, bool),
-
 	/// Where the input method was last told the cursor is, so it puts its candidates by it: left, top, width, height in
 	/// pixels
 	pub ime_area: Option<Rect<u32>>,
@@ -145,17 +142,14 @@ impl WindowState {
 		}
 	}
 
-	/// What `settings` ask for that this display can't show, each only the first time
-	fn unsupported(&mut self, settings: &Settings) -> Vec<&'static str> {
+	/// What `settings` ask for that this display can't show
+	fn unsupported(&self, settings: &Settings) -> Vec<&'static str> {
 		let mut messages = Vec::new();
-		let (opacity, blur) = &mut self.unsupported_told;
-		if settings.window.opacity < 1.0 && !*opacity && !self.renderer.is_see_through() {
+		if settings.window.opacity < 1.0 && !self.renderer.is_see_through() {
 			messages.push("sarthi: window.opacity: this display can't show see-through windows");
-			*opacity = true;
 		}
-		if settings.window.blur && !*blur && self.blur.method().is_none() {
+		if settings.window.blur && self.blur.method().is_none() {
 			messages.push("sarthi: window.blur: this display (X11) can't blur behind windows");
-			*blur = true;
 		}
 		messages
 	}
@@ -204,7 +198,7 @@ impl App {
 			window_mistakes: HashMap::new(),
 			config,
 			window: None,
-			editor: Editor::new(),
+			editor: Editor::default(),
 			fonts: Fonts::new(),
 			guifont: String::new(),
 			font_sizes: FontSizes::default(),
@@ -244,7 +238,6 @@ impl App {
 			blur,
 			window: window.clone(),
 			renderer,
-			unsupported_told: (false, false),
 			ime_area: None,
 		};
 		state.log_display();
@@ -537,7 +530,7 @@ impl App {
 
 	/// Warns in Neovim about the settings this display can't show, which would otherwise seem to do nothing
 	fn tell_unsupported(&mut self) {
-		let Some(state) = &mut self.window else { return };
+		let Some(state) = &self.window else { return };
 		for message in state.unsupported(&self.settings) {
 			if let Ok(nvim) = &self.nvim
 				&& let Err(error) = nvim.show_warning(message)
