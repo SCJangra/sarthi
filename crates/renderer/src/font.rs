@@ -379,10 +379,14 @@ impl FontSet {
 		let strikeout_thickness = underlines.thickness.unwrap_or(strikeout_thickness * font_size);
 		let (strikeout_top, strikeout_thickness) = line(baseline - offset * font_size, strikeout_thickness);
 
+		// The wave swings as many whole pixels above the underline as below it, so its middle stays on the line's pixels;
+		// half a pixel each way leaves one row of pixels to draw it, a flat line with dips.
+		let swing = ((underlines.wave_height - 1.0) * thickness / 2.0).round();
+		let swing = swing.clamp(0.0, ((cell_height - thickness) / 2.0).floor());
 		LineMetrics {
 			underline_top,
 			thickness,
-			wave_height: (underlines.wave_height * thickness).round().clamp(thickness, cell_height),
+			wave_height: thickness + 2.0 * swing,
 			ink_gaps: underlines.ink_gaps,
 			strikeout_top,
 			strikeout_thickness,
@@ -590,7 +594,7 @@ mod tests {
 		let expected = LineMetrics {
 			underline_top: 17.0,
 			thickness: 1.0,
-			wave_height: 2.0,
+			wave_height: 3.0,
 			ink_gaps: None,
 			strikeout_top: 10.0,
 			strikeout_thickness: 1.0,
@@ -770,8 +774,8 @@ mod tests {
 		assert_eq!((adjusted.thickness, adjusted.strikeout_thickness), (3.0, 3.0));
 		assert_eq!(adjusted.underline_top, font.underline_top - 2.0);
 		assert_eq!(adjusted.strikeout_top, font.strikeout_top);
-		// The wave height is in thicknesses.
-		assert_eq!((adjusted.wave_height, adjusted.ink_gaps), (6.0, Some(1.5)));
+		// The wave height is in thicknesses, rounded to swing whole pixels each way around the underline.
+		assert_eq!((adjusted.wave_height, adjusted.ink_gaps), (7.0, Some(1.5)));
 	}
 
 	#[test]
