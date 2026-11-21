@@ -167,6 +167,10 @@ fn default_duration() -> f32 {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, SmartDefault)]
 #[serde(default, deny_unknown_fields)]
 pub struct CursorAnimationSettings {
+	/// Whether the cursor moves to its new place, or jumps there
+	#[default(true)]
+	pub enabled: bool,
+
 	/// For moves farther than a couple of cells along a row
 	#[default(Animation::Spring { stiffness: 700.0, damping: 53.0 })]
 	pub curve: Animation,
@@ -180,13 +184,93 @@ pub struct CursorAnimationSettings {
 	#[default(1.0)]
 	pub trail: f32,
 
-	/// Whether moves in insert and replace mode animate, e.g. while typing
-	#[default(true)]
-	pub animate_insert_mode: bool,
+	/// Modes the cursor jumps to its new place in, as `vim.keymap.set()` names them, e.g. `{ 'i', 'c' }`: one, or a
+	/// list, of `n`, `v` (Visual and Select), `o`, `i` (Insert and Replace), `c` and `t`. Moves into and out of them
+	/// still animate, e.g. `A` from normal mode, or `:`.
+	pub exclude_modes: Modes,
+}
 
-	/// Whether moves into and out of the command line animate
-	#[default(true)]
-	pub animate_cmdline: bool,
+/// A mode, by the short name `vim.keymap.set()` gives it. Neovim tells Visual and Select mode apart only by the
+/// cursor's look, so `v` is both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub enum Mode {
+	/// Normal mode
+	#[serde(rename = "n")]
+	Normal,
+
+	/// Visual and Select mode
+	#[serde(rename = "v")]
+	Visual,
+
+	/// Operator-pending mode, e.g. after `d`
+	#[serde(rename = "o")]
+	OperatorPending,
+
+	/// Insert and Replace mode
+	#[serde(rename = "i")]
+	Insert,
+
+	/// The command line, e.g. after `:` or `/`
+	#[serde(rename = "c")]
+	Cmdline,
+
+	/// Terminal mode
+	#[serde(rename = "t")]
+	Terminal,
+}
+
+/// Modes, as `vim.keymap.set()` takes them: one, e.g. `'i'`, or a list, e.g. `{ 'i', 'c' }`
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Modes(pub Vec<Mode>);
+
+impl<'de> Deserialize<'de> for Modes {
+	/// A mode or a list of them, each a string decoded as a [`Mode`], so a mistake in it is named: msgpack decoders
+	/// take an enum as a map or an index, not as its name
+	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		use serde::de::{self, IntoDeserializer, value::SeqAccessDeserializer};
+
+		fn mode<E: de::Error>(name: &str) -> Result<Mode, E> {
+			Mode::deserialize(name.into_deserializer())
+		}
+
+		struct OneOrList;
+
+		impl<'de> de::Visitor<'de> for OneOrList {
+			type Value = Modes;
+
+			fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+				formatter.write_str("a mode, or a list of modes")
+			}
+
+			fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+				mode(value).map(|mode| Modes(vec![mode]))
+			}
+
+			fn visit_seq<A: de::SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+				let names = Vec::<String>::deserialize(SeqAccessDeserializer::new(seq))?;
+				names.iter().map(|name| mode(name)).collect::<Result<_, _>>().map(Modes)
+			}
+		}
+
+		deserializer.deserialize_any(OneOrList)
+	}
+}
+
+/// A mode or a list of them, as Lua gives them
+impl JsonSchema for Modes {
+	/// Written where it's used: it's short
+	fn inline_schema() -> bool {
+		true
+	}
+
+	fn schema_name() -> std::borrow::Cow<'static, str> {
+		"Modes".into()
+	}
+
+	fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+		let mode = generator.subschema_for::<Mode>();
+		json_schema!({ "anyOf": [mode, { "type": "array", "items": mode }] })
+	}
 }
 
 /// The shadow under floating and external windows, in logical pixels
@@ -783,7 +867,7 @@ mod number_or_false {
 mod tests {
 	use rmpv::Value;
 
-	use super::{Animation, Filetypes, RoundedCornerOptions, Settings, WindowOptions};
+	use super::{Animation, Filetypes, Mode, Modes, RoundedCornerOptions, Settings, WindowOptions};
 
 	/// A Lua table as Neovim sends it: a map, or an array when empty
 	fn table(pairs: Vec<(&str, Value)>) -> Value {
@@ -933,6 +1017,7 @@ mod tests {
 		let size = super::PaddingSize::Sides(super::PaddingSides { top: 2.0, ..Default::default() });
 		settings.window.padding.size = size;
 		settings.underline.ink_gaps = Some(1.5);
+		settings.cursor_animation.exclude_modes = super::Modes(vec![super::Mode::Insert, super::Mode::Cmdline]);
 		let encoded = rmp_serde::to_vec_named(&settings).unwrap();
 		assert_eq!(rmp_serde::from_slice::<Settings>(&encoded).unwrap(), settings);
 		let encoded = rmp_serde::to_vec_named(&Settings::default()).unwrap();
@@ -1047,11 +1132,24 @@ mod tests {
 	#[test]
 	fn cursor_animation() {
 		let cursor = |pairs| parse(table(vec![("cursor_animation", table(pairs))]));
-		let settings = cursor(vec![("trail", Value::from(0.2)), ("animate_cmdline", Value::from(false))])
+		let settings = cursor(vec![("trail", Value::from(0.2)), ("enabled", Value::from(false))])
 			.unwrap()
 			.cursor_animation;
-		assert_eq!((settings.trail, settings.animate_cmdline), (0.2, false));
+		assert_eq!((settings.trail, settings.enabled), (0.2, false));
 		assert_eq!(settings.short_curve, Animation::EaseOut { duration: 40.0 });
+		assert!(Settings::default().cursor_animation.enabled);
+
+		// Modes as `vim.keymap.set()` takes them: one, or a list
+		let modes =
+			|value| cursor(vec![("exclude_modes", value)]).map(|settings| settings.cursor_animation.exclude_modes);
+		assert_eq!(modes(Value::from("i")).unwrap(), Modes(vec![Mode::Insert]));
+		let list = Value::Array(vec![Value::from("i"), Value::from("c")]);
+		assert_eq!(modes(list).unwrap(), Modes(vec![Mode::Insert, Mode::Cmdline]));
+		assert_eq!(modes(table(vec![])).unwrap(), Modes::default());
+		let error = modes(Value::from("x")).unwrap_err();
+		assert!(error.contains("unknown variant `x`") && error.contains("`i`"), "{error}");
+		let error = modes(Value::Array(vec![Value::from("!")])).unwrap_err();
+		assert!(error.contains("unknown variant `!`"), "{error}");
 
 		let error = cursor(vec![("trail", Value::from(2))]).unwrap_err();
 		assert_eq!(error, "cursor_animation.trail must be from 0 to 1");

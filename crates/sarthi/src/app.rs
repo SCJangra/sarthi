@@ -545,7 +545,7 @@ impl App {
 		settings.validate()?;
 		self.mouse.set_touchpad_scroll(settings.touchpad.scroll_speed);
 		self.editor
-			.set_cursor_animation(settings.cursor_animation.animate_insert_mode, settings.cursor_animation.animate_cmdline);
+			.set_cursor_animation(settings.cursor_animation.enabled, settings.cursor_animation.exclude_modes.0.clone());
 		self.editor.set_see_through(settings.background.opacity < 1.0);
 		if let Some(state) = &mut self.window {
 			state.renderer.set_scroll_motion(settings::scroll_motion(&settings));

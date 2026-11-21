@@ -1,6 +1,7 @@
 //! The cursor's style from Neovim's modes (`:help ui-event-mode_info_set`), and when its moves animate
 
 use rpc::neovim::{CursorShape, HlId, ModeInfo};
+use rpc::sarthi::Mode;
 use smart_default::SmartDefault;
 
 /// How Neovim wants the cursor drawn, from `mode_info_set`, `mode_change`, `busy_start` and `busy_stop`
@@ -19,11 +20,10 @@ pub struct CursorState {
 	/// Neovim asked not to draw the cursor
 	hidden: bool,
 
-	/// Whether moves animate in insert and replace mode, and into and out of the command line
+	/// Whether moves animate at all, and the modes moves within which don't
 	#[default(true)]
-	animate_insert_mode: bool,
-	#[default(true)]
-	animate_cmdline: bool,
+	animation_enabled: bool,
+	exclude_modes: Vec<Mode>,
 
 	/// Whether the window has the focus
 	#[default(true)]
@@ -62,9 +62,9 @@ impl CursorState {
 		name.clone_into(&mut self.mode_name);
 	}
 
-	/// Whether moves animate in insert and replace mode, and into and out of the command line
-	pub fn set_animation(&mut self, insert_mode: bool, cmdline: bool) {
-		(self.animate_insert_mode, self.animate_cmdline) = (insert_mode, cmdline);
+	/// Whether moves animate at all, and the modes moves within which don't: moves into and out of them still do
+	pub fn set_animation(&mut self, enabled: bool, exclude_modes: Vec<Mode>) {
+		(self.animation_enabled, self.exclude_modes) = (enabled, exclude_modes);
 	}
 
 	/// Whether the window has the focus. Without it, the cursor is an outline and jumps to where it moves.
@@ -104,18 +104,33 @@ impl CursorState {
 		})
 	}
 
-	/// Whether a move to the cursor animates: not in a mode, or into or out of one, that animation is off for
+	/// Whether a move to the cursor animates: if animation is on, unless it's within a mode it's off for. A move into
+	/// or out of one, drawn first in another mode than the last, animates.
 	fn animates(&self) -> bool {
-		let typing = |mode: &str| mode == "insert" || mode == "replace";
-		let cmdline = |mode: &str| mode.starts_with("cmdline");
-		let off = |mode: &str| (typing(mode) && !self.animate_insert_mode) || (cmdline(mode) && !self.animate_cmdline);
-		!off(&self.mode_name) && !(cmdline(&self.drawn_mode) && !self.animate_cmdline)
+		let mode = mode_of(&self.mode_name);
+		let changed = mode != mode_of(&self.drawn_mode);
+		self.animation_enabled && (changed || mode.is_none_or(|mode| !self.exclude_modes.contains(&mode)))
+	}
+}
+
+/// The mode `vim.keymap.set()` names for a mode's name in `mode_change`, if it has one, e.g. [`Mode::Cmdline`] for
+/// `cmdline_insert`
+fn mode_of(name: &str) -> Option<Mode> {
+	match name {
+		"normal" => Some(Mode::Normal),
+		"visual" | "visual_select" => Some(Mode::Visual),
+		"operator" => Some(Mode::OperatorPending),
+		"insert" | "replace" => Some(Mode::Insert),
+		"cmdline_normal" | "cmdline_insert" | "cmdline_replace" => Some(Mode::Cmdline),
+		"terminal" => Some(Mode::Terminal),
+		_ => None,
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use rpc::neovim::{CursorShape, HlId, ModeInfo};
+	use rpc::sarthi::Mode;
 
 	use super::{CursorState, CursorStyle};
 
@@ -165,31 +180,44 @@ mod tests {
 	}
 
 	#[test]
-	fn moves_animate_unless_turned_off_for_the_mode() {
+	fn moves_animate_unless_within_an_excluded_mode() {
 		let animates = |cursor: &CursorState| cursor.style().unwrap().animate;
 		let mut cursor = CursorState::default();
 		cursor.set_mode(0, "normal");
+		cursor.drawn();
 		assert!(animates(&cursor));
 		cursor.set_mode(1, "insert");
 		assert!(animates(&cursor));
 
-		cursor.set_animation(false, true);
+		cursor.set_animation(true, vec![Mode::Insert, Mode::Cmdline]);
+		// Into insert mode, e.g. with `A`, then typing in it, Replace mode too
+		assert!(animates(&cursor));
+		cursor.drawn();
 		assert!(!animates(&cursor));
 		cursor.set_mode(1, "replace");
 		assert!(!animates(&cursor));
+		// Out of it
+		cursor.set_mode(0, "normal");
+		assert!(animates(&cursor));
+		cursor.drawn();
 
-		// Into the command line, and back out of it
-		cursor.set_animation(true, false);
-		cursor.set_mode(0, "normal");
-		cursor.drawn();
+		// Into the command line with `:`, typing in it, whichever of its modes, and back out of it
 		cursor.set_mode(2, "cmdline_normal");
-		assert!(!animates(&cursor));
+		assert!(animates(&cursor));
 		cursor.drawn();
-		cursor.set_mode(0, "normal");
+		cursor.set_mode(2, "cmdline_insert");
 		assert!(!animates(&cursor));
-		// Once drawn outside it, moves animate again.
+		cursor.set_mode(0, "normal");
+		assert!(animates(&cursor));
+		// Modes `vim.keymap.set()` has no name for animate.
+		cursor.set_mode(0, "more");
 		cursor.drawn();
 		assert!(animates(&cursor));
+
+		// Off: no move animates.
+		cursor.set_animation(false, Vec::new());
+		cursor.set_mode(1, "insert");
+		assert!(!animates(&cursor));
 	}
 
 	#[test]

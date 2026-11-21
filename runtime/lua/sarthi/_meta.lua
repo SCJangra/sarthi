@@ -93,11 +93,15 @@
 ---How the cursor moves to a new place: its corners each on their way, the leading ones faster, so it stretches towards
 ---where it goes and shrinks back as it arrives
 ---@class sarthi.CursorAnimationSettings
+---@field enabled? boolean Whether the cursor moves to its new place, or jumps there
 ---@field curve? sarthi.Animation For moves farther than a couple of cells along a row
 ---@field short_curve? sarthi.Animation For short moves along a row, like typing
 ---@field trail? number How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1, where its leading edge is there at once
----@field animate_insert_mode? boolean Whether moves in insert and replace mode animate, e.g. while typing
----@field animate_cmdline? boolean Whether moves into and out of the command line animate
+---@field exclude_modes? sarthi.Mode|sarthi.Mode[] Modes the cursor jumps to its new place in, as `vim.keymap.set()` names them, e.g. `{ 'i', 'c' }`: one, or a list, of `n`, `v` (Visual and Select), `o`, `i` (Insert and Replace), `c` and `t`. Moves into and out of them still animate, e.g. `A` from normal mode, or `:`.
+
+---A mode, by the short name `vim.keymap.set()` gives it. Neovim tells Visual and Select mode apart only by the cursor's
+---look, so `v` is both.
+---@alias sarthi.Mode "n"|"v"|"o"|"i"|"c"|"t"
 
 ---How underlines are drawn, as adjustments to the font's own, in logical pixels
 ---@class sarthi.UnderlineSettings

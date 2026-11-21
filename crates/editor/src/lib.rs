@@ -229,9 +229,10 @@ impl Editor {
 		self.stale = true;
 	}
 
-	/// Whether the cursor's moves animate in insert and replace mode, and into and out of the command line
-	pub fn set_cursor_animation(&mut self, insert_mode: bool, cmdline: bool) {
-		self.cursor.set_animation(insert_mode, cmdline);
+	/// Whether the cursor's moves animate at all, and the modes moves within which don't: moves into and out of them
+	/// still do
+	pub fn set_cursor_animation(&mut self, enabled: bool, exclude_modes: Vec<rpc::sarthi::Mode>) {
+		self.cursor.set_animation(enabled, exclude_modes);
 	}
 
 	/// The layers to draw, if something set on sarthi's side changed since the last redraw, like the shadow: to show it

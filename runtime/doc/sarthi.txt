@@ -248,6 +248,12 @@ How the cursor moves to a new place: its corners each on their way, the
 leading ones faster, so it stretches towards where it goes and shrinks back as
 it arrives
 
+cursor_animation.enabled                       *sarthi-cursor_animation.enabled*
+
+`boolean`, default `true` · global only
+
+Whether the cursor moves to its new place, or jumps there
+
 cursor_animation.curve                           *sarthi-cursor_animation.curve*
 
 `sarthi.Animation`, default
@@ -269,17 +275,14 @@ cursor_animation.trail                           *sarthi-cursor_animation.trail*
 How much the trailing corners lag behind the leading ones: from 0, where the
 cursor moves as it is, to 1, where its leading edge is there at once
 
-cursor_animation.animate_insert_mode *sarthi-cursor_animation.animate_insert_mode*
+cursor_animation.exclude_modes           *sarthi-cursor_animation.exclude_modes*
 
-`boolean`, default `true` · global only
+`sarthi.Mode|sarthi.Mode[]`, default `{}` · global only
 
-Whether moves in insert and replace mode animate, e.g. while typing
-
-cursor_animation.animate_cmdline       *sarthi-cursor_animation.animate_cmdline*
-
-`boolean`, default `true` · global only
-
-Whether moves into and out of the command line animate
+Modes the cursor jumps to its new place in, as `vim.keymap.set()` names them,
+e.g. `{ 'i', 'c' }`: one, or a list, of `n`, `v` (Visual and Select), `o`, `i`
+(Insert and Replace), `c` and `t`. Moves into and out of them still animate,
+e.g. `A` from normal mode, or `:`.
 
 ------------------------------------------------------------------------------
 underline                                                     *sarthi-underline*
