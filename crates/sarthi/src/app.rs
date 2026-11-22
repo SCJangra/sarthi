@@ -233,13 +233,7 @@ impl App {
 		let mut blur = Blur::new(window.clone());
 		blur.set(self.settings.background.blur);
 		window.set_ime_allowed(self.settings.ime.enabled);
-		let state = WindowState {
-			clipboard,
-			blur,
-			window: window.clone(),
-			renderer,
-			ime_area: None,
-		};
+		let state = WindowState { clipboard, blur, window: window.clone(), renderer, ime_area: None };
 		state.log_display();
 		self.window = Some(state);
 		self.tell_unsupported();
