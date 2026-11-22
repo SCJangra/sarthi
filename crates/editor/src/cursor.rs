@@ -1,11 +1,12 @@
-//! The cursor's style from Neovim's modes (`:help ui-event-mode_info_set`), and when its moves animate
+//! The cursor's style from Neovim's modes (`:help ui-event-mode_info_set`), and how its moves animate
 
+use renderer::{CellSize, CursorMotion};
 use rpc::neovim::{CursorShape, HlId, ModeInfo};
-use rpc::sarthi::Mode;
+use rpc::sarthi::{CursorAnimationSettings, CursorMove, Mode};
 use smart_default::SmartDefault;
 
 /// How Neovim wants the cursor drawn, from `mode_info_set`, `mode_change`, `busy_start` and `busy_stop`
-/// (`:help ui-event-mode_info_set`)
+/// (`:help ui-event-mode_info_set`), and how it moves to where it's drawn next
 #[derive(Debug, SmartDefault)]
 pub struct CursorState {
 	/// Whether to use the modes' styles; otherwise the cursor is always a block
@@ -17,13 +18,14 @@ pub struct CursorState {
 	mode_name: String,
 	drawn_mode: String,
 
+	/// Where the cursor was last drawn: its cell's top-left corner, in pixels; none before it's drawn
+	drawn_at: Option<[u32; 2]>,
+
 	/// Neovim asked not to draw the cursor
 	hidden: bool,
 
-	/// Whether moves animate at all, and the modes moves within which don't
-	#[default(true)]
-	animation_enabled: bool,
-	exclude_modes: Vec<Mode>,
+	/// How its moves animate
+	animation: CursorAnimationSettings,
 
 	/// Whether the window has the focus
 	#[default(true)]
@@ -42,9 +44,6 @@ pub struct CursorStyle {
 	/// Highlight for the cursor's colors; 0 means the cell's colors swapped
 	pub attr_id: HlId,
 
-	/// Whether moving here animates
-	pub animate: bool,
-
 	/// Drawn as an outline, the cell's character in its own colors: while the window doesn't have the focus
 	pub outline: bool,
 }
@@ -62,9 +61,9 @@ impl CursorState {
 		name.clone_into(&mut self.mode_name);
 	}
 
-	/// Whether moves animate at all, and the modes moves within which don't: moves into and out of them still do
-	pub fn set_animation(&mut self, enabled: bool, exclude_modes: Vec<Mode>) {
-		(self.animation_enabled, self.exclude_modes) = (enabled, exclude_modes);
+	/// How the cursor's moves animate, from its next move on
+	pub fn set_animation(&mut self, animation: CursorAnimationSettings) {
+		self.animation = animation;
 	}
 
 	/// Whether the window has the focus. Without it, the cursor is an outline and jumps to where it moves.
@@ -72,9 +71,10 @@ impl CursorState {
 		self.focused = focused;
 	}
 
-	/// The cursor was drawn in the current mode.
-	pub fn drawn(&mut self) {
+	/// The cursor was drawn in the current mode, in a cell whose top-left corner is at `at`, in pixels.
+	pub fn drawn(&mut self, at: [u32; 2]) {
 		self.drawn_mode.clone_from(&self.mode_name);
+		self.drawn_at = Some(at);
 	}
 
 	/// Hides the cursor while Neovim is busy (`busy_start`), or shows it again (`busy_stop`)
@@ -89,9 +89,8 @@ impl CursorState {
 			return None;
 		}
 
-		let (animate, outline) = (self.focused && self.animates(), !self.focused);
 		let block =
-			CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: HlId::DEFAULT, animate, outline };
+			CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: HlId::DEFAULT, outline: !self.focused };
 		let Some(mode) = self.modes.get(self.mode).filter(|_| self.style_enabled) else {
 			return Some(block);
 		};
@@ -104,12 +103,17 @@ impl CursorState {
 		})
 	}
 
-	/// Whether a move to the cursor animates: if animation is on, unless it's within a mode it's off for. A move into
-	/// or out of one, drawn first in another mode than the last, animates.
-	fn animates(&self) -> bool {
-		let mode = mode_of(&self.mode_name);
-		let changed = mode != mode_of(&self.drawn_mode);
-		self.animation_enabled && (changed || mode.is_none_or(|mode| !self.exclude_modes.contains(&mode)))
+	/// How the cursor moves to a cell whose top-left corner is at `to`, in pixels, `cell` large: as the animation
+	/// settings say for the move, or at once while they're off, without the focus, and for its first place
+	pub fn motion_to(&self, to: [u32; 2], cell: CellSize) -> Option<CursorMotion> {
+		let from = self.drawn_at.filter(|_| self.animation.enabled && self.focused)?;
+		// In whole cells of where it goes, so a move to a window with other fonts counts its cells
+		let cells = |from: u32, to: u32, size: u32| (from.abs_diff(to) + size / 2) / size.max(1);
+		let mode = mode_of(&self.mode_name).filter(|mode| mode_of(&self.drawn_mode) == Some(*mode));
+		let step =
+			CursorMove { rows: cells(from[1], to[1], cell.height), columns: cells(from[0], to[0], cell.width), mode };
+		let step = self.animation.for_move(&step);
+		Some(CursorMotion { motion: crate::motion(step.curve), trail: step.trail })
 	}
 }
 
@@ -129,13 +133,16 @@ fn mode_of(name: &str) -> Option<Mode> {
 
 #[cfg(test)]
 mod tests {
+	use renderer::CellSize;
 	use rpc::neovim::{CursorShape, HlId, ModeInfo};
-	use rpc::sarthi::Mode;
+	use rpc::sarthi::{Animation, CursorAnimationSettings, CursorOverride, Mode, Modes, Span};
 
 	use super::{CursorState, CursorStyle};
 
+	const CELL: CellSize = CellSize { width: 10, height: 20 };
+
 	const BLOCK: CursorStyle =
-		CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: HlId(0), animate: true, outline: false };
+		CursorStyle { shape: CursorShape::Block, percentage: 100, attr_id: HlId(0), outline: false };
 
 	fn modes() -> Vec<ModeInfo> {
 		vec![
@@ -180,52 +187,85 @@ mod tests {
 	}
 
 	#[test]
-	fn moves_animate_unless_within_an_excluded_mode() {
-		let animates = |cursor: &CursorState| cursor.style().unwrap().animate;
+	fn moves_take_the_values_of_the_overrides_that_apply() {
+		let (spring, quick) =
+			(Animation::Spring { stiffness: 700.0, damping: 53.0 }, Animation::EaseOut { duration: 40.0 });
 		let mut cursor = CursorState::default();
-		cursor.set_mode(0, "normal");
-		cursor.drawn();
-		assert!(animates(&cursor));
-		cursor.set_mode(1, "insert");
-		assert!(animates(&cursor));
+		cursor.set_animation(CursorAnimationSettings {
+			overrides: vec![
+				CursorOverride {
+					rows: Span::exactly(0),
+					columns: Span { min: None, max: Some(2) },
+					curve: Some(quick),
+					trail: Some(0.0),
+					..Default::default()
+				},
+				CursorOverride {
+					modes: Some(Modes(vec![Mode::Insert, Mode::Cmdline])),
+					curve: Some(Animation::None),
+					..Default::default()
+				},
+			],
+			..Default::default()
+		});
+		let at = |col: u32, row: u32| [col * CELL.width, row * CELL.height];
+		let step = |cursor: &CursorState, col, row| {
+			cursor.motion_to(at(col, row), CELL).map(|motion| (motion.motion, motion.trail))
+		};
+		let expected = |curve, trail| Some((crate::motion(curve), trail));
 
-		cursor.set_animation(true, vec![Mode::Insert, Mode::Cmdline]);
-		// Into insert mode, e.g. with `A`, then typing in it, Replace mode too
-		assert!(animates(&cursor));
-		cursor.drawn();
-		assert!(!animates(&cursor));
+		// Its first place: at once
+		assert_eq!(step(&cursor, 3, 0), None);
+		cursor.set_mode(0, "normal");
+		cursor.drawn(at(3, 0));
+		// `l`, `2l`: quick and without a trail; 3 columns, or a row down: the base
+		assert_eq!(step(&cursor, 4, 0), expected(quick, 0.0));
+		assert_eq!(step(&cursor, 1, 0), expected(quick, 0.0));
+		assert_eq!(step(&cursor, 6, 0), expected(spring, 1.0));
+		assert_eq!(step(&cursor, 3, 1), expected(spring, 1.0));
+
+		// Into insert mode, e.g. with `A`: a move between modes, which insert mode's override isn't for
+		cursor.set_mode(1, "insert");
+		assert_eq!(step(&cursor, 40, 0), expected(spring, 1.0));
+		cursor.drawn(at(40, 0));
+		// Typing in it, Replace mode too: both overrides apply, the later one's curve over the earlier one's
+		assert_eq!(step(&cursor, 41, 0), expected(Animation::None, 0.0));
 		cursor.set_mode(1, "replace");
-		assert!(!animates(&cursor));
+		assert_eq!(step(&cursor, 41, 0), expected(Animation::None, 0.0));
 		// Out of it
 		cursor.set_mode(0, "normal");
-		assert!(animates(&cursor));
-		cursor.drawn();
+		assert_eq!(step(&cursor, 41, 0), expected(quick, 0.0));
+		cursor.drawn(at(41, 0));
 
-		// Into the command line with `:`, typing in it, whichever of its modes, and back out of it
+		// The command line's modes are one: into it with `:`, then within it
 		cursor.set_mode(2, "cmdline_normal");
-		assert!(animates(&cursor));
-		cursor.drawn();
+		assert_eq!(step(&cursor, 0, 30), expected(spring, 1.0));
+		cursor.drawn(at(0, 30));
 		cursor.set_mode(2, "cmdline_insert");
-		assert!(!animates(&cursor));
-		cursor.set_mode(0, "normal");
-		assert!(animates(&cursor));
-		// Modes `vim.keymap.set()` has no name for animate.
+		assert_eq!(step(&cursor, 5, 30), expected(Animation::None, 1.0));
+		// Modes `vim.keymap.set()` has no name for are no override's.
 		cursor.set_mode(0, "more");
-		cursor.drawn();
-		assert!(animates(&cursor));
+		cursor.drawn(at(5, 30));
+		assert_eq!(step(&cursor, 5, 31), expected(spring, 1.0));
+	}
 
-		// Off: no move animates.
-		cursor.set_animation(false, Vec::new());
-		cursor.set_mode(1, "insert");
-		assert!(!animates(&cursor));
+	#[test]
+	fn moves_jump_while_animation_is_off_or_without_the_focus() {
+		let mut cursor = CursorState::default();
+		cursor.drawn([0, 0]);
+		assert!(cursor.motion_to([100, 0], CELL).is_some());
+		cursor.set_focused(false);
+		assert_eq!(cursor.motion_to([100, 0], CELL), None);
+		cursor.set_focused(true);
+		cursor.set_animation(CursorAnimationSettings { enabled: false, ..Default::default() });
+		assert_eq!(cursor.motion_to([100, 0], CELL), None);
 	}
 
 	#[test]
 	fn an_outline_without_the_focus() {
 		let mut cursor = CursorState::default();
 		cursor.set_focused(false);
-		// An outline, which jumps instead of moving
-		assert_eq!(cursor.style(), Some(CursorStyle { animate: false, outline: true, ..BLOCK }));
+		assert_eq!(cursor.style(), Some(CursorStyle { outline: true, ..BLOCK }));
 		cursor.set_focused(true);
 		assert_eq!(cursor.style(), Some(BLOCK));
 	}

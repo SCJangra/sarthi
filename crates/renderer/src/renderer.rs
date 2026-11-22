@@ -18,8 +18,7 @@ use crate::shape::ShapePipeline;
 use crate::stencil;
 use crate::text::TextPipeline;
 use crate::{
-	Cursor, CursorMotion, CursorShape, Decoration, Fonts, Layer, Motion, Rect, RenderCell, RendererConfig,
-	RendererError, TextStyle,
+	Cursor, CursorShape, Decoration, Fonts, Layer, Motion, Rect, RenderCell, RendererConfig, RendererError, TextStyle,
 };
 
 /// Draws [`Layer`]s to a window's surface with wgpu
@@ -170,7 +169,7 @@ impl Renderer {
 			shape,
 			layers: Vec::new(),
 			scrolls: ScrollAnimations::new(renderer_config.scroll),
-			cursor: CursorAnimation::new(renderer_config.cursor),
+			cursor: CursorAnimation::default(),
 			frame_quads: FrameQuads::default(),
 			layer_quads: Vec::new(),
 			stencil,
@@ -224,11 +223,6 @@ impl Renderer {
 	/// Sets how text that scrolls moves to its new place, from the next scroll on
 	pub fn set_scroll_motion(&mut self, motion: Motion) {
 		self.scrolls.set_motion(motion);
-	}
-
-	/// Sets how the cursor moves to a new place, from its next move on
-	pub fn set_cursor_motion(&mut self, motion: CursorMotion) {
-		self.cursor.set_motion(motion);
 	}
 
 	/// The layers shown, as last set
@@ -344,7 +338,7 @@ impl Renderer {
 	/// top-left, top-right, bottom-right, bottom-left) while it's on its way.
 	fn move_cursor(&mut self, now: Instant) -> Option<([[f32; 2]; 4], Cursor)> {
 		let (layer, cursor) = self.layers.iter().find_map(|layer| Some((layer, layer.cursor?)))?;
-		self.cursor.update(cursor_rect(layer, cursor), cursor.animate, layer.cell, now);
+		self.cursor.update(cursor_rect(layer, cursor), cursor.motion, now);
 		if !self.cursor.is_animating(now) {
 			return None;
 		}
@@ -771,7 +765,7 @@ mod tests {
 			shape,
 			color: 0xFF0000,
 			text_color: 0xFFFFFF,
-			animate: true,
+			motion: None,
 		});
 		layer
 	}
@@ -1044,7 +1038,7 @@ mod tests {
 				shape: crate::CursorShape::Block,
 				color: 0,
 				text_color: 0,
-				animate: true,
+				motion: None,
 			};
 			Layer { height: 3, cells: cells.collect(), cursor: Some(cursor), scroll, ..top }
 		};

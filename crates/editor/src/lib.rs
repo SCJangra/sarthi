@@ -8,6 +8,7 @@ pub mod external;
 pub mod grid;
 pub mod highlight;
 mod layers;
+mod motion;
 mod pointer;
 pub mod preedit;
 mod redraw;
@@ -15,8 +16,9 @@ mod shadows;
 
 use std::collections::HashMap;
 
-use renderer::{CellSize, Edges, FontId, Layer, Motion, Outline, Rect, Shadow};
+use renderer::{CellSize, Edges, FontId, Layer, Outline, Rect, Shadow};
 use rpc::neovim::{CellText, Grid, Window};
+use rpc::sarthi::{CursorAnimationSettings, ScrollAnimationSettings};
 use smart_default::SmartDefault;
 
 use crate::cursor::CursorState;
@@ -24,6 +26,7 @@ use crate::external::at_cursor;
 pub use crate::external::{Anchor, Place, Relative};
 use crate::grid::GridState;
 use crate::highlight::HighlightState;
+pub use crate::motion::motion;
 pub use crate::pointer::{GridPosition, Pointer};
 use crate::preedit::Preedit;
 
@@ -40,9 +43,9 @@ pub struct Editor {
 	/// How each window's text scrolls, by grid
 	viewports: HashMap<Grid, Viewport>,
 
-	/// How each window's text moves when it scrolls, if not as the renderer's other scrolled text does: with its own
-	/// motion, or jumping to its new place for `None`
-	scroll_motions: HashMap<Window, Option<Motion>>,
+	/// How each window's text moves when it scrolls, if not as the renderer's other scrolled text does: as its scroll
+	/// animation settings say, or jumping to its new place for `None`
+	scroll_animations: HashMap<Window, Option<ScrollAnimationSettings>>,
 
 	/// Whether the window is see-through, so the default background isn't drawn in cells (see [`Editor::see_through_cells`])
 	see_through: bool,
@@ -211,10 +214,11 @@ impl Editor {
 		&self.guifont
 	}
 
-	/// How `win`'s text moves when it scrolls: slides with `motion`, or jumps to its new place for `None`. Applies from
-	/// the next scroll, even one already applied but not yet flushed. Until set, it slides as the renderer's other text.
-	pub fn set_scroll_motion(&mut self, win: Window, motion: Option<Motion>) {
-		self.scroll_motions.insert(win, motion);
+	/// How `win`'s text moves when it scrolls: slides as `animation` says, or jumps to its new place for `None`.
+	/// Applies from the next scroll, even one already applied but not yet flushed. Until set, it slides as the
+	/// renderer's other text.
+	pub fn set_scroll_animation(&mut self, win: Window, animation: Option<ScrollAnimationSettings>) {
+		self.scroll_animations.insert(win, animation);
 	}
 
 	/// Whether the window is see-through: then cells in the default background draw none, outside floating windows.
@@ -229,10 +233,9 @@ impl Editor {
 		self.stale = true;
 	}
 
-	/// Whether the cursor's moves animate at all, and the modes moves within which don't: moves into and out of them
-	/// still do
-	pub fn set_cursor_animation(&mut self, enabled: bool, exclude_modes: Vec<rpc::sarthi::Mode>) {
-		self.cursor.set_animation(enabled, exclude_modes);
+	/// How the cursor's moves animate, from its next move on
+	pub fn set_cursor_animation(&mut self, animation: CursorAnimationSettings) {
+		self.cursor.set_animation(animation);
 	}
 
 	/// The layers to draw, if something set on sarthi's side changed since the last redraw, like the shadow: to show it

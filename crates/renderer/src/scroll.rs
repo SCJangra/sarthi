@@ -357,7 +357,7 @@ mod tests {
 		let shown = [layer(&["w", "a", "b", "c"], 0, 1, 4)];
 		let mut scrolled = layer(&["w", "b", "c", "d"], 1, 1, 4);
 		let shape = CursorShape::Bar { orientation: BarOrientation::Vertical, percentage: 25 };
-		scrolled.cursor = Some(Cursor { row: 2, col: 0, width: 1, shape, color: 0, text_color: 0, animate: true });
+		scrolled.cursor = Some(Cursor { row: 2, col: 0, width: 1, shape, color: 0, text_color: 0, motion: None });
 		scrolls.update(&shown, std::slice::from_ref(&scrolled), now);
 
 		let region = scrolls.region(&scrolled, now).unwrap();

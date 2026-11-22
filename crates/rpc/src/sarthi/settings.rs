@@ -68,9 +68,26 @@ pub struct ScrollAnimationSettings {
 	/// How it moves to its new place
 	pub curve: Animation,
 
+	/// Other values for some scrolls ([overrides](#sarthi.ScrollOverride)): each one that applies to a scroll in place
+	/// of `curve`, later ones winning, e.g. `{ { lines = { min = 40 }, curve = { type = 'none' } } }` for big jumps
+	pub overrides: Vec<ScrollOverride>,
+
 	/// Windows showing these filetypes jump to their new place, e.g. menus whose selected line is highlighted text,
 	/// whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
 	pub exclude_filetypes: Filetypes,
+}
+
+/// A value of `scroll_animation` for the scrolls it applies to
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScrollOverride {
+	/// For scrolls of this many lines: a number, or `{ min = …, max = … }`, either left out for no bound
+	#[serde(skip_serializing_if = "Span::is_any")]
+	pub lines: Span,
+
+	/// How text that scrolled that far moves to its new place
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub curve: Option<Animation>,
 }
 
 /// A window's own `scroll_animation` values (see [`ScrollAnimationSettings`])
@@ -92,6 +109,14 @@ impl ScrollAnimationSettings {
 			curve: options.curve.unwrap_or(self.curve),
 			..self.clone()
 		}
+	}
+
+	/// The curve of a scroll of `lines` lines: `curve`, or that of the last override that applies to it
+	pub fn curve_for(&self, lines: u32) -> Animation {
+		self.overrides
+			.iter()
+			.filter(|rule| rule.lines.contains(lines))
+			.fold(self.curve, |curve, rule| rule.curve.unwrap_or(curve))
 	}
 }
 
@@ -171,23 +196,216 @@ pub struct CursorAnimationSettings {
 	#[default(true)]
 	pub enabled: bool,
 
-	/// For moves farther than a couple of cells along a row
+	/// How it moves to its new place
 	#[default(Animation::Spring { stiffness: 700.0, damping: 53.0 })]
 	pub curve: Animation,
-
-	/// For short moves along a row, like typing
-	#[default(Animation::EaseOut { duration: 40.0 })]
-	pub short_curve: Animation,
 
 	/// How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1, where
 	/// its leading edge is there at once
 	#[default(1.0)]
 	pub trail: f32,
 
-	/// Modes the cursor jumps to its new place in, as `vim.keymap.set()` names them, e.g. `{ 'i', 'c' }`: one, or a
-	/// list, of `n`, `v` (Visual and Select), `o`, `i` (Insert and Replace), `c` and `t`. Moves into and out of them
-	/// still animate, e.g. `A` from normal mode, or `:`.
-	pub exclude_modes: Modes,
+	/// Other values for some moves ([overrides](#sarthi.CursorOverride)): each one that applies to a move in place of
+	/// `curve` and `trail`, later ones winning. By default, short moves along a row, like typing, are quick.
+	#[default(vec![CursorOverride {
+		rows: Span::exactly(0),
+		columns: Span { min: None, max: Some(2) },
+		curve: Some(Animation::EaseOut { duration: 40.0 }),
+		..Default::default()
+	}])]
+	pub overrides: Vec<CursorOverride>,
+}
+
+/// Values of `cursor_animation` for the moves it applies to, e.g. `{ modes = 'i', curve = { type = 'none' } }`: all
+/// its conditions must hold, and those it leaves out always do
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct CursorOverride {
+	/// For moves across this many rows: a number, or `{ min = …, max = … }`, either left out for no bound
+	#[serde(skip_serializing_if = "Span::is_any")]
+	pub rows: Span,
+
+	/// For moves across this many columns, like `rows`
+	#[serde(skip_serializing_if = "Span::is_any")]
+	pub columns: Span,
+
+	/// For moves within these modes, as `vim.keymap.set()` names them: one, or a list, of `n`, `v` (Visual and
+	/// Select), `o`, `i` (Insert and Replace), `c` and `t`. Not for moves into or out of them, e.g. `A` from normal
+	/// mode, or `:`.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub modes: Option<Modes>,
+
+	/// How the cursor moves to its new place
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub curve: Option<Animation>,
+
+	/// How much the trailing corners lag behind the leading ones
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub trail: Option<f32>,
+}
+
+/// A move of the cursor, as overrides see it
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CursorMove {
+	/// Rows from where it was, in cells of where it goes
+	pub rows: u32,
+
+	/// Columns from where it was, in cells of where it goes
+	pub columns: u32,
+
+	/// The mode it moves within; none for a move into another mode
+	pub mode: Option<Mode>,
+}
+
+/// How the cursor makes a move: the values of `cursor_animation` for it
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CursorStep {
+	/// How it moves to its new place
+	pub curve: Animation,
+
+	/// How much the trailing corners lag behind the leading ones
+	pub trail: f32,
+}
+
+impl CursorOverride {
+	/// Whether it applies to `step`
+	pub fn applies_to(&self, step: &CursorMove) -> bool {
+		self.rows.contains(step.rows)
+			&& self.columns.contains(step.columns)
+			&& self
+				.modes
+				.as_ref()
+				.is_none_or(|modes| step.mode.is_some_and(|mode| modes.0.contains(&mode)))
+	}
+}
+
+impl CursorAnimationSettings {
+	/// How the cursor makes `step`: `curve` and `trail`, with each override that applies to it in order, later ones
+	/// winning
+	pub fn for_move(&self, step: &CursorMove) -> CursorStep {
+		self.overrides.iter().filter(|rule| rule.applies_to(step)).fold(
+			CursorStep { curve: self.curve, trail: self.trail },
+			|current, rule| CursorStep {
+				curve: rule.curve.unwrap_or(current.curve),
+				trail: rule.trail.unwrap_or(current.trail),
+			},
+		)
+	}
+}
+
+/// How many of something a rule applies to: exactly a number, or from `min` to `max`, either left out for no bound
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Span {
+	/// The fewest it applies to
+	pub min: Option<u32>,
+
+	/// The most it applies to
+	pub max: Option<u32>,
+}
+
+impl Span {
+	/// Only `count`
+	pub fn exactly(count: u32) -> Self {
+		Self { min: Some(count), max: Some(count) }
+	}
+
+	/// Whether it applies to `count`
+	pub fn contains(&self, count: u32) -> bool {
+		self.min.is_none_or(|min| count >= min) && self.max.is_none_or(|max| count <= max)
+	}
+
+	/// Whether it applies to any count, having no bounds
+	pub fn is_any(&self) -> bool {
+		*self == Self::default()
+	}
+}
+
+impl<'de> Deserialize<'de> for Span {
+	/// A number, or a table of `min` and `max`: decoded as fields, so a mistake in it is named
+	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		use serde::de::{self, value::MapAccessDeserializer};
+
+		#[derive(Default, Deserialize)]
+		#[serde(default, deny_unknown_fields)]
+		struct Bounds {
+			min: Option<u32>,
+			max: Option<u32>,
+		}
+
+		struct NumberOrBounds;
+
+		impl<'de> de::Visitor<'de> for NumberOrBounds {
+			type Value = Span;
+
+			fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+				formatter.write_str("a number, or a table of min and max")
+			}
+
+			fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+				u32::try_from(value)
+					.map(Span::exactly)
+					.map_err(|_| E::invalid_value(de::Unexpected::Unsigned(value), &self))
+			}
+
+			fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+				u64::try_from(value)
+					.map_err(|_| E::invalid_value(de::Unexpected::Signed(value), &self))
+					.and_then(|value| self.visit_u64(value))
+			}
+
+			fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+				let Bounds { min, max } = Bounds::deserialize(MapAccessDeserializer::new(map))?;
+				Ok(Span { min, max })
+			}
+
+			/// An empty Lua table arrives as an array: no bounds.
+			fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+				match seq.next_element::<de::IgnoredAny>()? {
+					None => Ok(Span::default()),
+					Some(_) => Err(de::Error::invalid_type(de::Unexpected::Seq, &self)),
+				}
+			}
+		}
+
+		deserializer.deserialize_any(NumberOrBounds)
+	}
+}
+
+impl Serialize for Span {
+	/// As `setup()` takes it: a number for exactly one count, otherwise a table of the bounds it has
+	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		use serde::ser::SerializeMap;
+
+		if let (Some(min), Some(max)) = (self.min, self.max)
+			&& min == max
+		{
+			return serializer.serialize_u32(min);
+		}
+		let bounds = [("min", self.min), ("max", self.max)];
+		let mut map = serializer.serialize_map(None)?;
+		for (key, bound) in bounds.iter().filter_map(|(key, bound)| Some((key, (*bound)?))) {
+			map.serialize_entry(key, &bound)?;
+		}
+		map.end()
+	}
+}
+
+/// A number, or a table of `min` and `max`, as Lua gives them
+impl JsonSchema for Span {
+	/// Written where it's used: it's short
+	fn inline_schema() -> bool {
+		true
+	}
+
+	fn schema_name() -> std::borrow::Cow<'static, str> {
+		"Span".into()
+	}
+
+	fn json_schema(_: &mut SchemaGenerator) -> Schema {
+		let count = json_schema!({ "type": "integer", "minimum": 0 });
+		let bounds = json_schema!({ "type": "object", "properties": { "min": count, "max": count } });
+		json_schema!({ "anyOf": [count, bounds], "x-lua-type": "integer|{ min: integer?, max: integer? }" })
+	}
 }
 
 /// A mode, by the short name `vim.keymap.set()` gives it. Neovim tells Visual and Select mode apart only by the
@@ -745,6 +963,13 @@ impl WindowSettings {
 	/// Fails with what doesn't make sense, e.g. a negative size.
 	pub fn validate(&self) -> Result<(), String> {
 		validate_animation("scroll_animation.curve", self.scroll_animation.curve)?;
+		for (name, rule) in numbered("scroll_animation.overrides", &self.scroll_animation.overrides) {
+			validate_span(&format!("{name}.lines"), rule.lines)?;
+			let Some(curve) = rule.curve else {
+				return Err(format!("{name} changes nothing: give it a curve"));
+			};
+			validate_animation(&format!("{name}.curve"), curve)?;
+		}
 		check(self.shadow.blur >= 0.0, "shadow.blur can't be negative")?;
 		check((0.0..=1.0).contains(&self.shadow.opacity), "shadow.opacity must be from 0 to 1")?;
 		check(self.outline.width > 0.0, "outline.width must be more than 0")?;
@@ -764,8 +989,18 @@ impl Settings {
 
 		let cursor = &self.cursor_animation;
 		validate_animation("cursor_animation.curve", cursor.curve)?;
-		validate_animation("cursor_animation.short_curve", cursor.short_curve)?;
 		check((0.0..=1.0).contains(&cursor.trail), "cursor_animation.trail must be from 0 to 1")?;
+		for (name, rule) in numbered("cursor_animation.overrides", &cursor.overrides) {
+			validate_span(&format!("{name}.rows"), rule.rows)?;
+			validate_span(&format!("{name}.columns"), rule.columns)?;
+			if let Some(curve) = rule.curve {
+				validate_animation(&format!("{name}.curve"), curve)?;
+			}
+			let trail = rule.trail.is_none_or(|trail| (0.0..=1.0).contains(&trail));
+			check(trail, &format!("{name}.trail must be from 0 to 1"))?;
+			let changes = rule.curve.is_some() || rule.trail.is_some();
+			check(changes, &format!("{name} changes nothing: give it a curve or a trail"))?;
+		}
 
 		let underline = &self.underline;
 		check(underline.thickness.is_none_or(|thickness| thickness > 0.0), "underline.thickness must be more than 0")?;
@@ -775,6 +1010,20 @@ impl Settings {
 		check((0.0..=1.0).contains(&self.background.opacity), "background.opacity must be from 0 to 1")?;
 		Ok(())
 	}
+}
+
+/// The items of list `name`, each with its name as Lua numbers it, e.g. `overrides[1]`
+fn numbered<'a, T>(name: &'a str, items: &'a [T]) -> impl Iterator<Item = (String, &'a T)> {
+	items
+		.iter()
+		.enumerate()
+		.map(move |(index, item)| (format!("{name}[{}]", index + 1), item))
+}
+
+/// Whether `span` makes sense: its `min` no more than its `max`; the error names it as `name`
+fn validate_span(name: &str, span: Span) -> Result<(), String> {
+	let ordered = span.min.zip(span.max).is_none_or(|(min, max)| min <= max);
+	check(ordered, &format!("{name}: min is more than max"))
 }
 
 /// Whether `animation`'s values make sense; the error names the first that doesn't, as part of `name`
@@ -867,7 +1116,7 @@ mod number_or_false {
 mod tests {
 	use rmpv::Value;
 
-	use super::{Animation, Filetypes, Mode, Modes, RoundedCornerOptions, Settings, WindowOptions};
+	use super::{Animation, Filetypes, Mode, Modes, RoundedCornerOptions, Settings, Span, WindowOptions};
 
 	/// A Lua table as Neovim sends it: a map, or an array when empty
 	fn table(pairs: Vec<(&str, Value)>) -> Value {
@@ -1017,7 +1266,14 @@ mod tests {
 		let size = super::PaddingSize::Sides(super::PaddingSides { top: 2.0, ..Default::default() });
 		settings.window.padding.size = size;
 		settings.underline.ink_gaps = Some(1.5);
-		settings.cursor_animation.exclude_modes = super::Modes(vec![super::Mode::Insert, super::Mode::Cmdline]);
+		settings.cursor_animation.overrides.push(super::CursorOverride {
+			columns: super::Span { min: Some(3), max: None },
+			modes: Some(super::Modes(vec![super::Mode::Insert, super::Mode::Cmdline])),
+			trail: Some(0.5),
+			..Default::default()
+		});
+		settings.window.scroll_animation.overrides =
+			vec![super::ScrollOverride { lines: super::Span::exactly(1), curve: Some(Animation::None) }];
 		let encoded = rmp_serde::to_vec_named(&settings).unwrap();
 		assert_eq!(rmp_serde::from_slice::<Settings>(&encoded).unwrap(), settings);
 		let encoded = rmp_serde::to_vec_named(&Settings::default()).unwrap();
@@ -1136,25 +1392,99 @@ mod tests {
 			.unwrap()
 			.cursor_animation;
 		assert_eq!((settings.trail, settings.enabled), (0.2, false));
-		assert_eq!(settings.short_curve, Animation::EaseOut { duration: 40.0 });
 		assert!(Settings::default().cursor_animation.enabled);
+		let error = cursor(vec![("trail", Value::from(2))]).unwrap_err();
+		assert_eq!(error, "cursor_animation.trail must be from 0 to 1");
+	}
+
+	/// Settings with only `cursor_animation.overrides` given, as `rules`
+	fn cursor_overrides(rules: Vec<Value>) -> Result<Settings, String> {
+		parse(table(vec![("cursor_animation", table(vec![("overrides", Value::Array(rules))]))]))
+	}
+
+	#[test]
+	fn cursor_overrides_decode() {
+		let none = || ("curve", table(vec![("type", Value::from("none"))]));
+		let rule = |pairs| cursor_overrides(vec![table(pairs)]).map(|settings| settings.cursor_animation.overrides);
+
+		// A count is a number, or a table of `min` and `max`, either left out; an empty table is any count.
+		let bounds = table(vec![("min", Value::from(3))]);
+		let rules = rule(vec![("rows", Value::from(1)), ("columns", bounds), none()]).unwrap();
+		assert_eq!((rules[0].rows, rules[0].columns), (Span::exactly(1), Span { min: Some(3), max: None }));
+		assert_eq!(rules[0].curve, Some(Animation::None));
+		assert!(rule(vec![("rows", table(vec![])), none()]).unwrap()[0].rows.is_any());
 
 		// Modes as `vim.keymap.set()` takes them: one, or a list
-		let modes =
-			|value| cursor(vec![("exclude_modes", value)]).map(|settings| settings.cursor_animation.exclude_modes);
-		assert_eq!(modes(Value::from("i")).unwrap(), Modes(vec![Mode::Insert]));
+		let modes = |value| rule(vec![("modes", value), none()]).map(|rules| rules[0].modes.clone());
+		assert_eq!(modes(Value::from("i")).unwrap(), Some(Modes(vec![Mode::Insert])));
 		let list = Value::Array(vec![Value::from("i"), Value::from("c")]);
-		assert_eq!(modes(list).unwrap(), Modes(vec![Mode::Insert, Mode::Cmdline]));
-		assert_eq!(modes(table(vec![])).unwrap(), Modes::default());
+		assert_eq!(modes(list).unwrap(), Some(Modes(vec![Mode::Insert, Mode::Cmdline])));
 		let error = modes(Value::from("x")).unwrap_err();
 		assert!(error.contains("unknown variant `x`") && error.contains("`i`"), "{error}");
 		let error = modes(Value::Array(vec![Value::from("!")])).unwrap_err();
 		assert!(error.contains("unknown variant `!`"), "{error}");
 
-		let error = cursor(vec![("trail", Value::from(2))]).unwrap_err();
-		assert_eq!(error, "cursor_animation.trail must be from 0 to 1");
+		// Mistakes, named by the rule's place in the list as Lua numbers it
+		let error = rule(vec![("rows", table(vec![("min", Value::from(3)), ("max", Value::from(1))])), none()]);
+		assert_eq!(error.unwrap_err(), "cursor_animation.overrides[1].rows: min is more than max");
+		let error = rule(vec![("rows", Value::from(-1)), none()]).unwrap_err();
+		assert!(error.contains("a number, or a table of min and max"), "{error}");
+		let error = rule(vec![("rows", table(vec![("mni", Value::from(1))])), none()]).unwrap_err();
+		assert!(error.contains("unknown field `mni`"), "{error}");
+		let error = rule(vec![("rows", Value::from(1))]).unwrap_err();
+		assert_eq!(error, "cursor_animation.overrides[1] changes nothing: give it a curve or a trail");
 		let linear = table(vec![("type", Value::from("linear")), ("duration", Value::from(-1))]);
-		let error = cursor(vec![("short_curve", linear)]).unwrap_err();
-		assert_eq!(error, "cursor_animation.short_curve.duration can't be negative");
+		let error = rule(vec![("curve", linear)]).unwrap_err();
+		assert_eq!(error, "cursor_animation.overrides[1].curve.duration can't be negative");
+		let error = cursor_overrides(vec![table(vec![none()]), table(vec![("trail", Value::from(2))])]).unwrap_err();
+		assert_eq!(error, "cursor_animation.overrides[2].trail must be from 0 to 1");
+	}
+
+	#[test]
+	fn the_values_of_a_move_are_those_of_the_overrides_that_apply() {
+		let (spring, quick) =
+			(Animation::Spring { stiffness: 700.0, damping: 53.0 }, Animation::EaseOut { duration: 40.0 });
+		let mut cursor = Settings::default().cursor_animation;
+		let step = |cursor: &super::CursorAnimationSettings, rows, columns, mode| {
+			let step = cursor.for_move(&super::CursorMove { rows, columns, mode });
+			(step.curve, step.trail)
+		};
+
+		// By default, short moves along a row are quick.
+		assert_eq!(step(&cursor, 0, 2, None), (quick, 1.0));
+		assert_eq!(step(&cursor, 0, 3, None), (spring, 1.0));
+		assert_eq!(step(&cursor, 1, 0, None), (spring, 1.0));
+
+		// Later ones win for what they give; what they leave out stays.
+		cursor.overrides.push(super::CursorOverride {
+			modes: Some(Modes(vec![Mode::Insert])),
+			curve: Some(Animation::None),
+			trail: Some(0.0),
+			..Default::default()
+		});
+		cursor.overrides.push(super::CursorOverride {
+			columns: Span::exactly(1),
+			trail: Some(0.5),
+			..Default::default()
+		});
+		assert_eq!(step(&cursor, 0, 1, Some(Mode::Insert)), (Animation::None, 0.5));
+		assert_eq!(step(&cursor, 0, 2, Some(Mode::Insert)), (Animation::None, 0.0));
+		assert_eq!(step(&cursor, 0, 1, Some(Mode::Normal)), (quick, 0.5));
+		// A move into another mode is no mode's.
+		assert_eq!(step(&cursor, 0, 5, None), (spring, 1.0));
+	}
+
+	#[test]
+	fn scroll_overrides() {
+		let overrides = |rules| window_section("scroll_animation", vec![("overrides", Value::Array(rules))]);
+		let far = table(vec![
+			("lines", table(vec![("min", Value::from(40))])),
+			("curve", table(vec![("type", Value::from("none"))])),
+		]);
+		let scroll = overrides(vec![far]).unwrap().window.scroll_animation;
+		assert_eq!((scroll.curve_for(39), scroll.curve_for(40)), (Animation::default(), Animation::None));
+
+		let error = overrides(vec![table(vec![("lines", Value::from(1))])]).unwrap_err();
+		assert_eq!(error, "window.scroll_animation.overrides[1] changes nothing: give it a curve");
 	}
 }

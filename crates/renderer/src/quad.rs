@@ -631,7 +631,7 @@ mod tests {
 	/// Rectangles of a bar cursor at (row 2, col 3) of a layer placed at (row 1, col 1) of 8×19 px cells
 	fn bar_rect(orientation: BarOrientation, width: u32, percentage: u32) -> [f32; 4] {
 		let shape = CursorShape::Bar { orientation, percentage };
-		let cursor = Cursor { row: 2, col: 3, width, shape, color: 0xFFFFFF, text_color: 0, animate: true };
+		let cursor = Cursor { row: 2, col: 3, width, shape, color: 0xFFFFFF, text_color: 0, motion: None };
 		let layer = Layer {
 			id: 1,
 			x: 8,

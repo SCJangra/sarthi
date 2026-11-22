@@ -15,6 +15,8 @@ Settings ..................................................... |sarthi-settings|
   ime ............................................................. |sarthi-ime|
   background ............................................... |sarthi-background|
   Animations ................................................ |sarthi.Animation|
+  Cursor animation overrides ........................... |sarthi.CursorOverride|
+  Scroll animation overrides ........................... |sarthi.ScrollOverride|
 Lua module ............................................................ |sarthi|
 Window functions .................................................. |sarthi.api|
   The sarthi table ....................................... |sarthi.WindowConfig|
@@ -105,6 +107,14 @@ window.scroll_animation.curve             *sarthi-window.scroll_animation.curve*
 `{ type = "spring", stiffness = 400, damping = 32 }` · global, or per window
 
 How it moves to its new place
+
+window.scroll_animation.overrides     *sarthi-window.scroll_animation.overrides*
+
+`sarthi.ScrollOverride[]`, default `{}` · global only
+
+Other values for some scrolls (overrides |sarthi.ScrollOverride|): each one
+that applies to a scroll in place of `curve`, later ones winning,
+e.g. `{ { lines = { min = 40 }, curve = { type = 'none' } } }` for big jumps
 
 window.scroll_animation.exclude_filetypes *sarthi-window.scroll_animation.exclude_filetypes*
 
@@ -259,14 +269,7 @@ cursor_animation.curve                           *sarthi-cursor_animation.curve*
 `sarthi.Animation`, default
 `{ type = "spring", stiffness = 700, damping = 53 }` · global only
 
-For moves farther than a couple of cells along a row
-
-cursor_animation.short_curve               *sarthi-cursor_animation.short_curve*
-
-`sarthi.Animation`, default `{ type = "ease_out", duration = 40 }` · global
-only
-
-For short moves along a row, like typing
+How it moves to its new place
 
 cursor_animation.trail                           *sarthi-cursor_animation.trail*
 
@@ -275,14 +278,15 @@ cursor_animation.trail                           *sarthi-cursor_animation.trail*
 How much the trailing corners lag behind the leading ones: from 0, where the
 cursor moves as it is, to 1, where its leading edge is there at once
 
-cursor_animation.exclude_modes           *sarthi-cursor_animation.exclude_modes*
+cursor_animation.overrides                   *sarthi-cursor_animation.overrides*
 
-`sarthi.Mode|sarthi.Mode[]`, default `{}` · global only
+`sarthi.CursorOverride[]`, default
+`{ { rows = 0, columns = { max = 2 }, curve = { type = "ease_out", duration = 40 } } }`
+· global only
 
-Modes the cursor jumps to its new place in, as `vim.keymap.set()` names them,
-e.g. `{ 'i', 'c' }`: one, or a list, of `n`, `v` (Visual and Select), `o`, `i`
-(Insert and Replace), `c` and `t`. Moves into and out of them still animate,
-e.g. `A` from normal mode, or `:`.
+Other values for some moves (overrides |sarthi.CursorOverride|): each one that
+applies to a move in place of `curve` and `trail`, later ones winning. By
+default, short moves along a row, like typing, are quick.
 
 ------------------------------------------------------------------------------
 underline                                                     *sarthi-underline*
@@ -409,6 +413,64 @@ Like CSS's `cubic-bezier()` over `duration`
 - `points`: `number[]`, required. The curve's control points: x1, y1, x2, y2,
   with the x values from 0 to 1, e.g. `{ 0.25, 0.1, 0.25, 1 }`
 - `duration`: `number`, default `150`. How long it takes, in milliseconds
+
+------------------------------------------------------------------------------
+Cursor animation overrides                               *sarthi.CursorOverride*
+
+Values of `cursor_animation` for the moves it applies to,
+e.g. `{ modes = 'i', curve = { type = 'none' } }`: all its conditions must
+hold, and those it leaves out always do
+
+cursor_animation.overrides[n].rows                  *sarthi.CursorOverride.rows*
+
+`integer|{ min: integer?, max: integer? }`
+
+For moves across this many rows: a number, or `{ min = …, max = … }`, either
+left out for no bound
+
+cursor_animation.overrides[n].columns            *sarthi.CursorOverride.columns*
+
+`integer|{ min: integer?, max: integer? }`
+
+For moves across this many columns, like `rows`
+
+cursor_animation.overrides[n].modes                *sarthi.CursorOverride.modes*
+
+`sarthi.Mode|sarthi.Mode[]`
+
+For moves within these modes, as `vim.keymap.set()` names them: one, or a
+list, of `n`, `v` (Visual and Select), `o`, `i` (Insert and Replace), `c` and
+`t`. Not for moves into or out of them, e.g. `A` from normal mode, or `:`.
+
+cursor_animation.overrides[n].curve                *sarthi.CursorOverride.curve*
+
+`sarthi.Animation`
+
+How the cursor moves to its new place
+
+cursor_animation.overrides[n].trail                *sarthi.CursorOverride.trail*
+
+`number`
+
+How much the trailing corners lag behind the leading ones
+
+------------------------------------------------------------------------------
+Scroll animation overrides                               *sarthi.ScrollOverride*
+
+A value of `scroll_animation` for the scrolls it applies to
+
+window.scroll_animation.overrides[n].lines         *sarthi.ScrollOverride.lines*
+
+`integer|{ min: integer?, max: integer? }`
+
+For scrolls of this many lines: a number, or `{ min = …, max = … }`, either
+left out for no bound
+
+window.scroll_animation.overrides[n].curve         *sarthi.ScrollOverride.curve*
+
+`sarthi.Animation`
+
+How text that scrolled that far moves to its new place
 
 ==============================================================================
 Lua module                                                              *sarthi*

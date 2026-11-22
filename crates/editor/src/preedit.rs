@@ -5,7 +5,7 @@ use rpc::neovim::CellText;
 use unicode_width::UnicodeWidthChar;
 
 /// An id no grid has: Neovim's grid ids are 32-bit, and the message separator takes the one after them.
-const PREEDIT_ID: u64 = u32::MAX as u64 + 2;
+pub(crate) const PREEDIT_ID: u64 = u32::MAX as u64 + 2;
 
 /// Text an input method is composing, and where its caret is in it, as a byte offset
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,7 +81,7 @@ pub fn preedit_layer(layers: &mut [Layer], preedit: &Preedit) -> Option<Layer> {
 		shape: CursorShape::Bar { orientation: BarOrientation::Vertical, percentage: bar_percentage(cursor.shape) },
 		color: cursor.color,
 		text_color: cursor.text_color,
-		animate: false,
+		motion: None,
 	});
 	Some(Layer {
 		id: PREEDIT_ID,
@@ -142,7 +142,7 @@ mod tests {
 			width: 6,
 			height: 2,
 			cells: vec![cell; 12],
-			cursor: Some(Cursor { row: 1, col: 2, width: 1, shape, color: 0xFF0000, text_color: 0, animate: true }),
+			cursor: Some(Cursor { row: 1, col: 2, width: 1, shape, color: 0xFF0000, text_color: 0, motion: None }),
 			scroll: None,
 			shadow: None,
 			outline: None,
@@ -195,7 +195,7 @@ mod tests {
 		// After "日", 3 bytes in: its two cells
 		let shown = preedit_layer(&mut layers, &preedit("日本", Some(3))).unwrap();
 		let caret = shown.cursor.unwrap();
-		assert_eq!((caret.col, caret.color, caret.animate), (2, 0xFF0000, false));
+		assert_eq!((caret.col, caret.color, caret.motion), (2, 0xFF0000, None));
 		assert_eq!(caret.shape, CursorShape::Bar { orientation: BarOrientation::Vertical, percentage: 15 });
 		// At the end, a cell after the text holds it.
 		let shown = preedit_layer(&mut [layer()], &preedit("ab", Some(2))).unwrap();

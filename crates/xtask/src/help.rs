@@ -33,6 +33,12 @@ pub fn markdown(root: &Path) -> String {
 		settings_section(&mut out, &settings, &options, name, settings.resolve(property), 2);
 	}
 	animations(&mut out, &settings);
+	for (name, title, prefix) in [
+		("CursorOverride", "Cursor animation overrides", "cursor_animation.overrides[n]"),
+		("ScrollOverride", "Scroll animation overrides", "window.scroll_animation.overrides[n]"),
+	] {
+		table(&mut out, &settings, &format!("sarthi.{name}"), title, settings.def(name), prefix);
+	}
 
 	section(&mut out, 1, "Lua module", "sarthi", &prose("lua.md"));
 	functions(&mut out, &api, |lua| !lua.starts_with("api."));

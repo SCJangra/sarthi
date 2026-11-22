@@ -36,6 +36,7 @@
 ---@class sarthi.ScrollAnimationSettings
 ---@field enabled? boolean Whether text that scrolled slides to its new place, or jumps there
 ---@field curve? sarthi.Animation How it moves to its new place
+---@field overrides? sarthi.ScrollOverride[] Other values for some scrolls (overrides): each one that applies to a scroll in place of `curve`, later ones winning, e.g. `{ { lines = { min = 40 }, curve = { type = 'none' } } }` for big jumps
 ---@field exclude_filetypes? string[] Windows showing these filetypes jump to their new place, e.g. menus whose selected line is highlighted text, whatever their `w:sarthi` gives. Glob patterns, e.g. `cmp_*`.
 
 ---An animation's curve, e.g. `{ type = "spring", stiffness = 400, damping = 32 }`. Durations are in milliseconds; a
@@ -46,6 +47,11 @@
 ---@field damping? number How much the spring slows it down
 ---@field duration? number How long it takes, in milliseconds
 ---@field points? number[] The curve's control points: x1, y1, x2, y2, with the x values from 0 to 1, e.g. `{ 0.25, 0.1, 0.25, 1 }`
+
+---A value of `scroll_animation` for the scrolls it applies to
+---@class sarthi.ScrollOverride
+---@field lines? integer|{ min: integer?, max: integer? } For scrolls of this many lines: a number, or `{ min = …, max = … }`, either left out for no bound
+---@field curve? sarthi.Animation How text that scrolled that far moves to its new place
 
 ---The shadow under floating and external windows, in logical pixels
 ---@class sarthi.ShadowSettings
@@ -94,10 +100,18 @@
 ---where it goes and shrinks back as it arrives
 ---@class sarthi.CursorAnimationSettings
 ---@field enabled? boolean Whether the cursor moves to its new place, or jumps there
----@field curve? sarthi.Animation For moves farther than a couple of cells along a row
----@field short_curve? sarthi.Animation For short moves along a row, like typing
+---@field curve? sarthi.Animation How it moves to its new place
 ---@field trail? number How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1, where its leading edge is there at once
----@field exclude_modes? sarthi.Mode|sarthi.Mode[] Modes the cursor jumps to its new place in, as `vim.keymap.set()` names them, e.g. `{ 'i', 'c' }`: one, or a list, of `n`, `v` (Visual and Select), `o`, `i` (Insert and Replace), `c` and `t`. Moves into and out of them still animate, e.g. `A` from normal mode, or `:`.
+---@field overrides? sarthi.CursorOverride[] Other values for some moves (overrides): each one that applies to a move in place of `curve` and `trail`, later ones winning. By default, short moves along a row, like typing, are quick.
+
+---Values of `cursor_animation` for the moves it applies to, e.g. `{ modes = 'i', curve = { type = 'none' } }`: all its
+---conditions must hold, and those it leaves out always do
+---@class sarthi.CursorOverride
+---@field rows? integer|{ min: integer?, max: integer? } For moves across this many rows: a number, or `{ min = …, max = … }`, either left out for no bound
+---@field columns? integer|{ min: integer?, max: integer? } For moves across this many columns, like `rows`
+---@field modes? sarthi.Mode|sarthi.Mode[] For moves within these modes, as `vim.keymap.set()` names them: one, or a list, of `n`, `v` (Visual and Select), `o`, `i` (Insert and Replace), `c` and `t`. Not for moves into or out of them, e.g. `A` from normal mode, or `:`.
+---@field curve? sarthi.Animation How the cursor moves to its new place
+---@field trail? number How much the trailing corners lag behind the leading ones
 
 ---A mode, by the short name `vim.keymap.set()` gives it. Neovim tells Visual and Select mode apart only by the cursor's
 ---look, so `v` is both.

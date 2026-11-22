@@ -2,7 +2,7 @@
 
 use smart_default::SmartDefault;
 
-use crate::{CursorMotion, Motion};
+use crate::Motion;
 
 /// How a [`crate::Renderer`] sets up the GPU and the window's surface
 #[derive(Debug, Clone, SmartDefault)]
@@ -25,9 +25,6 @@ pub struct RendererConfig {
 	/// How text that scrolled moves to its new place, until [`crate::Renderer::set_scroll_motion`] changes it
 	#[default(Motion::Spring { stiffness: 400.0, damping: 32.0 })]
 	pub scroll: Motion,
-
-	/// How the cursor moves to a new place, until [`crate::Renderer::set_cursor_motion`] changes it
-	pub cursor: CursorMotion,
 
 	/// How opaque the window's background is, from 0 to 1, until [`crate::Renderer::set_opacity`] changes it
 	#[default(1.0)]

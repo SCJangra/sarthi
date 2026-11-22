@@ -3,38 +3,29 @@
 
 use std::time::{Duration, Instant};
 
-use smart_default::SmartDefault;
-
 use crate::animation::{Approach, Easing, Motion};
-use crate::{BarOrientation, CellSize, Cursor, CursorShape, Layer, Rect};
+use crate::{BarOrientation, Cursor, CursorShape, Layer, Rect};
 
-/// How the cursor moves to a new place
-#[derive(Debug, Clone, Copy, PartialEq, SmartDefault)]
+/// How the cursor makes a move to a new place
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CursorMotion {
-	/// For moves farther than a couple of cells along a row
-	#[default(Motion::Spring { stiffness: 700.0, damping: 53.0 })]
+	/// How its corners move there
 	pub motion: Motion,
-
-	/// For short moves along a row, like typing
-	#[default(Motion::Ease { easing: Easing::EaseOut, duration: Duration::from_millis(40) })]
-	pub short: Motion,
 
 	/// How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1, where
 	/// the leading corners are there at once
-	#[default(0.7)]
 	pub trail: f32,
 }
-
-/// Cells along a row that still make a short move
-const SHORT_MOVE: f32 = 2.0;
 
 /// Below this share of a motion's time, a corner is at its place at once.
 const INSTANT: f32 = 0.01;
 
-/// The cursor's corners on their way to where the cursor is
-pub(crate) struct CursorAnimation {
-	motion: CursorMotion,
+/// The motion of a corner at rest: any, as it has no way to go
+const AT_REST: Motion = Motion::Ease { easing: Easing::Linear, duration: Duration::ZERO };
 
+/// The cursor's corners on their way to where the cursor is
+#[derive(Default)]
+pub(crate) struct CursorAnimation {
 	/// Top-left, top-right, bottom-right and bottom-left; none before the first cursor
 	corners: Option<[Corner; 4]>,
 }
@@ -50,20 +41,11 @@ struct Corner {
 }
 
 impl CursorAnimation {
-	pub(crate) fn new(motion: CursorMotion) -> Self {
-		Self { motion, corners: None }
-	}
-
-	/// Sets how the cursor moves from its next move on
-	pub(crate) fn set_motion(&mut self, motion: CursorMotion) {
-		self.motion = motion;
-	}
-
-	/// Moves the cursor to `rect`, in pixels, at `now`: animated, unless `animate` is false or
-	/// it's the first cursor. A move is short by cells of `cell`, the cell size where the cursor goes.
-	pub(crate) fn update(&mut self, rect: Rect<f32>, animate: bool, cell: CellSize, now: Instant) {
+	/// Moves the cursor to `rect`, in pixels, at `now`: as `motion` says, or at once without one or for the first
+	/// cursor
+	pub(crate) fn update(&mut self, rect: Rect<f32>, motion: Option<CursorMotion>, now: Instant) {
 		let targets = corners_of(rect);
-		let at_rest = |target: [f32; 2]| Corner { target, offset: [Approach::new(self.motion.motion, now); 2] };
+		let at_rest = |target: [f32; 2]| Corner { target, offset: [Approach::new(AT_REST, now); 2] };
 		let Some(corners) = &mut self.corners else {
 			self.corners = Some(targets.map(at_rest));
 			return;
@@ -71,17 +53,14 @@ impl CursorAnimation {
 		if corners.iter().zip(&targets).all(|(corner, target)| corner.target == *target) {
 			return;
 		}
-		if !animate {
+		let Some(CursorMotion { motion, trail }) = motion else {
 			*corners = targets.map(at_rest);
 			return;
-		}
+		};
 
 		let (from, to) = (center(&corners.map(|corner| corner.target)), center(&targets));
 		let travel = [to[0] - from[0], to[1] - from[1]];
-		let short = corners[0].target[1] == targets[0][1] && travel[0].abs() <= SHORT_MOVE * cell.width as f32;
-		let motion = if short { self.motion.short } else { self.motion.motion };
-
-		for ((corner, target), share) in corners.iter_mut().zip(targets).zip(lead(travel, self.motion.trail)) {
+		for ((corner, target), share) in corners.iter_mut().zip(targets).zip(lead(travel, trail)) {
 			for ((offset, from), to) in corner.offset.iter_mut().zip(corner.target).zip(target) {
 				if share < INSTANT {
 					*offset = Approach::new(motion, now);
@@ -162,15 +141,12 @@ mod tests {
 
 	const CELL: CellSize = CellSize { width: 10, height: 20 };
 
-	/// Cells a pixel large, so the moves below are as many cells as pixels, e.g. for what's a short move
-	const PIXEL: CellSize = CellSize { width: 1, height: 1 };
-
 	fn linear(millis: u64) -> Motion {
 		Motion::Ease { easing: Easing::Linear, duration: Duration::from_millis(millis) }
 	}
 
-	fn animation(trail: f32) -> CursorAnimation {
-		CursorAnimation::new(CursorMotion { motion: linear(100), short: linear(10), trail })
+	fn motion(trail: f32) -> Option<CursorMotion> {
+		Some(CursorMotion { motion: linear(100), trail })
 	}
 
 	/// A block cursor of a one-pixel cell
@@ -196,18 +172,18 @@ mod tests {
 
 	#[test]
 	fn the_first_cursor_is_in_place_at_once() {
-		let (now, mut cursor) = (Instant::now(), animation(0.5));
+		let (now, mut cursor, moving) = (Instant::now(), CursorAnimation::default(), motion(0.5));
 		assert_eq!(cursor.corners(now), None);
-		cursor.update(block(3.0, 2.0), true, PIXEL, now);
+		cursor.update(block(3.0, 2.0), moving, now);
 		assert_eq!(cursor.corners(now), Some([[3.0, 2.0], [4.0, 2.0], [4.0, 3.0], [3.0, 3.0]]));
 		assert!(!cursor.is_animating(now));
 	}
 
 	#[test]
 	fn a_move_stretches_the_cursor_then_settles() {
-		let (now, mut cursor) = (Instant::now(), animation(0.5));
-		cursor.update(block(0.0, 0.0), true, PIXEL, now);
-		cursor.update(block(10.0, 0.0), true, PIXEL, now);
+		let (now, mut cursor, moving) = (Instant::now(), CursorAnimation::default(), motion(0.5));
+		cursor.update(block(0.0, 0.0), moving, now);
+		cursor.update(block(10.0, 0.0), moving, now);
 		assert!(cursor.is_animating(now));
 
 		// Halfway through the leading corners' time: they're halfway, the trailing ones a quarter of the way.
@@ -223,33 +199,21 @@ mod tests {
 	}
 
 	#[test]
-	fn short_moves_along_a_row_are_quicker() {
-		let (now, mut cursor) = (Instant::now(), animation(0.0));
-		cursor.update(block(4.0, 1.0), true, PIXEL, now);
-		cursor.update(block(5.0, 1.0), true, PIXEL, now);
-		assert!(!cursor.is_animating(now + Duration::from_millis(10)));
-
-		// The same distance down a column isn't short.
-		cursor.update(block(5.0, 2.0), true, PIXEL, now);
-		assert!(cursor.is_animating(now + Duration::from_millis(10)));
-	}
-
-	#[test]
 	fn a_move_without_animation_jumps() {
-		let (now, mut cursor) = (Instant::now(), animation(0.5));
-		cursor.update(block(0.0, 0.0), true, PIXEL, now);
-		cursor.update(block(10.0, 5.0), false, PIXEL, now);
+		let (now, mut cursor, moving) = (Instant::now(), CursorAnimation::default(), motion(0.5));
+		cursor.update(block(0.0, 0.0), moving, now);
+		cursor.update(block(10.0, 5.0), None, now);
 		assert!(!cursor.is_animating(now));
 		assert_eq!(cursor.corners(now).unwrap()[0], [10.0, 5.0]);
 	}
 
 	#[test]
 	fn a_new_target_on_the_way_starts_from_where_the_corners_are() {
-		let (now, mut cursor) = (Instant::now(), animation(0.0));
-		cursor.update(block(0.0, 0.0), true, PIXEL, now);
-		cursor.update(block(10.0, 0.0), true, PIXEL, now);
+		let (now, mut cursor, moving) = (Instant::now(), CursorAnimation::default(), motion(0.0));
+		cursor.update(block(0.0, 0.0), moving, now);
+		cursor.update(block(10.0, 0.0), moving, now);
 		let halfway = now + Duration::from_millis(50);
-		cursor.update(block(10.0, 4.0), true, PIXEL, halfway);
+		cursor.update(block(10.0, 4.0), moving, halfway);
 		// No jump: still halfway along the row, and only starting down
 		let corners = cursor.corners(halfway).unwrap();
 		assert!(close(corners, [[5.0, 0.0], [6.0, 0.0], [6.0, 1.0], [5.0, 1.0]]), "{corners:?}");
@@ -257,12 +221,30 @@ mod tests {
 
 	#[test]
 	fn a_shape_change_animates_in_place() {
-		let (now, mut cursor) = (Instant::now(), animation(0.5));
-		cursor.update(block(2.0, 0.0), true, PIXEL, now);
-		cursor.update(crate::Rect::new(2.0, 0.0, 0.2, 1.0), true, PIXEL, now);
-		// A short move: halfway through the short motion, the right edge is on its way from 3 to 2.2, the left one in place.
-		let corners = cursor.corners(now + Duration::from_millis(5)).unwrap();
+		let (now, mut cursor, moving) = (Instant::now(), CursorAnimation::default(), motion(0.5));
+		cursor.update(block(2.0, 0.0), moving, now);
+		cursor.update(crate::Rect::new(2.0, 0.0, 0.2, 1.0), moving, now);
+		// Halfway through the motion, the right edge is on its way from 3 to 2.2, the left one in place.
+		let corners = cursor.corners(now + Duration::from_millis(50)).unwrap();
 		assert!(close(corners, [[2.0, 0.0], [2.6, 0.0], [2.6, 1.0], [2.0, 1.0]]), "{corners:?}");
+	}
+
+	#[test]
+	fn a_held_key_keeps_the_cursor_going_one_way() {
+		// `j` held down: a row every 30 ms, faster than the spring settles
+		let spring = Some(CursorMotion { motion: Motion::Spring { stiffness: 700.0, damping: 53.0 }, trail: 1.0 });
+		let (start, mut cursor) = (Instant::now(), CursorAnimation::default());
+		let mut last = f32::NEG_INFINITY;
+		for step in 0..50 {
+			let now = start + Duration::from_millis(30 * step);
+			cursor.update(block(0.0, step as f32 * 20.0), spring, now);
+			// Drawn every 5 ms in between: the top edge only ever goes down.
+			for frame in 0..6 {
+				let top = cursor.corners(now + Duration::from_millis(5 * frame)).unwrap()[0][1];
+				assert!(top >= last - 1e-3, "back up from {last} to {top} at move {step}");
+				last = top;
+			}
+		}
 	}
 
 	#[test]
@@ -285,7 +267,7 @@ mod tests {
 			padding_background: (0, 0),
 			corner_radius: 0.0,
 		};
-		let cursor = |shape| Cursor { row: 2, col: 3, width: 1, shape, color: 0, text_color: 0, animate: true };
+		let cursor = |shape| Cursor { row: 2, col: 3, width: 1, shape, color: 0, text_color: 0, motion: None };
 		assert_eq!(cursor_rect(&layer, cursor(CursorShape::Block)), crate::Rect::new(50.0, 60.0, 10.0, 20.0));
 		let bar = |orientation, percentage| CursorShape::Bar { orientation, percentage };
 		// 25% of 10 pixels rounds up to 3, as drawn at rest.

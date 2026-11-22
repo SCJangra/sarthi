@@ -199,7 +199,7 @@ pub struct TextStyle {
 }
 
 /// The cursor in a cell of a [`Layer`], drawn over the text
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Cursor {
 	/// Position of the cell, in cells from the layer's top-left corner
 	pub row: u32,
@@ -218,8 +218,8 @@ pub struct Cursor {
 	/// Color of the character under a block cursor, so it stays readable. As `0xRRGGBB` in sRGB.
 	pub text_color: u32,
 
-	/// Whether moving here animates (see [`crate::CursorMotion`]); otherwise the cursor jumps here.
-	pub animate: bool,
+	/// How the cursor moves here from where it was; without one it jumps here
+	pub motion: Option<crate::CursorMotion>,
 }
 
 /// What a [`Cursor`] looks like, from Neovim's `guicursor`

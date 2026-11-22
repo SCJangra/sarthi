@@ -158,11 +158,15 @@ impl Editor {
 	/// How the text of grid `id`, `width` × `height` cells, scrolled since the last `flush`, if it did
 	fn scroll(&self, id: Grid, width: u32, height: u32) -> Option<Scroll> {
 		let viewport = self.viewports.get(&id).filter(|viewport| viewport.scrolled != 0)?;
-		let motion = viewport.win.and_then(|win| self.scroll_motions.get(&win).copied());
+		let animation = viewport.win.and_then(|win| self.scroll_animations.get(&win));
 		// It jumps.
-		if motion == Some(None) {
+		if animation.is_some_and(Option::is_none) {
 			return None;
 		}
+		let lines = viewport.scrolled.unsigned_abs().try_into().unwrap_or(u32::MAX);
+		let motion = animation
+			.and_then(Option::as_ref)
+			.map(|animation| crate::motion(animation.curve_for(lines)));
 		let Edges { top, right, bottom, left } = viewport.margins;
 		Some(Scroll {
 			rows: viewport.scrolled.clamp(i32::MIN.into(), i32::MAX.into()) as i32,
@@ -170,7 +174,7 @@ impl Editor {
 			bottom: height.saturating_sub(bottom),
 			left,
 			right: width.saturating_sub(right),
-			motion: motion.flatten(),
+			motion,
 		})
 	}
 

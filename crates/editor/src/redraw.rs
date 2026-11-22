@@ -1,9 +1,10 @@
 //! Neovim's redraw events (`:help ui-events`) applied to the editor's state, drawn once a redraw ends
 
-use renderer::Edges;
+use renderer::{Edges, Layer};
 use rpc::neovim::{CellText, Grid, OptionSetEvent, OptionValue, RedrawNotification, WinViewportEvent, Window};
 
 use crate::grid::GridState;
+use crate::preedit::PREEDIT_ID;
 use crate::{Editor, Placement, Redraw};
 
 impl Editor {
@@ -16,7 +17,6 @@ impl Editor {
 		}
 		redraw
 	}
-
 	fn apply_event(&mut self, event: RedrawNotification) -> Option<Redraw> {
 		match event {
 			// A grid starts with its first resize.
@@ -154,7 +154,7 @@ impl Editor {
 	fn destroy_grid(&mut self, grid: Grid) {
 		self.grids.remove(&grid);
 		if let Some(win) = self.viewports.remove(&grid).and_then(|viewport| viewport.win) {
-			self.scroll_motions.remove(&win);
+			self.scroll_animations.remove(&win);
 		}
 		match self.placements.remove(&grid) {
 			Some(Placement::Float { win, .. }) => _ = self.floats.remove(&win),
@@ -230,15 +230,33 @@ impl Editor {
 
 	/// The layers to draw, if anything changed since the last `flush`
 	pub(crate) fn flush(&mut self) -> Option<Redraw> {
-		let redraw =
+		let mut redraw =
 			std::mem::take(&mut self.stale).then(|| Redraw { background: self.background(), layers: self.layers() });
-		if redraw.is_some() {
-			self.cursor.drawn();
+		if let Some(redraw) = &mut redraw {
+			self.move_cursor(&mut redraw.layers);
 		}
 		// A scroll belongs to the redraw it's part of.
 		for viewport in self.viewports.values_mut() {
 			viewport.scrolled = 0;
 		}
 		redraw
+	}
+
+	/// Gives the cursor among `layers`, the first one's as the renderer draws it, how it moves there, and notes where
+	/// it's drawn
+	fn move_cursor(&mut self, layers: &mut [Layer]) {
+		let found = layers.iter_mut().find_map(|layer| {
+			let (id, cell, x, y) = (layer.id, layer.cell, layer.x, layer.y);
+			Some((id, cell, [x, y], layer.cursor.as_mut()?))
+		});
+		let Some((id, cell, [x, y], cursor)) = found else {
+			return;
+		};
+		let at = [x + cursor.col * cell.width, y + cursor.row * cell.height];
+		// The caret in what an input method composes moves at once.
+		if id != PREEDIT_ID {
+			cursor.motion = self.cursor.motion_to(at, cell);
+		}
+		self.cursor.drawn(at);
 	}
 }

@@ -1,10 +1,11 @@
-use renderer::{CellSize, Cursor, CursorShape, Edges, FontId, Layer, Motion, Shadow};
+use renderer::{CellSize, Cursor, CursorMotion, CursorShape, Edges, FontId, Layer, Shadow};
 use rpc::neovim::{
 	CellText, DefaultColorsSetEvent, Grid, GridCell, GridCursorGotoEvent, GridDestroyEvent, GridLineEvent,
 	GridResizeEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, HlId, MsgSetPosEvent, OptionSetEvent, OptionValue,
 	RedrawNotification, WinCloseEvent, WinExternalPosEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent,
 	WinViewportEvent, WinViewportMarginsEvent, Window,
 };
+use rpc::sarthi::{Animation, CursorAnimationSettings, ScrollAnimationSettings, ScrollOverride, Span};
 use serde::de::IgnoredAny;
 
 use super::{Anchor, Editor, FloatStyle, GridPosition, OutlineStyle, Place, Pointer, Preedit, Redraw, Relative};
@@ -84,7 +85,7 @@ fn cursor_is_drawn_where_neovim_put_it() {
 	let [layer] = redraw.layers.as_slice() else { panic!("expected one layer") };
 	// A block cursor in the cell's swapped colors, on "b"
 	let cursor =
-		Cursor { row: 0, col: 1, width: 1, shape: CursorShape::Block, color: FG, text_color: BG, animate: true };
+		Cursor { row: 0, col: 1, width: 1, shape: CursorShape::Block, color: FG, text_color: BG, motion: None };
 	assert_eq!(layer.cursor, Some(cursor));
 
 	// Moving the cursor is a change to draw.
@@ -974,24 +975,30 @@ fn shadow_of(redraw: &Redraw, id: u64) -> Option<Vec<[u32; 4]>> {
 #[test]
 fn some_windows_jump_or_slide_their_own_way() {
 	let mut editor = screen();
-	let motion = Motion::Spring { stiffness: 100.0, damping: 20.0 };
+	let spring = Animation::Spring { stiffness: 100.0, damping: 20.0 };
+	let far = ScrollOverride { lines: Span { min: Some(3), max: None }, curve: Some(Animation::None) };
+	let animation = ScrollAnimationSettings { curve: spring, overrides: vec![far], ..Default::default() };
 	flush(&mut editor, vec![win_pos(2, 0, 0), viewport(2, 100, 0)]);
 
 	// Told before the redraw that scrolls, like `WinScrolled` does
-	editor.set_scroll_motion(win_of(2), None);
+	editor.set_scroll_animation(win_of(2), None);
 	let redraw = flush(&mut editor, vec![viewport(2, 100, 1), line(2, 0, "a")]);
 	assert_eq!(scroll_of(&redraw, 2), None);
 
-	editor.set_scroll_motion(win_of(2), Some(motion));
+	editor.set_scroll_animation(win_of(2), Some(animation));
 	let redraw = flush(&mut editor, vec![viewport(2, 100, 1), line(2, 0, "b")]);
 	assert_eq!(scroll_of(&redraw, 2), Some((1, 0, 3, 0, 4)));
 	let Some(layer) = redraw.layers.iter().find(|layer| layer.id == 2) else { panic!() };
-	assert_eq!(layer.scroll.and_then(|scroll| scroll.motion), Some(motion));
+	assert_eq!(layer.scroll.and_then(|scroll| scroll.motion), Some(crate::motion(spring)));
+	// Farther, as its override says
+	let redraw = flush(&mut editor, vec![viewport(2, 100, -3), line(2, 0, "c")]);
+	let Some(layer) = redraw.layers.iter().find(|layer| layer.id == 2) else { panic!() };
+	assert_eq!(layer.scroll.and_then(|scroll| scroll.motion), Some(crate::motion(Animation::None)));
 
 	// Forgotten with the window's grid
-	editor.set_scroll_motion(win_of(2), None);
+	editor.set_scroll_animation(win_of(2), None);
 	flush(&mut editor, vec![RedrawNotification::GridDestroy(vec![GridDestroyEvent { grid: Grid(2) }])]);
-	assert!(editor.scroll_motions.is_empty());
+	assert!(editor.scroll_animations.is_empty());
 }
 
 fn option(name: &str, value: OptionValue) -> RedrawNotification {
@@ -1092,4 +1099,24 @@ fn the_message_grid_covers_its_rows_only() {
 	assert_eq!(at(3, 4), Some(GridPosition { grid: Grid(3), row: 0, col: 4 }));
 	assert_eq!(at(2, 4), Some(GridPosition { grid: Grid(1), row: 2, col: 4 }));
 	assert_eq!(editor.grid_origin(Grid(3)), Some((3, 0)));
+}
+
+#[test]
+fn the_cursor_moves_as_its_animation_says() {
+	let mut editor = screen();
+	let motion = |redraw: &Redraw| redraw.layers.iter().find_map(|layer| layer.cursor).map(|cursor| cursor.motion);
+	let moving = |curve| Some(Some(CursorMotion { motion: crate::motion(curve), trail: 1.0 }));
+
+	// Its first place: at once
+	assert_eq!(motion(&flush(&mut editor, vec![goto(1, 0, 0)])), Some(None));
+	// A column on, by default a short move; then a row down
+	assert_eq!(motion(&flush(&mut editor, vec![goto(1, 0, 1)])), moving(Animation::EaseOut { duration: 40.0 }));
+	assert_eq!(
+		motion(&flush(&mut editor, vec![goto(1, 1, 1)])),
+		moving(Animation::Spring { stiffness: 700.0, damping: 53.0 })
+	);
+
+	// Off: at once
+	editor.set_cursor_animation(CursorAnimationSettings { enabled: false, ..Default::default() });
+	assert_eq!(motion(&flush(&mut editor, vec![goto(1, 2, 1)])), Some(None));
 }

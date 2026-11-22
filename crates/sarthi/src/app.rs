@@ -247,7 +247,6 @@ impl App {
 		let config = RendererConfig {
 			background,
 			scroll: settings::scroll_motion(settings),
-			cursor: settings::cursor_motion(settings),
 			opacity: settings.background.opacity,
 			..RendererConfig::default()
 		};
@@ -387,8 +386,8 @@ impl App {
 			Notification::WinScrolled(WinScrolledArgs { windows }) => {
 				for window in windows {
 					let options = self.window_options(window.win, &window.sarthi);
-					let motion = settings::window_scroll(&self.settings, &window, &options);
-					self.editor.set_scroll_motion(window.win, motion);
+					let animation = settings::window_scroll(&self.settings, &window, &options);
+					self.editor.set_scroll_animation(window.win, animation);
 				}
 			},
 			// Before Neovim draws them
@@ -538,12 +537,10 @@ impl App {
 	pub(crate) fn apply_settings(&mut self, settings: Settings) -> Result<(), String> {
 		settings.validate()?;
 		self.mouse.set_touchpad_scroll(settings.touchpad.scroll_speed);
-		self.editor
-			.set_cursor_animation(settings.cursor_animation.enabled, settings.cursor_animation.exclude_modes.0.clone());
+		self.editor.set_cursor_animation(settings.cursor_animation.clone());
 		self.editor.set_see_through(settings.background.opacity < 1.0);
 		if let Some(state) = &mut self.window {
 			state.renderer.set_scroll_motion(settings::scroll_motion(&settings));
-			state.renderer.set_cursor_motion(settings::cursor_motion(&settings));
 			state.renderer.set_opacity(settings.background.opacity);
 			state.window.set_ime_allowed(settings.ime.enabled);
 			// The compositor blurs the desktop behind the window, where it can.

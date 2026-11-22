@@ -1,38 +1,15 @@
 //! How sarthi's settings (`rpc::sarthi::Settings`, set with `require("sarthi").setup()`) apply to the renderer
 
-use std::time::Duration;
-
 use editor::{FloatStyle, OutlineStyle};
-use renderer::{CursorMotion, Easing, Edges, Motion, Shadow, UnderlineSize};
+use renderer::{Edges, Motion, Shadow, UnderlineSize};
 use rpc::sarthi::{
-	Animation, Filetypes, FloatWindow, ScrolledWindow, Settings, WindowOptions, WindowSettings, WindowVariable,
+	Filetypes, FloatWindow, ScrollAnimationSettings, ScrolledWindow, Settings, WindowOptions, WindowSettings,
+	WindowVariable,
 };
 
 /// How the renderer moves scrolled text
 pub fn scroll_motion(settings: &Settings) -> Motion {
-	motion(settings.window.scroll_animation.curve)
-}
-
-/// How the renderer moves the cursor
-pub fn cursor_motion(settings: &Settings) -> CursorMotion {
-	let cursor = &settings.cursor_animation;
-	CursorMotion { motion: motion(cursor.curve), short: motion(cursor.short_curve), trail: cursor.trail }
-}
-
-/// `animation` as the renderer takes it
-fn motion(animation: Animation) -> Motion {
-	let ease = |easing, duration: f32| Motion::Ease { easing, duration: Duration::from_secs_f32(duration / 1000.0) };
-	match animation {
-		// Over no time at all, the value is in place at once.
-		Animation::None => ease(Easing::Linear, 0.0),
-		Animation::Spring { stiffness, damping } => Motion::Spring { stiffness, damping },
-		Animation::Linear { duration } => ease(Easing::Linear, duration),
-		Animation::EaseOut { duration } => ease(Easing::EaseOut, duration),
-		Animation::EaseInOut { duration } => ease(Easing::EaseInOut, duration),
-		Animation::CubicBezier { points: [x1, y1, x2, y2], duration } => {
-			ease(Easing::CubicBezier(x1, y1, x2, y2), duration)
-		},
-	}
+	editor::motion(settings.window.scroll_animation.curve)
 }
 
 /// What a window's `w:sarthi` gives it, if it's one sarthi can decode with values that make sense; otherwise what's
@@ -50,10 +27,14 @@ pub fn window_options(settings: &Settings, variable: &WindowVariable) -> Result<
 /// How `window`'s text moves when it scrolls, with `options` from its `w:sarthi`: slides as its scroll settings say,
 /// or jumps to its new place for `None`. It slides if its `w:sarthi`, or else the settings, enable it, and its filetype
 /// isn't excluded.
-pub fn window_scroll(settings: &Settings, window: &ScrolledWindow, options: &WindowOptions) -> Option<Motion> {
+pub fn window_scroll(
+	settings: &Settings,
+	window: &ScrolledWindow,
+	options: &WindowOptions,
+) -> Option<ScrollAnimationSettings> {
 	let scroll = settings.window.scroll_animation.with(&options.scroll_animation);
 	let enabled = scroll.enabled && !scroll.exclude_filetypes.matches(&window.filetype);
-	enabled.then(|| motion(scroll.curve))
+	enabled.then_some(scroll)
 }
 
 /// How floating or external window `window` looks besides its cells, with `options` from its `w:sarthi`, in logical
@@ -112,7 +93,6 @@ pub fn underlines(settings: &Settings) -> UnderlineSize {
 
 #[cfg(test)]
 mod tests {
-	use renderer::Motion;
 	use rpc::neovim::Window;
 	use rpc::sarthi::{
 		Animation, Filetypes, FloatWindow, OutlineOptions, PaddingOptions, PaddingSides, PaddingSize,
@@ -319,7 +299,7 @@ mod tests {
 
 		// Its own animation
 		let linear = scroll(ScrollAnimationOptions { curve: Some(Animation::None), ..Default::default() });
-		let motion = slides(&Settings::default(), "lua", &linear);
-		assert!(matches!(motion, Some(Motion::Ease { duration, .. }) if duration.is_zero()), "{motion:?}");
+		let animation = slides(&Settings::default(), "lua", &linear);
+		assert_eq!(animation.map(|animation| animation.curve), Some(Animation::None));
 	}
 }
