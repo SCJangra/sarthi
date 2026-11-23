@@ -220,8 +220,8 @@ impl Renderer {
 		self.layers = layers;
 	}
 
-	/// Sets how text that scrolls moves to its new place, from the next scroll on
-	pub fn set_scroll_motion(&mut self, motion: Motion) {
+	/// Sets how text that scrolls moves to its new place, or none to jump there, from the next scroll on
+	pub fn set_scroll_motion(&mut self, motion: Option<Motion>) {
 		self.scrolls.set_motion(motion);
 	}
 

@@ -8,7 +8,7 @@ use rpc::sarthi::{
 };
 
 /// How the renderer moves scrolled text
-pub fn scroll_motion(settings: &Settings) -> Motion {
+pub fn scroll_motion(settings: &Settings) -> Option<Motion> {
 	editor::motion(settings.window.scroll_animation.curve)
 }
 

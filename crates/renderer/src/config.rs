@@ -22,9 +22,10 @@ pub struct RendererConfig {
 	#[default(2)]
 	pub desired_maximum_frame_latency: u32,
 
-	/// How text that scrolled moves to its new place, until [`crate::Renderer::set_scroll_motion`] changes it
-	#[default(Motion::Spring { stiffness: 400.0, damping: 32.0 })]
-	pub scroll: Motion,
+	/// How text that scrolled moves to its new place, or none to jump there, until
+	/// [`crate::Renderer::set_scroll_motion`] changes it
+	#[default(Some(Motion::Spring { stiffness: 400.0, damping: 32.0 }))]
+	pub scroll: Option<Motion>,
 
 	/// How opaque the window's background is, from 0 to 1, until [`crate::Renderer::set_opacity`] changes it
 	#[default(1.0)]

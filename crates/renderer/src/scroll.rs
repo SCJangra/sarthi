@@ -9,8 +9,8 @@ use crate::{Decoration, Layer, RenderCell, Scroll};
 
 /// The layers whose text is sliding, by layer id
 pub(crate) struct ScrollAnimations {
-	/// How scrolled text moves to its new place
-	motion: Motion,
+	/// How scrolled text moves to its new place, if it doesn't jump there
+	motion: Option<Motion>,
 
 	layers: HashMap<u64, Animation>,
 }
@@ -47,12 +47,12 @@ struct Animation {
 }
 
 impl ScrollAnimations {
-	pub(crate) fn new(motion: Motion) -> Self {
+	pub(crate) fn new(motion: Option<Motion>) -> Self {
 		Self { motion, layers: HashMap::new() }
 	}
 
 	/// Sets how scrolled text moves from the next scroll on
-	pub(crate) fn set_motion(&mut self, motion: Motion) {
+	pub(crate) fn set_motion(&mut self, motion: Option<Motion>) {
 		self.motion = motion;
 	}
 
@@ -68,6 +68,11 @@ impl ScrollAnimations {
 
 		for layer in layers {
 			let Some(scroll) = layer.scroll else { continue };
+			// Without a motion, its text jumps, from where it was sliding too.
+			let Some(motion) = scroll.motion.or(self.motion) else {
+				self.layers.remove(&layer.id);
+				continue;
+			};
 			// A new layer has no text to slide from; neither has one that changed size, e.g. a resized window.
 			let previous = shown.iter().find(|previous| previous.id == layer.id);
 			let Some(previous) =
@@ -83,7 +88,7 @@ impl ScrollAnimations {
 			let animation = self.layers.entry(layer.id).or_insert_with(|| Animation {
 				size: (layer.width, layer.height),
 				region: scroll,
-				offset: Approach::new(scroll.motion.unwrap_or(self.motion), now),
+				offset: Approach::new(motion, now),
 				rows: BTreeMap::new(),
 			});
 			animation.scroll(previous, scroll, now);
@@ -226,7 +231,7 @@ mod tests {
 
 	/// Animations that ease out over [`DURATION`]
 	fn animations() -> ScrollAnimations {
-		ScrollAnimations::new(Motion::Ease { easing: Easing::EaseOut, duration: DURATION })
+		ScrollAnimations::new(Some(Motion::Ease { easing: Easing::EaseOut, duration: DURATION }))
 	}
 
 	/// A layer one character per cell and one row per string, scrolled by `rows` within rows `top..bottom` if not 0
@@ -388,7 +393,7 @@ mod tests {
 		let now = Instant::now();
 		// Like CSS's back-out: past the target, then back
 		let motion = Motion::Ease { easing: Easing::CubicBezier(0.3, 1.6, 0.6, 1.0), duration: DURATION };
-		let mut scrolls = ScrollAnimations::new(motion);
+		let mut scrolls = ScrollAnimations::new(Some(motion));
 		let shown = [layer(&["a", "b", "c"], 0, 0, 3)];
 		let scrolled = [layer(&["b", "c", "d"], 1, 0, 3)];
 		scrolls.update(&shown, &scrolled, now);
@@ -412,5 +417,21 @@ mod tests {
 		// Linearly over twice the duration: half a row from its place at the duration the others take
 		let (_, offset) = region(&scrolls, &scrolled, now + DURATION).unwrap();
 		assert!((offset + 0.5).abs() < 0.01, "{offset}");
+	}
+
+	#[test]
+	fn without_a_motion_the_text_jumps() {
+		let now = Instant::now();
+		let mut scrolls = animations();
+		let (shown, scrolled) = (layer(&["a", "b", "c"], 0, 0, 3), layer(&["b", "c", "d"], 1, 0, 3));
+		scrolls.update(std::slice::from_ref(&shown), std::slice::from_ref(&scrolled), now);
+		assert!(scrolls.is_animating(now));
+
+		// A scroll without one, while sliding: the text jumps to its place, and stops sliding.
+		scrolls.set_motion(None);
+		let again = layer(&["c", "d", "e"], 1, 0, 3);
+		scrolls.update(&[scrolled], std::slice::from_ref(&again), now);
+		assert_eq!(region(&scrolls, &again, now), None);
+		assert!(!scrolls.is_animating(now));
 	}
 }

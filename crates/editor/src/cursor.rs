@@ -104,7 +104,8 @@ impl CursorState {
 	}
 
 	/// How the cursor moves to a cell whose top-left corner is at `to`, in pixels, `cell` large: as the animation
-	/// settings say for the move, or at once while they're off, without the focus, and for its first place
+	/// settings say for the move, or at once while they're off, without the focus, for its first place, and for a
+	/// curve of `none`
 	pub fn motion_to(&self, to: [u32; 2], cell: CellSize) -> Option<CursorMotion> {
 		let from = self.drawn_at.filter(|_| self.animation.enabled && self.focused)?;
 		// In whole cells of where it goes, so a move to a window with other fonts counts its cells
@@ -113,7 +114,7 @@ impl CursorState {
 		let step =
 			CursorMove { rows: cells(from[1], to[1], cell.height), columns: cells(from[0], to[0], cell.width), mode };
 		let step = self.animation.for_move(&step);
-		Some(CursorMotion { motion: crate::motion(step.curve), trail: step.trail })
+		Some(CursorMotion { motion: crate::motion(step.curve)?, trail: step.trail })
 	}
 }
 
@@ -212,7 +213,7 @@ mod tests {
 		let step = |cursor: &CursorState, col, row| {
 			cursor.motion_to(at(col, row), CELL).map(|motion| (motion.motion, motion.trail))
 		};
-		let expected = |curve, trail| Some((crate::motion(curve), trail));
+		let expected = |curve, trail| crate::motion(curve).map(|motion| (motion, trail));
 
 		// Its first place: at once
 		assert_eq!(step(&cursor, 3, 0), None);
@@ -228,7 +229,7 @@ mod tests {
 		cursor.set_mode(1, "insert");
 		assert_eq!(step(&cursor, 40, 0), expected(spring, 1.0));
 		cursor.drawn(at(40, 0));
-		// Typing in it, Replace mode too: both overrides apply, the later one's curve over the earlier one's
+		// Typing in it, Replace mode too: both overrides apply, the later one's curve over the earlier one's, a jump
 		assert_eq!(step(&cursor, 41, 0), expected(Animation::None, 0.0));
 		cursor.set_mode(1, "replace");
 		assert_eq!(step(&cursor, 41, 0), expected(Animation::None, 0.0));

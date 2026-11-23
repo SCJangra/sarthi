@@ -5,12 +5,11 @@ use std::time::Duration;
 use renderer::{Easing, Motion};
 use rpc::sarthi::Animation;
 
-/// `animation` as the renderer takes it
-pub fn motion(animation: Animation) -> Motion {
+/// `animation` as the renderer takes it; none for `none`, which jumps
+pub fn motion(animation: Animation) -> Option<Motion> {
 	let ease = |easing, duration: f32| Motion::Ease { easing, duration: Duration::from_secs_f32(duration / 1000.0) };
-	match animation {
-		// Over no time at all, the value is in place at once.
-		Animation::None => ease(Easing::Linear, 0.0),
+	Some(match animation {
+		Animation::None => return None,
 		Animation::Spring { stiffness, damping } => Motion::Spring { stiffness, damping },
 		Animation::Linear { duration } => ease(Easing::Linear, duration),
 		Animation::EaseOut { duration } => ease(Easing::EaseOut, duration),
@@ -18,5 +17,5 @@ pub fn motion(animation: Animation) -> Motion {
 		Animation::CubicBezier { points: [x1, y1, x2, y2], duration } => {
 			ease(Easing::CubicBezier(x1, y1, x2, y2), duration)
 		},
-	}
+	})
 }

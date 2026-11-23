@@ -989,11 +989,10 @@ fn some_windows_jump_or_slide_their_own_way() {
 	let redraw = flush(&mut editor, vec![viewport(2, 100, 1), line(2, 0, "b")]);
 	assert_eq!(scroll_of(&redraw, 2), Some((1, 0, 3, 0, 4)));
 	let Some(layer) = redraw.layers.iter().find(|layer| layer.id == 2) else { panic!() };
-	assert_eq!(layer.scroll.and_then(|scroll| scroll.motion), Some(crate::motion(spring)));
-	// Farther, as its override says
+	assert_eq!(layer.scroll.and_then(|scroll| scroll.motion), crate::motion(spring));
+	// Farther, a jump as its override says
 	let redraw = flush(&mut editor, vec![viewport(2, 100, -3), line(2, 0, "c")]);
-	let Some(layer) = redraw.layers.iter().find(|layer| layer.id == 2) else { panic!() };
-	assert_eq!(layer.scroll.and_then(|scroll| scroll.motion), Some(crate::motion(Animation::None)));
+	assert_eq!(scroll_of(&redraw, 2), None);
 
 	// Forgotten with the window's grid
 	editor.set_scroll_animation(win_of(2), None);
@@ -1105,7 +1104,7 @@ fn the_message_grid_covers_its_rows_only() {
 fn the_cursor_moves_as_its_animation_says() {
 	let mut editor = screen();
 	let motion = |redraw: &Redraw| redraw.layers.iter().find_map(|layer| layer.cursor).map(|cursor| cursor.motion);
-	let moving = |curve| Some(Some(CursorMotion { motion: crate::motion(curve), trail: 1.0 }));
+	let moving = |curve| Some(Some(CursorMotion { motion: crate::motion(curve).unwrap(), trail: 1.0 }));
 
 	// Its first place: at once
 	assert_eq!(motion(&flush(&mut editor, vec![goto(1, 0, 0)])), Some(None));
