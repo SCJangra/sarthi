@@ -40,6 +40,9 @@ pub struct Renderer {
 	scrolls: ScrollAnimations,
 	cursor: CursorAnimation,
 
+	/// Whether the last frame drawn showed text sliding or the cursor on its way
+	animating: bool,
+
 	/// Quads of the current frame, layer by layer, and each layer's ranges of them; kept to reuse the allocations
 	frame_quads: FrameQuads,
 	layer_quads: Vec<LayerQuads>,
@@ -170,6 +173,7 @@ impl Renderer {
 			layers: Vec::new(),
 			scrolls: ScrollAnimations::new(renderer_config.scroll),
 			cursor: CursorAnimation::default(),
+			animating: false,
 			frame_quads: FrameQuads::default(),
 			layer_quads: Vec::new(),
 			stencil,
@@ -230,10 +234,10 @@ impl Renderer {
 		&self.layers
 	}
 
-	/// Whether text is still sliding or the cursor moving, so the window should be drawn again
+	/// Whether the last frame drawn showed text sliding or the cursor moving, so the window should be drawn again: as of
+	/// when it was drawn, as a move that ended since still needs a frame at rest
 	pub fn is_animating(&self) -> bool {
-		let now = Instant::now();
-		self.scrolls.is_animating(now) || self.cursor.is_animating(now)
+		self.animating
 	}
 
 	/// Draws the layers on the clear color, each layer's text in its fonts. Laying out text needs `fonts`, which all
@@ -264,6 +268,7 @@ impl Renderer {
 		let (surface, now) = ((self.config.width, self.config.height), Instant::now());
 		// On its way, the cursor is drawn as its shape, with a block's character only where the shape covers its cell.
 		let moving = self.move_cursor(now);
+		self.animating = moving.is_some() || self.scrolls.is_animating(now);
 		let mut pieces = pieces(&self.layers, &self.scrolls, surface, now);
 		if let Some((corners, cursor)) = moving {
 			if let Some(piece) = pieces.last_mut().filter(|piece| piece.kind == PieceKind::Cursor) {

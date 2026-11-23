@@ -32,7 +32,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	event_loop.run_app(&mut app)?;
 
-	// Neovim didn't start: the window said why, and stderr did too.
 	if app.nvim.is_err() {
 		std::process::exit(1);
 	}
