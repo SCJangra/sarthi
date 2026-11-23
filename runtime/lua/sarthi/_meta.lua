@@ -195,3 +195,4 @@
 ---@class sarthi.ScrollAnimationOptions
 ---@field enabled? boolean Whether its text slides
 ---@field curve? sarthi.Animation How its text slides
+---@field overrides? sarthi.ScrollOverride[] Other values for some of its scrolls, in place of the settings' `overrides`: `{}` for none, e.g. to have only its own `curve`

@@ -110,7 +110,7 @@ How it moves to its new place
 
 window.scroll_animation.overrides     *sarthi-window.scroll_animation.overrides*
 
-`sarthi.ScrollOverride[]`, default `{}` · global only
+`sarthi.ScrollOverride[]`, default `{}` · global, or per window
 
 Other values for some scrolls (overrides |sarthi.ScrollOverride|): each one
 that applies to a scroll in place of `curve`, later ones winning,
