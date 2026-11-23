@@ -20,14 +20,14 @@ function sarthi.settings()
   return (rpc.request('get_settings'))
 end
 
----Sets the font size, in points (4 to 96), by setting `:h` in `guifont`.
+---Sets the font size, in points (4 to 96), by setting `:h` in `guifont`. Window fonts with a size of their own keep it.
 ---@param points number Size in points
 function sarthi.set_font_size(points)
   return (rpc.request('set_font_size', points))
 end
 
----Makes the font `delta` points bigger, or smaller if negative, by setting `:h` in `guifont`. The size stays within 4
----to 96 points.
+---Makes the font `delta` points bigger, or smaller if negative, by setting `:h` in `guifont`, and each window font with
+---a size of its own (`sarthi.font.size`) too. Sizes stay within 4 to 96 points.
 ---@param delta number Points to add, or to take away if negative
 function sarthi.change_font_size(delta)
   return (rpc.request('change_font_size', delta))

@@ -323,6 +323,18 @@ impl NvimHandle {
 			.call::<SetStringOption>((name.to_owned(), value, NoOpts {}))
 			.map_err(Error::Rpc)
 	}
+
+	/// Sets string option `name` to `value`, like [`NvimHandle::set_string_option`], without waiting for it. Neovim
+	/// reports a wrong value as an error of its own.
+	///
+	/// # Errors
+	///
+	/// Fails once the connection to Neovim is closed.
+	pub fn set_string_option_later(&self, name: &str, value: String) -> Result<(), Error> {
+		self.rpc
+			.notify::<SetStringOption>((name.to_owned(), value, NoOpts {}))
+			.map_err(Error::Rpc)
+	}
 }
 
 /// The Neovim child process. When dropped, waits for it to exit, killing it if it doesn't exit within

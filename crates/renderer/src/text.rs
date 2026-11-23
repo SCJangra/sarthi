@@ -404,16 +404,15 @@ fn segments(cells: &[RenderCell], mut run_of: impl FnMut(&str) -> Run) -> Vec<Se
 	segments
 }
 
-/// Lays out `segment` in its font of set `font`, in lines a cell high, with all text bold or italic if the fonts were
-/// chosen so. A glyph wider than its cells keeps its size, and draws over the cells after it.
+/// Lays out `segment` in its font of set `font`, in lines a cell high. A glyph wider than its cells keeps its size, and
+/// draws over the cells after it.
 fn layout(fonts: &mut Fonts, font: FontId, segment: &Segment) -> Buffer {
 	let family = fonts.family(font, segment.face).to_owned();
-	let (bold, italic) = fonts.styles(font);
 	// The face of the segment's font each span is drawn with
 	let variants: Vec<(Weight, Style)> = segment
 		.spans
 		.iter()
-		.map(|(_, style)| fonts.variant(font, segment.face, style.bold || bold, style.italic || italic))
+		.map(|(_, style)| fonts.variant(font, segment.face, style.bold, style.italic))
 		.collect();
 
 	let (font_size, cell) = (fonts.text_size(font).font_size, fonts.cell_size(font));
@@ -635,8 +634,8 @@ mod tests {
 	#[test]
 	fn bold_and_italic_stay_in_the_family() {
 		let mut fonts = Fonts::new();
-		let choice = crate::FontChoice { families: vec!["Iosevka".into()], ..crate::FontChoice::default() };
-		if fonts.choose(&choice).is_err() {
+		let families = vec!["Iosevka".into()];
+		if fonts.choose(&families).is_err() {
 			eprintln!("skipped: Iosevka isn't installed");
 			return;
 		}

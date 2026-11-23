@@ -19,22 +19,22 @@ use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 use editor::preedit::{Preedit, cursor_rect};
 use editor::{Editor, Pointer, Redraw};
 use flume::Receiver;
-use renderer::{CellSize, FontChoice, FontId, Fonts, Frame, Rect, Renderer, RendererConfig, RendererError, TextSize};
+use renderer::{CellSize, FontId, Fonts, Frame, Rect, Renderer, RendererConfig, RendererError, TextSize};
 use rpc::client::{Message, Nvim};
 use rpc::neovim::{
 	ClientInfo, ClientVersion, InputMouseParams, Notification, RedrawNotification, UiAttachParams, UiOptions,
 	UiTryResizeParams,
 };
 use rpc::sarthi::{
-	CmdheightChangedArgs, FILES, FloatsChangedArgs, MODULES, STARTUP, Settings, WinClosedArgs, WinScrolledArgs,
-	WindowFont, WindowOptions, WindowVariable,
+	CmdheightChangedArgs, FILES, FloatsChangedArgs, Font, FontFamily, FontSize, MODULES, STARTUP, Settings,
+	WinClosedArgs, WinScrolledArgs, WindowOptions, WindowVariable,
 };
 
 use crate::api::{self, MainTask};
 use crate::blur::Blur;
 use crate::clipboard::Clipboard;
 use crate::error::Error;
-use crate::guifont::{self, GuiFont};
+use crate::guifont;
 use crate::input::{committed_text, neovim_keys};
 use crate::mouse::Mouse;
 use crate::settings;
@@ -50,8 +50,8 @@ pub struct App {
 	pub editor: Editor,
 	pub fonts: Fonts,
 
-	/// Font size in logical pixels
-	pub font_size: f32,
+	/// The main font, from `guifont`: always [`FontFamily::Named`] and [`FontSize::Points`]
+	pub font: Font,
 
 	/// The last applied `guifont` value
 	pub guifont: String,
@@ -65,11 +65,8 @@ pub struct App {
 	/// Grid size last sent to Neovim, so resizes that don't change it aren't sent again
 	pub ui_size: GridSize,
 
-	/// The fonts `guifont` chose, which windows with fonts of their own but no family of their own use too
-	pub font_choice: FontChoice,
-
-	/// The fonts external windows asked for (`sarthi.font`), by window, so they're sized again with the main ones
-	pub window_fonts: HashMap<rpc::neovim::Window, WindowFont>,
+	/// The fonts external windows asked for (`sarthi.font`), by window, so they're sized again with the main one
+	pub window_fonts: HashMap<rpc::neovim::Window, Font>,
 
 	/// Modifier keys held right now, for the keys and mouse events sent to Neovim
 	pub modifiers: ModifiersState,
@@ -185,7 +182,10 @@ impl App {
 		}
 
 		Ok(Self {
-			font_size: config.font_size,
+			font: Font {
+				family: FontFamily::Named(Vec::new()),
+				size: FontSize::Points(guifont::points(config.font_size)),
+			},
 			mouse: Mouse::new(Settings::default().touchpad.scroll_speed),
 			pointer: Pointer::Arrow,
 			settings: Settings::default(),
@@ -198,7 +198,6 @@ impl App {
 			linespace: 0,
 			nvim,
 			ui_size: GridSize { width: 0, height: 0 },
-			font_choice: FontChoice::default(),
 			window_fonts: HashMap::new(),
 			modifiers: ModifiersState::empty(),
 			error: None,
@@ -248,19 +247,19 @@ impl App {
 
 	/// Size of text in `window`, in physical pixels
 	fn text_size(&self, window: &Window) -> TextSize {
-		self.text_size_of(window, self.font_size)
+		self.text_size_of(window, self.main_font().1)
 	}
 
-	/// Size of text of `font_size` logical pixels in `window`, in physical pixels, with the line space and underlines of
-	/// the main fonts' text
-	fn text_size_of(&self, window: &Window, font_size: f32) -> TextSize {
+	/// Size of text of `points` in `window`, in physical pixels, with the line space and underlines of the main font's
+	/// text
+	fn text_size_of(&self, window: &Window, points: f32) -> TextSize {
 		let scale = window.scale_factor();
 		// Logical pixels like the font size, in whole physical ones
 		let line_space = (self.linespace as f64 * scale)
 			.round()
 			.clamp(f64::from(i32::MIN), f64::from(i32::MAX));
 		let underlines = settings::underlines(&self.settings).scaled(scale as f32);
-		TextSize { font_size: font_size * scale as f32, line_space: line_space as i32, underlines }
+		TextSize { font_size: guifont::pixels(points) * scale as f32, line_space: line_space as i32, underlines }
 	}
 
 	/// Size of a grid cell, in physical pixels: of the main fonts, as last sized (see [`App::update_text_size`])
@@ -293,15 +292,18 @@ impl App {
 		}
 	}
 
-	/// Draws external window `win`'s text in `font` (`sarthi.font`), or the main fonts for `None`; or what's wrong with
-	/// the fonts
-	pub(crate) fn set_window_font(&mut self, win: rpc::neovim::Window, font: Option<WindowFont>) -> Result<(), String> {
+	/// Draws external window `win`'s text in `font` (`sarthi.font`), or the main font for `None`; or what's wrong with
+	/// the font
+	pub(crate) fn set_window_font(&mut self, win: rpc::neovim::Window, font: Option<Font>) -> Result<(), String> {
 		let Some(font) = font else {
 			self.window_fonts.remove(&win);
 			self.editor.set_external_font(win, None);
 			self.refresh();
 			return Ok(());
 		};
+		if let FontSize::Points(points) = font.size {
+			guifont::checked(points)?;
+		}
 		let window = self.window.as_ref().map(|state| state.window.clone()).ok_or("no window yet")?;
 		let resolved = self.resolve_window_font(&window, &font)?;
 		self.window_fonts.insert(win, font);
@@ -310,17 +312,31 @@ impl App {
 		Ok(())
 	}
 
-	/// The fonts of `font` in `window`, and the size of their cells: its families, or `guifont`'s; at its size, or
-	/// `guifont`'s
-	fn resolve_window_font(&mut self, window: &Window, font: &WindowFont) -> Result<(FontId, CellSize), String> {
-		let choice = match &font.family {
-			Some(families) => FontChoice { families: families.clone().into_vec(), ..FontChoice::default() },
-			None => self.font_choice.clone(),
-		};
-		let pixels = font.size.map_or(Ok(self.font_size), guifont::pixels)?;
+	/// Makes the window fonts of their own size `delta` points bigger, or smaller if negative, each kept within the
+	/// sizes the font size functions take. The others follow the main font.
+	pub(crate) fn change_window_font_sizes(&mut self, delta: f32) {
+		for font in self.window_fonts.values_mut() {
+			if let FontSize::Points(points) = &mut font.size {
+				*points = guifont::changed(*points, delta);
+			}
+		}
+		self.update_text_size();
+		self.refresh();
+	}
+
+	/// The main font's families, and its size in points
+	pub(crate) fn main_font(&self) -> (&[String], f32) {
+		(self.font.family.or(&[]), self.font.size.or(guifont::points(self.config.font_size)))
+	}
+
+	/// The fonts of `font` in `window`, and the size of their cells: the main font's families and size where it has none
+	/// of its own
+	fn resolve_window_font(&mut self, window: &Window, font: &Font) -> Result<(FontId, CellSize), String> {
+		let (families, points) = self.main_font();
+		let (families, points) = (font.family.or(families).to_vec(), font.size.or(points));
 		let id = self
 			.fonts
-			.add(&choice, self.text_size_of(window, pixels))
+			.add(&families, self.text_size_of(window, points))
 			.map_err(|error| error.to_string())?;
 		Ok((id, self.fonts.cell_size(id)))
 	}
@@ -484,27 +500,29 @@ impl App {
 		state.window.request_redraw();
 	}
 
-	/// Draws text with the fonts and size `guifont` asks for. A value that can't be used is shown as an error in Neovim,
-	/// and the fonts stay as they were.
+	/// Draws text with the fonts and size `guifont` asks for. Without a size, `guifont` gets the default one, and is drawn
+	/// when Neovim reports it back. A value that can't be used is shown as an error in Neovim, and the font stays as it
+	/// was.
 	fn apply_guifont(&mut self) {
 		self.guifont = self.editor.guifont().to_owned();
-		let applied = GuiFont::parse(&self.guifont).and_then(|font| {
-			let pixels = font.pixels();
-			let choice = FontChoice { families: font.families, bold: font.bold, italic: font.italic };
-			self.fonts.choose(&choice).map_err(|error| error.to_string())?;
-			self.font_choice = choice;
-			Ok(pixels)
+		let applied = guifont::parse(&self.guifont).and_then(|font| {
+			if font.size == FontSize::Main {
+				let value = guifont::with_size(&self.guifont, guifont::points(self.config.font_size));
+				let nvim = self.nvim.as_ref().map_err(ToString::to_string)?;
+				return nvim
+					.set_string_option_later("guifont", value)
+					.map_err(|error| error.to_string());
+			}
+			self.fonts.choose(font.family.or(&[])).map_err(|error| error.to_string())?;
+			self.font = font;
+			Ok(())
 		});
 
-		match applied {
-			Ok(pixels) => self.font_size = pixels.unwrap_or(self.config.font_size),
-			Err(error) => {
-				if let Ok(nvim) = &self.nvim
-					&& let Err(error) = nvim.show_error(&format!("guifont: {error}"))
-				{
-					tracing::warn!("Couldn't report a guifont error to Neovim: {error}");
-				}
-			},
+		if let Err(error) = applied
+			&& let Ok(nvim) = &self.nvim
+			&& let Err(error) = nvim.show_error(&format!("guifont: {error}"))
+		{
+			tracing::warn!("Couldn't report a guifont error to Neovim: {error}");
 		}
 	}
 

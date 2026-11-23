@@ -20,7 +20,7 @@ const FACES: [&[u8]; 2] = [
 	include_bytes!("../assets/fonts/JetBrainsMono-Italic[wght].ttf"),
 ];
 
-/// Most fonts [`FontChoice::families`] can name
+/// Most families a set of fonts can name
 const MAX_FAMILIES: usize = 32;
 
 /// Size of a grid cell, in physical pixels
@@ -82,19 +82,6 @@ impl UnderlineSize {
 	}
 }
 
-/// Which fonts to draw text with
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct FontChoice {
-	/// Font families, by name: the first draws all text it has the characters for, the others, in order, the
-	/// characters it lacks, and the system's fonts what none of them has. Empty for the bundled font.
-	pub families: Vec<String>,
-
-	/// Draws all text bold or italic, not only text highlighted so
-	pub bold: bool,
-	/// Draws all text italic, not only text highlighted so
-	pub italic: bool,
-}
-
 /// Why fonts couldn't be chosen
 #[derive(Debug, thiserror::Error)]
 pub enum FontError {
@@ -106,7 +93,7 @@ pub enum FontError {
 	#[error("font {0} has no usable metrics")]
 	NoMetrics(String),
 
-	/// More fonts were named than [`FontChoice::families`] takes
+	/// More families were named than a set takes
 	#[error("at most {MAX_FAMILIES} fonts")]
 	TooMany,
 
@@ -137,7 +124,8 @@ pub struct Fonts {
 
 /// Fonts chosen to draw text with, at a size, and what's known about them
 struct FontSet {
-	choice: FontChoice,
+	/// The families asked for, as named
+	families: Vec<String>,
 
 	/// The chosen fonts, in order: the set's main font first
 	faces: Vec<Face>,
@@ -195,41 +183,42 @@ impl Fonts {
 		for face in FACES {
 			system.db_mut().load_font_source(Source::Binary(Arc::new(face)));
 		}
-		let (faces, em) = resolve(&mut system, &FontChoice::default()).expect("the bundled font is loaded");
-		let main = FontSet::new(FontChoice::default(), faces, em, TextSize::new(14.0));
+		let (faces, em) = resolve(&mut system, &[]).expect("the bundled font is loaded");
+		let main = FontSet::new(Vec::new(), faces, em, TextSize::new(14.0));
 		let mut fonts = Self { system, sets: vec![main] };
 		fonts.name_monospace();
 		fonts
 	}
 
-	/// Draws the main set's text with the fonts of `choice`. Families that aren't installed are skipped, like in a list
-	/// of alternatives; `monospace` is the bundled font. If none is installed, or the main font can't be used, nothing
-	/// changes.
+	/// Draws the main set's text with `families`: the first draws all text it has the characters for, the others, in
+	/// order, the characters it lacks, and the system's fonts what none of them has; none is the bundled font. Families
+	/// that aren't installed are skipped, like in a list of alternatives; `monospace` is the bundled font. If none is
+	/// installed, or the main font can't be used, nothing changes.
 	///
 	/// # Errors
 	///
 	/// Fails if none of the fonts is installed, or the main one has no usable metrics.
-	pub fn choose(&mut self, choice: &FontChoice) -> Result<(), FontError> {
-		let (faces, em) = resolve(&mut self.system, choice)?;
+	pub fn choose(&mut self, families: &[String]) -> Result<(), FontError> {
+		let (faces, em) = resolve(&mut self.system, families)?;
 		let main = &mut self.sets[0];
 		let generation = main.generation.wrapping_add(1);
-		*main = FontSet { generation, ..FontSet::new(choice.clone(), faces, em, main.size) };
+		*main = FontSet { generation, ..FontSet::new(families.to_vec(), faces, em, main.size) };
 		self.name_monospace();
 		Ok(())
 	}
 
-	/// A set of the fonts of `choice` at `size`, chosen like [`Fonts::choose`] does: an equal set if there's one already
+	/// A set of `families` at `size`, chosen like [`Fonts::choose`] does: an equal set if there's one already
 	///
 	/// # Errors
 	///
 	/// Fails like [`Fonts::choose`], or if there are as many sets as [`FontId`] can number.
-	pub fn add(&mut self, choice: &FontChoice, size: TextSize) -> Result<FontId, FontError> {
-		if let Some(index) = self.sets.iter().position(|set| set.choice == *choice && set.size == size) {
+	pub fn add(&mut self, families: &[String], size: TextSize) -> Result<FontId, FontError> {
+		if let Some(index) = self.sets.iter().position(|set| set.families == families && set.size == size) {
 			return Ok(FontId(index as u16));
 		}
 		let id = u16::try_from(self.sets.len()).map_err(|_| FontError::TooManySets)?;
-		let (faces, em) = resolve(&mut self.system, choice)?;
-		self.sets.push(FontSet::new(choice.clone(), faces, em, size));
+		let (faces, em) = resolve(&mut self.system, families)?;
+		self.sets.push(FontSet::new(families.to_vec(), faces, em, size));
 		Ok(FontId(id))
 	}
 
@@ -262,12 +251,6 @@ impl Fonts {
 	/// Changes whenever set `font`'s fonts or size do, so text laid out with the old ones is laid out again
 	pub(crate) fn generation(&self, font: FontId) -> u32 {
 		self.set(font).generation
-	}
-
-	/// Whether set `font` draws all text bold, and all italic, not only text highlighted so
-	pub(crate) fn styles(&self, font: FontId) -> (bool, bool) {
-		let choice = &self.set(font).choice;
-		(choice.bold, choice.italic)
 	}
 
 	/// Where `text`, one cell's characters, goes when a row of set `font`'s text is laid out (see [`FontSet::run_of`])
@@ -328,9 +311,9 @@ impl Fonts {
 }
 
 impl FontSet {
-	fn new(choice: FontChoice, faces: Vec<Face>, em: EmMetrics, size: TextSize) -> Self {
+	fn new(families: Vec<String>, faces: Vec<Face>, em: EmMetrics, size: TextSize) -> Self {
 		Self {
-			choice,
+			families,
 			faces,
 			coverage: FxHashMap::default(),
 			one_cell: FxHashMap::default(),
@@ -432,12 +415,12 @@ impl FontSet {
 	}
 }
 
-/// The fonts of `choice`, and the metrics of the first, which draws text: see [`Fonts::choose`]
-fn resolve(system: &mut FontSystem, choice: &FontChoice) -> Result<(Vec<Face>, EmMetrics), FontError> {
-	if choice.families.len() > MAX_FAMILIES {
+/// The fonts of `families`, and the metrics of the first, which draws text: see [`Fonts::choose`]
+fn resolve(system: &mut FontSystem, families: &[String]) -> Result<(Vec<Face>, EmMetrics), FontError> {
+	if families.len() > MAX_FAMILIES {
 		return Err(FontError::TooMany);
 	}
-	let families: Vec<&str> = match choice.families.as_slice() {
+	let families: Vec<&str> = match families {
 		[] => vec![BUNDLED],
 		families => families.iter().map(String::as_str).collect(),
 	};
@@ -555,9 +538,7 @@ mod tests {
 	use glyphon::fontdb::{Family, Query, Style, Weight};
 	use glyphon::{Attrs, Buffer, Metrics, Shaping};
 
-	use super::{
-		BUNDLED, CellSize, FontChoice, FontError, FontId, FontSet, Fonts, LineMetrics, Run, TextSize, UnderlineSize,
-	};
+	use super::{BUNDLED, CellSize, FontError, FontId, FontSet, Fonts, LineMetrics, Run, TextSize, UnderlineSize};
 
 	const MAIN: FontId = FontId::MAIN;
 
@@ -652,8 +633,8 @@ mod tests {
 		assert_eq!(fonts.run_of(MAIN, "漢"), Run::Alone(None));
 
 		// Iosevka draws ➜ two cells wide.
-		let choice = FontChoice { families: vec![String::from("Iosevka")], ..FontChoice::default() };
-		if fonts.choose(&choice).is_err() {
+		let families = vec![String::from("Iosevka")];
+		if fonts.choose(&families).is_err() {
 			eprintln!("skipped: Iosevka isn't installed");
 			return;
 		}
@@ -664,12 +645,10 @@ mod tests {
 	fn choose_by_name_in_any_case() {
 		let mut fonts = Fonts::new();
 		let generation = fonts.generation(MAIN);
-		let choice = FontChoice { families: vec![String::from("jetbrains MONO")], bold: true, italic: false };
-		fonts.choose(&choice).unwrap();
+		fonts.choose(&[String::from("jetbrains MONO")]).unwrap();
 
 		// The font's own spelling is used, and text laid out before is laid out again.
 		assert_eq!(fonts.family(MAIN, Some(0)), BUNDLED);
-		assert_eq!(fonts.styles(MAIN), (true, false));
 		assert_ne!(fonts.generation(MAIN), generation);
 	}
 
@@ -677,7 +656,7 @@ mod tests {
 	fn missing_fonts_are_skipped() {
 		let mut fonts = Fonts::new();
 		let families = vec![String::from("No Such Font"), String::from("monospace"), String::from("Nor This")];
-		fonts.choose(&FontChoice { families, ..FontChoice::default() }).unwrap();
+		fonts.choose(&families).unwrap();
 		// Only `monospace`, the bundled font, is left.
 		assert_eq!(main(&mut fonts).faces.len(), 1);
 		assert_eq!(fonts.family(MAIN, Some(0)), BUNDLED);
@@ -687,16 +666,18 @@ mod tests {
 	fn no_installed_font_changes_nothing() {
 		let mut fonts = Fonts::new();
 		let generation = fonts.generation(MAIN);
-		let choice = FontChoice { families: vec!["No Such Font".into(), "Nor This".into()], ..FontChoice::default() };
-		assert!(matches!(fonts.choose(&choice), Err(FontError::NotFound(names)) if names == "No Such Font, Nor This"));
+		let families = vec!["No Such Font".into(), "Nor This".into()];
+		assert!(
+			matches!(fonts.choose(&families), Err(FontError::NotFound(names)) if names == "No Such Font, Nor This")
+		);
 		assert_eq!((fonts.generation(MAIN), fonts.family(MAIN, None)), (generation, BUNDLED));
 	}
 
 	#[test]
 	fn another_main_font_and_fallbacks() {
 		let mut fonts = Fonts::new();
-		let choice = FontChoice { families: vec!["DejaVu Sans Mono".into(), BUNDLED.into()], ..FontChoice::default() };
-		if fonts.choose(&choice).is_err() {
+		let families = vec!["DejaVu Sans Mono".into(), BUNDLED.into()];
+		if fonts.choose(&families).is_err() {
 			eprintln!("skipped: DejaVu Sans Mono isn't installed");
 			return;
 		}
@@ -742,8 +723,8 @@ mod tests {
 	#[test]
 	fn the_closest_face_of_the_family() {
 		let mut fonts = Fonts::new();
-		let choice = FontChoice { families: vec!["Iosevka".into()], ..FontChoice::default() };
-		if fonts.choose(&choice).is_err() {
+		let families = vec!["Iosevka".into()];
+		if fonts.choose(&families).is_err() {
 			eprintln!("skipped: Iosevka isn't installed");
 			return;
 		}
@@ -782,22 +763,21 @@ mod tests {
 	fn sets_have_their_own_fonts_and_size() {
 		let mut fonts = Fonts::new();
 		let large = TextSize::new(28.0);
-		let bold = FontChoice { bold: true, ..FontChoice::default() };
-		let other = fonts.add(&bold, large).unwrap();
+		let mono = vec![String::from("monospace")];
+		let other = fonts.add(&mono, large).unwrap();
 		assert_ne!(other, MAIN);
 
-		// Its own size and styles; the main set's stay.
+		// Its own size; the main set's stays.
 		assert_eq!((fonts.cell_size(other), fonts.text_size(other)), (CellSize { width: 17, height: 37 }, large));
-		assert_eq!((fonts.styles(other), fonts.styles(MAIN)), ((true, false), (false, false)));
 		assert_eq!(fonts.cell_size(MAIN), CellSize { width: 8, height: 19 });
 
 		// The same fonts at the same size are the same set; at another size, another.
-		assert_eq!(fonts.add(&bold, large).unwrap(), other);
-		assert_ne!(fonts.add(&bold, TextSize::new(20.0)).unwrap(), other);
+		assert_eq!(fonts.add(&mono, large).unwrap(), other);
+		assert_ne!(fonts.add(&mono, TextSize::new(20.0)).unwrap(), other);
 
 		// Choosing the main fonts leaves the others as they are.
-		fonts.choose(&FontChoice { italic: true, ..FontChoice::default() }).unwrap();
-		assert_eq!(fonts.styles(other), (true, false));
+		fonts.choose(&mono).unwrap();
+		assert_eq!(fonts.cell_size(other), CellSize { width: 17, height: 37 });
 
 		// A set that isn't there is the main one.
 		assert_eq!(fonts.cell_size(FontId(99)), fonts.cell_size(MAIN));

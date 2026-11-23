@@ -31,12 +31,13 @@ pub enum Request {
 	#[schemars(extend("x-lua" = "settings", "x-returns" = "sarthi.Settings"))]
 	GetSettings(GetSettingsArgs),
 
-	/// Sets the font size, in points (4 to 96), by setting `:h` in `guifont`.
+	/// Sets the font size, in points (4 to 96), by setting `:h` in `guifont`. Window fonts with a size of their own keep
+	/// it.
 	#[schemars(extend("x-lua" = "set_font_size"))]
 	SetFontSize(SetFontSizeArgs),
 
-	/// Makes the font `delta` points bigger, or smaller if negative, by setting `:h` in `guifont`. The size stays
-	/// within 4 to 96 points.
+	/// Makes the font `delta` points bigger, or smaller if negative, by setting `:h` in `guifont`, and each window font
+	/// with a size of its own (`sarthi.font.size`) too. Sizes stay within 4 to 96 points.
 	#[schemars(extend("x-lua" = "change_font_size"))]
 	ChangeFontSize(ChangeFontSizeArgs),
 

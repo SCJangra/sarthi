@@ -10,7 +10,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 use smart_default::SmartDefault;
 
-use crate::{WindowFont, WindowPlace};
+use crate::{Font, WindowPlace};
 
 /// The settings `require('sarthi').setup()` takes, a section each, in the order the help file lists them
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -911,7 +911,7 @@ pub struct WindowConfig {
 	pub place: Option<WindowPlace>,
 
 	/// The fonts an external window's text is drawn with. External windows only.
-	pub font: Option<WindowFont>,
+	pub font: Option<Font>,
 
 	/// Its own [shadow](#sarthi-window.shadow) values
 	pub shadow: Option<ShadowOptions>,

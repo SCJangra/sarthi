@@ -46,7 +46,7 @@ pub fn markdown(root: &Path) -> String {
 	section(&mut out, 1, "Window functions", "sarthi.api", &prose("api.md"));
 	functions(&mut out, &api, |lua| lua.starts_with("api."));
 	table(&mut out, &config, "sarthi.WindowConfig", "The `sarthi` table", &config.root, "sarthi");
-	for name in ["WindowPlace", "WindowFont"] {
+	for name in ["WindowPlace", "Font"] {
 		let key = if name == "WindowPlace" { "place" } else { "font" };
 		table(&mut out, &config, &format!("sarthi.{name}"), &format!("sarthi.{key}"), config.def(name), key);
 	}

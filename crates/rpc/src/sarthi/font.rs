@@ -1,39 +1,62 @@
-//! The fonts of an external window, as `require('sarthi').api` takes them in `sarthi.font`
+//! Fonts: the main one from `guifont`, and an external window's own, as `require('sarthi').api` takes it in
+//! `sarthi.font`
 
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 /// The fonts an external window's text is drawn with (`sarthi.font`). Either left out is `guifont`'s. The window is as
 /// many of its own cells as its config says.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
-pub struct WindowFont {
-	/// A family, or families in order: the first draws all text it has the characters for. `guifont`'s if left out.
-	pub family: Option<FontFamilies>,
+pub struct Font {
+	/// Families in order: the first draws all text it has the characters for. `guifont`'s if left out.
+	#[schemars(with = "Vec<String>")]
+	pub family: FontFamily,
 
 	/// In points, like `guifont`'s `:h`; `guifont`'s size if left out
-	pub size: Option<f32>,
+	#[schemars(with = "f32")]
+	pub size: FontSize,
 }
 
-/// The fonts of a window's set, as `font.family` takes them: one name or a list
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[cfg_attr(test, derive(PartialEq))]
-#[serde(untagged)]
-#[schemars(inline)]
-pub enum FontFamilies {
-	/// One font
-	One(String),
-	/// Fonts in order, each drawing what the ones before it lack
-	Many(Vec<String>),
+/// A font's families
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(untagged, expecting = "a list of font families")]
+pub enum FontFamily {
+	/// The main font's, from `guifont`
+	#[default]
+	Main,
+	/// These, in order: the first draws all text it has the characters for, the others, in order, the characters it
+	/// lacks. Empty for sarthi's bundled font.
+	Named(Vec<String>),
 }
 
-impl FontFamilies {
-	/// The fonts as a list, in order
-	pub fn into_vec(self) -> Vec<String> {
+impl FontFamily {
+	/// These families, or `main` for the main font's
+	pub fn or<'a>(&'a self, main: &'a [String]) -> &'a [String] {
 		match self {
-			Self::One(family) => vec![family],
-			Self::Many(families) => families,
+			Self::Main => main,
+			Self::Named(families) => families,
+		}
+	}
+}
+
+/// A font's size
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
+#[serde(untagged, expecting = "a size in points")]
+pub enum FontSize {
+	/// The main font's, from `guifont`
+	#[default]
+	Main,
+	/// In points
+	Points(f32),
+}
+
+impl FontSize {
+	/// This size, or `main` for the main font's, in points
+	pub fn or(self, main: f32) -> f32 {
+		match self {
+			Self::Main => main,
+			Self::Points(points) => points,
 		}
 	}
 }
@@ -42,9 +65,9 @@ impl FontFamilies {
 mod tests {
 	use rmpv::Value;
 
-	use super::{FontFamilies, WindowFont};
+	use super::{Font, FontFamily, FontSize};
 
-	fn decode(fields: Vec<(&str, Value)>) -> Result<WindowFont, String> {
+	fn decode(fields: Vec<(&str, Value)>) -> Result<Font, String> {
 		// From msgpack, like Neovim sends it
 		let map = Value::Map(fields.into_iter().map(|(key, value)| (Value::from(key), value)).collect());
 		rmp_serde::from_slice(&rmp_serde::to_vec(&map).unwrap()).map_err(|error| error.to_string())
@@ -52,13 +75,13 @@ mod tests {
 
 	#[test]
 	fn fonts() {
-		let one = decode(vec![("family", Value::from("Inter")), ("size", Value::from(11))]).unwrap();
-		assert_eq!(one, WindowFont { family: Some(FontFamilies::One(String::from("Inter"))), size: Some(11.0) });
-		assert_eq!(one.family.unwrap().into_vec(), ["Inter"]);
+		let font =
+			decode(vec![("family", Value::Array(vec![Value::from("A"), Value::from("B")])), ("size", Value::from(11))]);
+		let family = FontFamily::Named(vec![String::from("A"), String::from("B")]);
+		assert_eq!(font.unwrap(), Font { family, size: FontSize::Points(11.0) });
 
-		let many = decode(vec![("family", Value::Array(vec![Value::from("A"), Value::from("B")]))]).unwrap();
-		assert_eq!(many.family.unwrap().into_vec(), ["A", "B"]);
-		assert_eq!(decode(vec![]).unwrap(), WindowFont::default());
+		// Left out, the main font's
+		assert_eq!(decode(vec![]).unwrap(), Font { family: FontFamily::Main, size: FontSize::Main });
 	}
 
 	#[test]
@@ -69,5 +92,9 @@ mod tests {
 				.contains("unknown field `famly`")
 		);
 		assert!(decode(vec![("family", Value::from(3))]).is_err());
+		let error = decode(vec![("family", Value::from("A"))]).unwrap_err();
+		assert!(error.contains("a list of font families"), "{error}");
+		let error = decode(vec![("size", Value::from("big"))]).unwrap_err();
+		assert!(error.contains("a size in points"), "{error}");
 	}
 }

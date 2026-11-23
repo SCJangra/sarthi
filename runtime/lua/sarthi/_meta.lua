@@ -16,7 +16,7 @@
 ---and fonts.
 ---@class sarthi.WindowConfig
 ---@field place? sarthi.WindowPlace Where an external window goes. External windows only.
----@field font? sarthi.WindowFont The fonts an external window's text is drawn with. External windows only.
+---@field font? sarthi.Font The fonts an external window's text is drawn with. External windows only.
 ---@field shadow? sarthi.ShadowOptions Its own shadow values
 ---@field outline? sarthi.OutlineOptions Its own outline values. External windows only.
 ---@field rounded_corners? sarthi.RoundedCornerOptions Its own rounded corners values. External windows only.
@@ -164,8 +164,8 @@
 
 ---The fonts an external window's text is drawn with (`sarthi.font`). Either left out is `guifont`'s. The window is as
 ---many of its own cells as its config says.
----@class sarthi.WindowFont
----@field family? string|string[] A family, or families in order: the first draws all text it has the characters for. `guifont`'s if left out.
+---@class sarthi.Font
+---@field family? string[] Families in order: the first draws all text it has the characters for. `guifont`'s if left out.
 ---@field size? number In points, like `guifont`'s `:h`; `guifont`'s size if left out
 
 ---A window's own `shadow` values (see [`ShadowSettings`])

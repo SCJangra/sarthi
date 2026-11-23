@@ -9,7 +9,7 @@
 
 use rmpv::Value;
 use rpc::neovim::{Buffer, Window};
-use rpc::sarthi::{PlaceRelative, WindowFont, WindowOptions, WindowPlace};
+use rpc::sarthi::{Font, PlaceRelative, WindowOptions, WindowPlace};
 
 use super::{Ctx, neovim_error};
 use crate::place;
@@ -118,7 +118,7 @@ fn apply(ctx: &Ctx, win: Window, given: Given, place: Option<WindowPlace>, optio
 	let font = given
 		.font
 		.clone()
-		.map(decode::<WindowFont>)
+		.map(decode::<Font>)
 		.transpose()
 		.map_err(|mistake| format!("`sarthi.font`: {mistake}"))?;
 	ctx.on_main(move |app| {
