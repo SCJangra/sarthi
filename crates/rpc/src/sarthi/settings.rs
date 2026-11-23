@@ -1041,12 +1041,12 @@ fn validate_animation(name: &str, animation: Animation) -> Result<(), String> {
 			check(damping >= 0.0, "damping can't be negative")
 		},
 		Animation::Linear { duration } | Animation::EaseOut { duration } | Animation::EaseInOut { duration } => {
-			check(duration >= 0.0, "duration can't be negative")
+			check(duration > 0.0, "duration must be more than 0")
 		},
 		Animation::CubicBezier { points: [x1, _, x2, _], duration } => {
 			let within = |x: f32| (0.0..=1.0).contains(&x);
 			check(within(x1) && within(x2), "points: x1 and x2 must be from 0 to 1")?;
-			check(duration >= 0.0, "duration can't be negative")
+			check(duration > 0.0, "duration must be more than 0")
 		},
 	}
 }
@@ -1443,7 +1443,11 @@ mod tests {
 		assert_eq!(error, "cursor_animation.overrides[1] changes nothing: give it a curve or a trail");
 		let linear = table(vec![("type", Value::from("linear")), ("duration", Value::from(-1))]);
 		let error = rule(vec![("curve", linear)]).unwrap_err();
-		assert_eq!(error, "cursor_animation.overrides[1].curve.duration can't be negative");
+		assert_eq!(error, "cursor_animation.overrides[1].curve.duration must be more than 0");
+		// Over no time, it's `none`.
+		let instant = table(vec![("type", Value::from("ease_out")), ("duration", Value::from(0))]);
+		let error = rule(vec![("curve", instant)]).unwrap_err();
+		assert_eq!(error, "cursor_animation.overrides[1].curve.duration must be more than 0");
 		let error = cursor_overrides(vec![table(vec![none()]), table(vec![("trail", Value::from(2))])]).unwrap_err();
 		assert_eq!(error, "cursor_animation.overrides[2].trail must be from 0 to 1");
 	}
