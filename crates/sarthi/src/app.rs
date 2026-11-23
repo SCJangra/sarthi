@@ -41,22 +41,19 @@ use crate::settings;
 use crate::startup::{self, StartError};
 use crate::windows::{GridSize, WindowConfig};
 
-/// Sarthi's app ID (Wayland) and window class (X11), the name of its desktop file
+/// Sarthi's app ID (Wayland) and window class (X11), and the name of its desktop file.
 const APP_ID: &str = "sarthi";
 
 pub struct App {
 	pub config: WindowConfig,
-
-	/// The window, once created
 	pub window: Option<WindowState>,
-
 	pub editor: Editor,
 	pub fonts: Fonts,
 
-	/// Font size in logical pixels: from `guifont`, or the configured one
+	/// Font size in logical pixels
 	pub font_size: f32,
 
-	/// The `guifont` value last applied, so each value is applied (or reported as wrong) once
+	/// The last applied `guifont` value
 	pub guifont: String,
 
 	/// The `linespace` value last applied, in logical pixels
