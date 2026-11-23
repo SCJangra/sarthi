@@ -20,7 +20,6 @@ use clap::Parser;
 use windows::WindowConfig;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-	// Exits for `--help`, `--version` and mistakes, with clap's message.
 	let Args { nvim, args, .. } = Args::parse();
 
 	tracing_subscriber::fmt()
