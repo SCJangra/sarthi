@@ -33,9 +33,4 @@ function sarthi.change_font_size(delta)
   return (rpc.request('change_font_size', delta))
 end
 
----Sets `guifont` back to its value before the font size was first changed, unless it was set otherwise since.
-function sarthi.reset_font_size()
-  return (rpc.request('reset_font_size'))
-end
-
 return sarthi

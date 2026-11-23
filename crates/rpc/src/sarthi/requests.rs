@@ -40,10 +40,6 @@ pub enum Request {
 	#[schemars(extend("x-lua" = "change_font_size"))]
 	ChangeFontSize(ChangeFontSizeArgs),
 
-	/// Sets `guifont` back to its value before the font size was first changed, unless it was set otherwise since.
-	#[schemars(extend("x-lua" = "reset_font_size"))]
-	ResetFontSize(ResetFontSizeArgs),
-
 	/// Like `vim.api.nvim_open_win()`, with a `sarthi` table in `config` ([`WindowConfig`](#sarthi.WindowConfig)).
 	/// Managed even without one: it has the settings' outline, corners and padding. A mistake in the `sarthi` table
 	/// closes the window again, so the call does nothing but fail.
@@ -107,11 +103,6 @@ pub struct ChangeFontSizeArgs {
 	/// Points to add, or to take away if negative
 	pub delta: f32,
 }
-
-/// The arguments of [`Request::ResetFontSize`]: none
-#[derive(Debug, Deserialize, JsonSchema)]
-#[cfg_attr(test, derive(PartialEq))]
-pub struct ResetFontSizeArgs {}
 
 /// The arguments of [`Request::NvimOpenWin`]
 #[derive(Debug, Deserialize, JsonSchema)]

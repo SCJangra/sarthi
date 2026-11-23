@@ -515,11 +515,6 @@ Parameters:
 
 - `{delta}` (`number`): Points to add, or to take away if negative
 
-sarthi.reset_font_size()                                *sarthi.reset_font_size*
-
-Sets `guifont` back to its value before the font size was first changed,
-unless it was set otherwise since.
-
 ==============================================================================
 Window functions                                                    *sarthi.api*
 

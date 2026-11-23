@@ -34,7 +34,7 @@ use crate::api::{self, MainTask};
 use crate::blur::Blur;
 use crate::clipboard::Clipboard;
 use crate::error::Error;
-use crate::guifont::{self, FontSizes, GuiFont};
+use crate::guifont::{self, GuiFont};
 use crate::input::{committed_text, neovim_keys};
 use crate::mouse::Mouse;
 use crate::settings;
@@ -58,9 +58,6 @@ pub struct App {
 
 	/// The `guifont` value last applied, so each value is applied (or reported as wrong) once
 	pub guifont: String,
-
-	/// What the font size functions changed `guifont` from, for a reset
-	pub font_sizes: FontSizes,
 
 	/// The `linespace` value last applied, in logical pixels
 	pub linespace: i64,
@@ -201,7 +198,6 @@ impl App {
 			editor: Editor::default(),
 			fonts: Fonts::new(),
 			guifont: String::new(),
-			font_sizes: FontSizes::default(),
 			linespace: 0,
 			nvim,
 			ui_size: GridSize { width: 0, height: 0 },

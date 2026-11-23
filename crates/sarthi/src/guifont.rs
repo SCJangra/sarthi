@@ -88,51 +88,22 @@ fn with_size(guifont: &str, points: f32) -> String {
 	entries.collect::<Vec<_>>().join(",")
 }
 
-/// The font size functions: each takes the current `guifont`, and gives the value to set it to. A reset gives back
-/// the value before the first change, unless `guifont` was set otherwise since.
-#[derive(Debug, Default)]
-pub struct FontSizes {
-	/// The `guifont` before the first change, and the value the last change gave
-	changed: Option<(String, String)>,
+/// `guifont` at `points`, an error outside [`SIZES`]
+pub fn set_size(guifont: &str, points: f32) -> Result<String, String> {
+	pixels(points)?;
+	GuiFont::parse(guifont)?;
+	Ok(with_size(guifont, points))
 }
 
-impl FontSizes {
-	/// `guifont` at `points`, an error outside [`SIZES`]
-	pub fn set(&mut self, guifont: &str, points: f32) -> Result<String, String> {
-		pixels(points)?;
-		GuiFont::parse(guifont)?;
-		Ok(self.change_to(guifont, with_size(guifont, points)))
-	}
-
-	/// `guifont` at its size (or `default`, in points, without one) plus `delta` points, kept within [`SIZES`]
-	pub fn change(&mut self, guifont: &str, delta: f32, default: f32) -> Result<String, String> {
-		let points = GuiFont::parse(guifont)?.size.unwrap_or(default) + delta;
-		let points = points.clamp(*SIZES.start(), *SIZES.end());
-		Ok(self.change_to(guifont, with_size(guifont, points)))
-	}
-
-	/// `guifont` before the first change, or as it is if it was set otherwise since
-	pub fn reset(&mut self, guifont: &str) -> String {
-		self.before(guifont)
-	}
-
-	fn change_to(&mut self, guifont: &str, changed: String) -> String {
-		self.changed = Some((self.before(guifont), changed.clone()));
-		changed
-	}
-
-	/// The `guifont` before the first change while it's still what the last change gave, otherwise as it is
-	fn before(&mut self, guifont: &str) -> String {
-		match self.changed.take() {
-			Some((before, after)) if after == guifont => before,
-			_ => guifont.to_owned(),
-		}
-	}
+/// `guifont` at its size (or `default`, in points, without one) plus `delta` points, kept within [`SIZES`]
+pub fn change_size(guifont: &str, delta: f32, default: f32) -> Result<String, String> {
+	let points = GuiFont::parse(guifont)?.size.unwrap_or(default) + delta;
+	Ok(with_size(guifont, points.clamp(*SIZES.start(), *SIZES.end())))
 }
 
 #[cfg(test)]
 mod tests {
-	use super::{FontSizes, GuiFont, with_size};
+	use super::{GuiFont, change_size, set_size, with_size};
 
 	fn families(names: &[&str]) -> Vec<String> {
 		names.iter().map(|name| name.to_string()).collect()
@@ -179,38 +150,18 @@ mod tests {
 
 	#[test]
 	fn font_sizes_change_guifont() {
-		let mut sizes = FontSizes::default();
-		assert_eq!(sizes.set("Iosevka:h14", 16.0).unwrap(), "Iosevka:h16");
-		assert_eq!(sizes.change("Iosevka:h16", 1.0, 10.5).unwrap(), "Iosevka:h17");
+		assert_eq!(set_size("Iosevka:h14", 16.0).unwrap(), "Iosevka:h16");
+		assert_eq!(change_size("Iosevka:h16", 1.0, 10.5).unwrap(), "Iosevka:h17");
 		// Without a size, from the default
-		assert_eq!(sizes.change("Iosevka", -0.5, 10.5).unwrap(), "Iosevka:h10");
+		assert_eq!(change_size("Iosevka", -0.5, 10.5).unwrap(), "Iosevka:h10");
 
-		// Kept within the sizes for changes, an error for set()
-		assert_eq!(sizes.change("X:h95", 5.0, 10.5).unwrap(), "X:h96");
-		assert_eq!(sizes.change("X:h5", -5.0, 10.5).unwrap(), "X:h4");
-		assert_eq!(sizes.set("X", 100.0).unwrap_err(), "font size 100 is outside 4..96 points");
-		assert_eq!(sizes.set("X:w1", 12.0).unwrap_err(), "unknown option: w1 (sarthi knows h<size>, b and i)");
+		// Kept within the sizes for changes, an error for set_size()
+		assert_eq!(change_size("X:h95", 5.0, 10.5).unwrap(), "X:h96");
+		assert_eq!(change_size("X:h5", -5.0, 10.5).unwrap(), "X:h4");
+		assert_eq!(set_size("X", 100.0).unwrap_err(), "font size 100 is outside 4..96 points");
+		assert_eq!(set_size("X:w1", 12.0).unwrap_err(), "unknown option: w1 (sarthi knows h<size>, b and i)");
 	}
 
-	#[test]
-	fn reset_undoes_the_changes() {
-		let mut sizes = FontSizes::default();
-		let changed = sizes.set("Iosevka:h14", 16.0).unwrap();
-		let changed = sizes.change(&changed, 1.0, 10.5).unwrap();
-		assert_eq!(sizes.reset(&changed), "Iosevka:h14");
-		// Nothing more to undo
-		assert_eq!(sizes.reset("Iosevka:h14"), "Iosevka:h14");
-
-		// Set otherwise since the change, the new value stays.
-		sizes.set("", 16.0).unwrap();
-		assert_eq!(sizes.reset("Fira Code"), "Fira Code");
-		assert_eq!(sizes.reset(":h16"), ":h16");
-
-		// A change after `guifont` was set otherwise undoes to that value.
-		sizes.set("Iosevka", 16.0).unwrap();
-		let changed = sizes.change("Fira Code:h12", 1.0, 10.5).unwrap();
-		assert_eq!(sizes.reset(&changed), "Fira Code:h12");
-	}
 
 	#[test]
 	fn errors() {

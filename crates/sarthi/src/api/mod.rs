@@ -82,16 +82,13 @@ pub fn handle(ctx: &Ctx, IncomingRequest { request, responder }: IncomingRequest
 		},
 		Request::GetSettings(_) => responder.respond(ctx.on_main(|app| app.settings.clone())),
 		Request::SetFontSize(SetFontSizeArgs { points }) => {
-			responder.respond(set_guifont(ctx, move |app, guifont| app.font_sizes.set(guifont, points)));
+			responder.respond(set_guifont(ctx, move |_, guifont| guifont::set_size(guifont, points)));
 		},
 		Request::ChangeFontSize(ChangeFontSizeArgs { delta }) => {
 			responder.respond(set_guifont(ctx, move |app, guifont| {
 				let default = guifont::points(app.config.font_size);
-				app.font_sizes.change(guifont, delta, default)
+				guifont::change_size(guifont, delta, default)
 			}));
-		},
-		Request::ResetFontSize(_) => {
-			responder.respond(set_guifont(ctx, |app, guifont| Ok(app.font_sizes.reset(guifont))));
 		},
 		Request::NvimOpenWin(NvimOpenWinArgs { buf, enter, config }) => {
 			responder.respond(window::open(ctx, buf, enter, config));
