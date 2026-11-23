@@ -99,6 +99,10 @@ pub struct ScrollAnimationOptions {
 
 	/// How its text slides
 	pub curve: Option<Animation>,
+
+	/// Other values for some of its scrolls, in place of the settings' `overrides`: `{}` for none, e.g. to have only
+	/// its own `curve`
+	pub overrides: Option<Vec<ScrollOverride>>,
 }
 
 impl ScrollAnimationSettings {
@@ -107,6 +111,7 @@ impl ScrollAnimationSettings {
 		Self {
 			enabled: options.enabled.unwrap_or(self.enabled),
 			curve: options.curve.unwrap_or(self.curve),
+			overrides: options.overrides.clone().unwrap_or_else(|| self.overrides.clone()),
 			..self.clone()
 		}
 	}
@@ -1116,7 +1121,10 @@ mod number_or_false {
 mod tests {
 	use rmpv::Value;
 
-	use super::{Animation, Filetypes, Mode, Modes, RoundedCornerOptions, Settings, Span, WindowOptions};
+	use super::{
+		Animation, Filetypes, Mode, Modes, RoundedCornerOptions, ScrollAnimationOptions, ScrollAnimationSettings,
+		ScrollOverride, Settings, Span, WindowOptions,
+	};
 
 	/// A Lua table as Neovim sends it: a map, or an array when empty
 	fn table(pairs: Vec<(&str, Value)>) -> Value {
@@ -1486,5 +1494,22 @@ mod tests {
 
 		let error = overrides(vec![table(vec![("lines", Value::from(1))])]).unwrap_err();
 		assert_eq!(error, "window.scroll_animation.overrides[1] changes nothing: give it a curve");
+	}
+
+	#[test]
+	fn window_scroll_overrides() {
+		// A window keeps the settings' overrides, with its own curve too, unless it gives its own
+		let far = ScrollOverride { lines: Span { min: Some(40), max: None }, curve: Some(Animation::None) };
+		let settings = ScrollAnimationSettings { overrides: vec![far.clone()], ..Default::default() };
+		let spring = Animation::Spring { stiffness: 300.0, damping: 30.0 };
+		let overrides = |curve, overrides| {
+			settings
+				.with(&ScrollAnimationOptions { curve, overrides, ..Default::default() })
+				.overrides
+		};
+		assert_eq!(overrides(None, None), vec![far.clone()]);
+		assert_eq!(overrides(Some(spring), None), vec![far.clone()]);
+		assert_eq!(overrides(None, Some(vec![])), vec![]);
+		assert_eq!(overrides(Some(spring), Some(vec![far.clone()])), vec![far]);
 	}
 }
