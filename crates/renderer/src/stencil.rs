@@ -5,17 +5,17 @@
 
 pub(crate) const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Stencil8;
 
-/// Ignores the stencil
+/// Ignores the stencil.
 pub(crate) fn ignored() -> wgpu::DepthStencilState {
 	state(wgpu::CompareFunction::Always, wgpu::StencilOperation::Keep, 0)
 }
 
-/// Writes the reference wherever it draws
+/// Writes the reference wherever it draws.
 pub(crate) fn writes() -> wgpu::DepthStencilState {
 	state(wgpu::CompareFunction::Always, wgpu::StencilOperation::Replace, 0xFF)
 }
 
-/// Draws only where the stencil holds the reference
+/// Draws only where the stencil holds the reference.
 pub(crate) fn tested() -> wgpu::DepthStencilState {
 	state(wgpu::CompareFunction::Equal, wgpu::StencilOperation::Keep, 0)
 }
@@ -36,7 +36,7 @@ fn state(compare: wgpu::CompareFunction, pass_op: wgpu::StencilOperation, write_
 	}
 }
 
-/// A stencil buffer for a surface of `width` × `height` pixels
+/// A stencil buffer for a surface of `width` × `height` pixels.
 pub(crate) fn view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
 	device
 		.create_texture(&wgpu::TextureDescriptor {
@@ -52,7 +52,7 @@ pub(crate) fn view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Text
 		.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
-/// `view` attached to a pass, cleared to 0, which no layer's reference is
+/// `view` attached to a pass, cleared to 0, which no layer's reference is.
 pub(crate) fn attachment(view: &wgpu::TextureView) -> wgpu::RenderPassDepthStencilAttachment<'_> {
 	wgpu::RenderPassDepthStencilAttachment {
 		view,
@@ -61,7 +61,7 @@ pub(crate) fn attachment(view: &wgpu::TextureView) -> wgpu::RenderPassDepthStenc
 	}
 }
 
-/// The reference of the layer at `index`: from 1, wrapping past 255
+/// The reference of the layer at `index`: from 1, wrapping past 255.
 pub(crate) fn reference(index: usize) -> u32 {
 	(index % 255) as u32 + 1
 }

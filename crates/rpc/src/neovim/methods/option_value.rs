@@ -1,6 +1,6 @@
 use crate::{NoOpts, RpcMethod};
 
-/// [`nvim_get_option_value`](https://neovim.io/doc/user/api/#nvim_get_option_value()), of a string option
+/// [`nvim_get_option_value`](https://neovim.io/doc/user/api/#nvim_get_option_value()), of a string option.
 pub struct GetStringOption;
 
 impl RpcMethod for GetStringOption {
@@ -9,7 +9,7 @@ impl RpcMethod for GetStringOption {
 	type Response = String;
 }
 
-/// [`nvim_set_option_value`](https://neovim.io/doc/user/api/#nvim_set_option_value()), of a string option
+/// [`nvim_set_option_value`](https://neovim.io/doc/user/api/#nvim_set_option_value()), of a string option.
 pub struct SetStringOption;
 
 impl RpcMethod for SetStringOption {

@@ -1,11 +1,11 @@
-//! Sarthi's animation settings as the renderer moves things
+//! Sarthi's animation settings as the renderer moves things.
 
 use std::time::Duration;
 
 use renderer::{Easing, Motion};
 use rpc::sarthi::Animation;
 
-/// `animation` as the renderer takes it; none for `none`, which jumps
+/// `animation` as the renderer takes it; none for `none`, which jumps.
 pub fn motion(animation: Animation) -> Option<Motion> {
 	let ease = |easing, duration: f32| Motion::Ease { easing, duration: Duration::from_secs_f32(duration / 1000.0) };
 	Some(match animation {

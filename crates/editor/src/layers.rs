@@ -1,5 +1,5 @@
 //! The layers to draw: each shown grid as a layer, stacked as Neovim's own compositor would, with their frames,
-//! shadows and the text an input method composes
+//! shadows and the text an input method composes.
 
 use renderer::{Decoration, Edges, Layer, LayerShadow, Rect, RenderCell, Scroll};
 use rpc::neovim::{CellText, Grid, GridCell as NvimGridCell, Window};
@@ -14,7 +14,7 @@ impl Editor {
 	/// ui-event-win_float_pos`): the windows, then floating windows and the message grid by `compindex`; and over all
 	/// of them, the external windows in their order. Grids that aren't placed aren't shown.
 	pub(crate) fn stacked(&self) -> Vec<(Grid, &Placement)> {
-		// Sort keys: tiled windows, floats and messages, then external windows; within each, by drawing order or grid id
+		// Sort keys: tiled windows, floats and messages, then external windows; within each, by drawing order or grid id.
 		let mut placed: Vec<(Grid, &Placement)> =
 			self.placements.iter().map(|(&id, placement)| (id, placement)).collect();
 		placed.retain(|(id, placement)| *placement != &Placement::Hidden && self.grids.contains_key(id));
@@ -26,14 +26,14 @@ impl Editor {
 		placed
 	}
 
-	/// The layers in drawing order: grid 1, then the grids shown over it (see [`Editor::stacked`])
+	/// The layers in drawing order: grid 1, then the grids shown over it (see [`Editor::stacked`]).
 	pub(crate) fn layers(&self) -> Vec<Layer> {
 		let screen_height = self.grids.get(&Grid::GLOBAL).map_or(0, |grid| grid.height);
 		let placed = self.stacked();
 
 		let mut shadows = self.float_shadows(&placed);
 		shadows.extend(self.external_shadows(&placed));
-		// What covers grid 1, and what covers the tiled windows, in cells
+		// What covers grid 1, and what covers the tiled windows, in cells.
 		let screen_width = self.grids.get(&Grid::GLOBAL).map_or(0, |grid| grid.width);
 		let area_of = |kind: fn(&Placement) -> Option<[u32; 2]>| -> Vec<Rect<u32>> {
 			placed
@@ -67,7 +67,7 @@ impl Editor {
 					layers.push(self.see_through_cells(self.layer(id, *row, *col), (*row, *col), &messages))
 				},
 				// Placed by Neovim in its cells: a shadow, but no frame (outline, corners, padding), which Neovim
-				// wouldn't leave room for
+				// wouldn't leave room for.
 				Placement::Float { row, col, .. } => {
 					let mut layer = self.layer(id, *row, *col);
 					layer.shadow = shadows.remove(&id);
@@ -114,7 +114,7 @@ impl Editor {
 		let blank = CellText::from(" ").expect("a space fits in a cell");
 		let (width, height, (origin_row, origin_col)) = (layer.width, layer.height, origin);
 		for cover in covered {
-			// In the layer's cells
+			// In the layer's cells.
 			let (left, top) = (cover.x.saturating_sub(origin_col).min(width), cover.y.saturating_sub(origin_row));
 			let right = cover.right().saturating_sub(origin_col).clamp(left, width);
 			let bottom = cover.bottom().saturating_sub(origin_row).min(height);
@@ -128,7 +128,7 @@ impl Editor {
 		layer
 	}
 
-	/// Grid `id` as a layer at `row`, `col` of the screen, with the cursor if it's in this grid
+	/// Grid `id` as a layer at `row`, `col` of the screen, with the cursor if it's in this grid.
 	fn layer(&self, id: Grid, row: u32, col: u32) -> Layer {
 		let cursor = (id == self.cursor_grid).then(|| self.cursor.style()).flatten();
 		let (font, cell) = self.font_of(id);
@@ -141,7 +141,7 @@ impl Editor {
 	}
 
 	/// External window `win`, grid `id`, as a layer where it's placed (see [`Editor::set_external_place`]), with
-	/// `shadow`, the shadow drawn with it (see [`Editor::external_shadows`])
+	/// `shadow`, the shadow drawn with it (see [`Editor::external_shadows`]).
 	fn external_layer(&self, id: Grid, win: Window, shadow: Option<LayerShadow>) -> Layer {
 		let mut layer = self.layer(id, 0, 0);
 		let rect = self.external_rect(id, win);
@@ -155,7 +155,7 @@ impl Editor {
 		layer
 	}
 
-	/// How the text of grid `id`, `width` × `height` cells, scrolled since the last `flush`, if it did
+	/// How the text of grid `id`, `width` × `height` cells, scrolled since the last `flush`, if it did.
 	fn scroll(&self, id: Grid, width: u32, height: u32) -> Option<Scroll> {
 		let viewport = self.viewports.get(&id).filter(|viewport| viewport.scrolled != 0)?;
 		let lines = viewport.scrolled.unsigned_abs().try_into().unwrap_or(u32::MAX);
@@ -177,7 +177,7 @@ impl Editor {
 	}
 
 	/// The line the TUI draws above messages that scrolled over the windows: `separator` across the screen at `row`,
-	/// in the `MsgSeparator` highlight
+	/// in the `MsgSeparator` highlight.
 	fn separator(&self, row: u32, separator: CellText) -> Layer {
 		let width = self.grids.get(&Grid::GLOBAL).map_or(0, |grid| grid.width);
 		let mut line = GridState::new(width, 1);
@@ -191,7 +191,7 @@ impl Editor {
 	}
 }
 
-/// Keeps the first `height` rows of `layer`, if it's taller
+/// Keeps the first `height` rows of `layer`, if it's taller.
 fn clip_rows(layer: &mut Layer, height: u32) {
 	let Layer { height: layer_height, width, cells, cursor, .. } = layer;
 	if *layer_height <= height {

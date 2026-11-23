@@ -1,4 +1,4 @@
-//! Rectangles drawn on the GPU: cell backgrounds, decorations, the cursor, and layers' padding, outlines and shadows
+//! Rectangles drawn on the GPU: cell backgrounds, decorations, the cursor, and layers' padding, outlines and shadows.
 
 use std::ops::Range;
 
@@ -12,14 +12,14 @@ use crate::{
 	Underline,
 };
 
-/// A rectangle in physical pixels, with optional rounded corners and border
+/// A rectangle in physical pixels, with optional rounded corners and border.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub(crate) struct Quad {
-	/// Left, top, width, height
+	/// Left, top, width, height.
 	pub rect: [f32; 4],
 
-	/// RGBA as the surface expects it: linear for sRGB surfaces (see [`rgba`]), not premultiplied
+	/// RGBA as the surface expects it: linear for sRGB surfaces (see [`rgba`]), not premultiplied.
 	pub color: [f32; 4],
 	pub border_color: [f32; 4],
 
@@ -27,18 +27,18 @@ pub(crate) struct Quad {
 	pub border_width: f32,
 
 	/// Draws a patterned line instead of a rectangle: kind ([`WAVE`], [`DOTS`] or [`DASHES`]; 0 for none), period and
-	/// line thickness in pixels, unused; or a shadow instead ([`SHADOW`]), with its blur radius in pixels
+	/// line thickness in pixels, unused; or a shadow instead ([`SHADOW`]), with its blur radius in pixels.
 	pub pattern: [f32; 4],
 
 	/// For a shadow: where it isn't drawn, under what casts it, as rectangles of the frame's holes (see
-	/// [`QuadPipeline::prepare`]): the first, and how many
+	/// [`QuadPipeline::prepare`]): the first, and how many.
 	pub holes: [u32; 2],
 
 	/// A rounded rectangle what's drawn is cut to, like a window with rounded corners: left, top, width, height in pixels;
-	/// unused without a radius
+	/// unused without a radius.
 	pub clip: [f32; 4],
 
-	/// The clip's corner radius, and unused; 0 for no clip
+	/// The clip's corner radius, and unused; 0 for no clip.
 	pub clip_radius: [f32; 2],
 }
 
@@ -48,7 +48,7 @@ const DASHES: f32 = 3.0;
 const SHADOW: f32 = 4.0;
 
 impl Quad {
-	/// A plain rectangle without rounded corners or border
+	/// A plain rectangle without rounded corners or border.
 	pub fn fill(rect: [f32; 4], color: [f32; 4]) -> Self {
 		Self {
 			rect,
@@ -66,7 +66,7 @@ impl Quad {
 	/// `shadow` under a rectangle `rect` (left, top, width, height), for a surface of the given kind: the quad reaches as
 	/// far as the shadow does. Its holes (see [`Quad::holes`]) have corners rounded by `hole_radius`.
 	pub fn shadow(rect: [f32; 4], shadow: Shadow, hole_radius: f32, srgb_surface: bool) -> Self {
-		// Three standard deviations of the blur, past which the shadow is gone
+		// Three standard deviations of the blur, past which the shadow is gone.
 		let reach = 1.5 * shadow.blur.max(0.0);
 		let [left, top, width, height] = rect;
 		let [x, y] = shadow.offset;
@@ -76,13 +76,13 @@ impl Quad {
 		Self { pattern: [SHADOW, shadow.blur.max(0.0), hole_radius.max(0.0), 0.0], ..Self::fill(rect, color) }
 	}
 
-	/// A line of `kind` across `rect`, `thickness` pixels thick, repeating every `period` pixels
+	/// A line of `kind` across `rect`, `thickness` pixels thick, repeating every `period` pixels.
 	fn patterned(rect: [f32; 4], color: [f32; 4], kind: f32, period: f32, thickness: f32) -> Self {
 		Self { pattern: [kind, period, thickness, 0.0], ..Self::fill(rect, color) }
 	}
 }
 
-/// A frame's quads, and the rectangles their shadows leave out (see [`Quad::holes`])
+/// A frame's quads, and the rectangles their shadows leave out (see [`Quad::holes`]).
 #[derive(Debug, Default)]
 pub(crate) struct FrameQuads {
 	pub quads: Vec<Quad>,
@@ -96,20 +96,20 @@ impl FrameQuads {
 	}
 }
 
-/// Draws [`Quad`]s with instanced draw calls: all quads of a frame are uploaded at once, and drawn in ranges
+/// Draws [`Quad`]s with instanced draw calls: all quads of a frame are uploaded at once, and drawn in ranges.
 pub(crate) struct QuadPipeline {
 	pipeline: wgpu::RenderPipeline,
 
-	/// Writes the stencil's reference where each quad's rounded rectangle is, and no color (see [`crate::stencil`])
+	/// Writes the stencil's reference where each quad's rounded rectangle is, and no color (see [`crate::stencil`]).
 	mask: wgpu::RenderPipeline,
 	viewport: wgpu::Buffer,
 	bind_group_layout: wgpu::BindGroupLayout,
 	bind_group: wgpu::BindGroup,
 
-	/// Instance buffer, grown when a frame needs more room
+	/// Instance buffer, grown when a frame needs more room.
 	instances: wgpu::Buffer,
 
-	/// The rectangles shadows leave out (left, top, width, height in pixels), grown like the instances
+	/// The rectangles shadows leave out (left, top, width, height in pixels), grown like the instances.
 	holes: wgpu::Buffer,
 }
 
@@ -197,7 +197,7 @@ impl QuadPipeline {
 			})
 		};
 		let pipeline = pipeline_with("fs_main", wgpu::ColorWrites::ALL, stencil::ignored());
-		// Only the stencil: where the quad's rounded rectangle is
+		// Only the stencil: where the quad's rounded rectangle is.
 		let mask = pipeline_with("fs_mask", wgpu::ColorWrites::empty(), stencil::writes());
 
 		let instances = instance_buffer(device, 0);
@@ -242,7 +242,7 @@ impl QuadPipeline {
 		pass.draw(0..4, range);
 	}
 
-	/// Writes the stencil reference set on `pass` where each quad at `range` is, cut to its rounded corners
+	/// Writes the stencil reference set on `pass` where each quad at `range` is, cut to its rounded corners.
 	pub(crate) fn render_mask(&self, pass: &mut wgpu::RenderPass<'_>, range: Range<u32>) {
 		if range.is_empty() {
 			return;
@@ -323,7 +323,7 @@ pub(crate) fn cell_decorations<'a>(
 	let cell = layer.cell;
 	let rows = layer.rows();
 	for (row, cells) in (0..).zip(rows) {
-		// In surface pixels, like the quads
+		// In surface pixels, like the quads.
 		let (left, top) = (layer.x as f32, (layer.y + row * cell.height) as f32);
 		let gaps: Vec<Range<f32>> = ink(row as usize).iter().map(|gap| gap.start + left..gap.end + left).collect();
 
@@ -336,17 +336,17 @@ pub(crate) fn cell_decorations<'a>(
 	}
 }
 
-/// Where `underline` goes in a cell: its top and bottom, in pixels from the cell's top
+/// Where `underline` goes in a cell: its top and bottom, in pixels from the cell's top.
 pub(crate) fn underline_band(underline: Underline, cell: CellSize, lines: LineMetrics) -> (f32, f32) {
 	let (cell_height, thickness, y) = (cell.height as f32, lines.thickness, lines.underline_top);
 	match underline {
 		Underline::Single | Underline::Dotted | Underline::Dashed => (y, y + thickness),
-		// Two lines with a gap as thick as a line, moved up if they would leave the cell
+		// Two lines with a gap as thick as a line, moved up if they would leave the cell.
 		Underline::Double => {
 			let y = y.min(cell_height - 3.0 * thickness).max(0.0);
 			(y, y + 3.0 * thickness)
 		},
-		// A wave around the underline, as high as the line metrics say
+		// A wave around the underline, as high as the line metrics say.
 		Underline::Curly => {
 			let height = lines.wave_height.min(cell_height);
 			let y = (y + (thickness - height) / 2.0).clamp(0.0, cell_height - height);
@@ -380,7 +380,7 @@ fn decoration_quads(
 				quads.push(Quad::fill(line(y, thickness), color));
 				quads.push(Quad::fill(line(y + 2.0 * thickness, thickness), color));
 			},
-			// One period per cell
+			// One period per cell.
 			Underline::Curly => quads.push(Quad::patterned(line(y, bottom - y), color, WAVE, cell_width, thickness)),
 			Underline::Dotted => {
 				quads.push(Quad::patterned(line(y, thickness), color, DOTS, 2.0 * thickness, thickness));
@@ -481,11 +481,11 @@ pub(crate) fn padding_quads(quads: &mut Vec<Quad>, layer: &Layer, srgb_surface: 
 }
 
 /// A quad for `outline` around `rect` with corners rounded by `radius`: a border just outside it, taking none of its
-/// pixels
+/// pixels.
 pub(crate) fn outline_quad(rect: Rect<f32>, outline: Outline, radius: f32, srgb_surface: bool) -> Quad {
 	let width = outline.width.max(0.0);
 	let rect = rect.outset(Edges::all(width));
-	// Around rounded corners, rounded by as much more as it's wide, so it keeps its width
+	// Around rounded corners, rounded by as much more as it's wide, so it keeps its width.
 	let corner_radius = if radius > 0.0 { radius + width } else { 0.0 };
 	let border_color = rgba(outline.color, srgb_surface);
 	Quad { border_color, border_width: width, corner_radius, ..Quad::fill(rect.into(), [0.0; 4]) }
@@ -533,7 +533,7 @@ pub(crate) fn area_shadow(frame: &mut FrameQuads, shadow: &LayerShadow, srgb_sur
 }
 
 /// The area of `rects` as rectangles that don't overlap: by bands between the rectangles' top and bottom edges, each
-/// band in runs of covered columns
+/// band in runs of covered columns.
 fn disjoint(rects: &[Rect<u32>]) -> Vec<Rect<u32>> {
 	let edges = |edges_of: fn(&Rect<u32>) -> [u32; 2]| {
 		let mut edges: Vec<u32> = rects.iter().flat_map(edges_of).collect();
@@ -567,7 +567,7 @@ fn disjoint(rects: &[Rect<u32>]) -> Vec<Rect<u32>> {
 	pieces
 }
 
-/// Runs of neighbouring cells with the same background and blend, as (first column, length, color, blend)
+/// Runs of neighbouring cells with the same background and blend, as (first column, length, color, blend).
 fn background_runs(cells: &[RenderCell]) -> impl Iterator<Item = (u32, u32, u32, u8)> {
 	let same = |a: &RenderCell, b: &RenderCell| (a.background, a.blend) == (b.background, b.blend);
 	cells.chunk_by(same).scan(0, |col, run| {
@@ -628,7 +628,7 @@ mod tests {
 		assert_eq!(background_runs(&row).collect::<Vec<_>>(), [(0, 1, 1, 0), (1, 2, 2, 0), (3, 1, 1, 0)]);
 	}
 
-	/// Rectangles of a bar cursor at (row 2, col 3) of a layer placed at (row 1, col 1) of 8×19 px cells
+	/// Rectangles of a bar cursor at (row 2, col 3) of a layer placed at (row 1, col 1) of 8×19 px cells.
 	fn bar_rect(orientation: BarOrientation, width: u32, percentage: u32) -> [f32; 4] {
 		let shape = CursorShape::Bar { orientation, percentage };
 		let cursor = Cursor { row: 2, col: 3, width, shape, color: 0xFFFFFF, text_color: 0, motion: None };
@@ -655,7 +655,7 @@ mod tests {
 	}
 
 	/// Decoration quads for a run of 3 cells with `decoration` at (row 1, col 2), with 8×19 px cells and the lines of
-	/// JetBrains Mono at 14 px
+	/// JetBrains Mono at 14 px.
 	fn decorations(decoration: Decoration) -> Vec<Quad> {
 		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
 		let blank = RenderCell {
@@ -708,7 +708,7 @@ mod tests {
 
 	#[test]
 	fn padding_is_the_window_s_background() {
-		// A window whose first cell is highlighted, like a search match or a menu's selected item
+		// A window whose first cell is highlighted, like a search match or a menu's selected item.
 		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
 		let cell = |background| RenderCell {
 			text: ArrayString::from(" ").unwrap(),
@@ -747,11 +747,11 @@ mod tests {
 		let single = decorations(underline(Underline::Single));
 		assert_eq!(single, [Quad::fill([16.0, 36.0, 24.0, 1.0], [0.0, 1.0, 0.0, 1.0])]);
 
-		// Moved up so both lines fit in the 19 px cell: 16 + 3 > 19 would not
+		// Moved up so both lines fit in the 19 px cell: 16 + 3 > 19 would not.
 		let double: Vec<_> = decorations(underline(Underline::Double)).iter().map(|quad| quad.rect).collect();
 		assert_eq!(double, [[16.0, 35.0, 24.0, 1.0], [16.0, 37.0, 24.0, 1.0]]);
 
-		// A wave 4 px high around the underline (15.5 to 19.5), moved up to stay in the cell, one period per cell
+		// A wave 4 px high around the underline (15.5 to 19.5), moved up to stay in the cell, one period per cell.
 		let curly = decorations(underline(Underline::Curly))[0];
 		assert_eq!((curly.rect, curly.pattern), ([16.0, 34.0, 24.0, 4.0], [WAVE, 8.0, 1.0, 0.0]));
 
@@ -784,16 +784,16 @@ mod tests {
 
 	#[test]
 	fn shadow_areas_are_cut_into_rectangles_that_dont_overlap() {
-		// Side by side, like a picker's windows: one rectangle
+		// Side by side, like a picker's windows: one rectangle.
 		assert_eq!(disjoint(&rects(&[[0, 0, 4, 2], [4, 0, 3, 2]])), rects(&[[0, 0, 7, 2]]));
-		// A window inside its border: the border's rectangle, by bands
+		// A window inside its border: the border's rectangle, by bands.
 		assert_eq!(
 			disjoint(&rects(&[[0, 0, 10, 5], [1, 1, 8, 3]])),
 			rects(&[[0, 0, 10, 1], [0, 1, 10, 3], [0, 4, 10, 1]])
 		);
-		// A menu with a shorter window beside it
+		// A menu with a shorter window beside it.
 		assert_eq!(disjoint(&rects(&[[0, 0, 4, 4], [4, 0, 3, 2]])), rects(&[[0, 0, 7, 2], [0, 2, 4, 2]]));
-		// Apart
+		// Apart.
 		assert_eq!(disjoint(&rects(&[[0, 0, 2, 1], [5, 0, 2, 1]])), rects(&[[0, 0, 2, 1], [5, 0, 2, 1]]));
 		assert_eq!(disjoint(&[]), Vec::new());
 	}
@@ -804,14 +804,14 @@ mod tests {
 		assert_eq!(bar_rect(BarOrientation::Vertical, 1, 25), [32.0, 57.0, 2.0, 19.0]);
 		// 20% of 19 px is 3.8, rounded up; the bar sits on the bottom edge and spans both halves of a wide character.
 		assert_eq!(bar_rect(BarOrientation::Horizontal, 2, 20), [32.0, 72.0, 16.0, 4.0]);
-		// At least 1 px, at most the whole cell
+		// At least 1 px, at most the whole cell.
 		assert_eq!(bar_rect(BarOrientation::Vertical, 1, 0), [32.0, 57.0, 1.0, 19.0]);
 		assert_eq!(bar_rect(BarOrientation::Horizontal, 1, 150), [32.0, 57.0, 8.0, 19.0]);
 	}
 
 	const SIZE: u32 = 64;
 
-	/// Draws `quads` on black into a `SIZE`×`SIZE` texture and returns its pixels row by row, or `None` without a GPU
+	/// Draws `quads` on black into a `SIZE`×`SIZE` texture and returns its pixels row by row, or `None` without a GPU.
 	fn draw(quads: &[Quad]) -> Option<Vec<[u8; 4]>> {
 		smol::block_on(async {
 			let gpu = crate::test_gpu::gpu()?;
@@ -890,7 +890,7 @@ mod tests {
 			eprintln!("skipped: no GPU adapter");
 			return;
 		};
-		// Covers pixels 8..24 exactly, without partly covered pixels at the edges
+		// Covers pixels 8..24 exactly, without partly covered pixels at the edges.
 		for (x, y) in [(8, 8), (23, 8), (8, 23), (23, 23), (16, 16)] {
 			assert_eq!(pixel(&pixels, x, y), [255, 0, 0, 255], "inside at ({x}, {y})");
 		}
@@ -939,13 +939,13 @@ mod tests {
 
 	#[test]
 	fn gpu_wave_swings_around_its_center() {
-		// 8 px high, one period over 16 px: up in the first half, down in the second
+		// 8 px high, one period over 16 px: up in the first half, down in the second.
 		let Some(pixels) = draw(&[Quad::patterned([0.0, 0.0, 16.0, 8.0], RED, WAVE, 16.0, 1.0)]) else {
 			eprintln!("skipped: no GPU adapter");
 			return;
 		};
 		let drawn_rows = |x| (0..8).filter(|&y| pixel(&pixels, x, y)[0] > 64).collect::<Vec<_>>();
-		// Through the middle at the start, lowest on screen at a quarter period, highest at three quarters
+		// Through the middle at the start, lowest on screen at a quarter period, highest at three quarters.
 		assert!(drawn_rows(0).iter().all(|&y| (3..=5).contains(&y)), "x = 0: {:?}", drawn_rows(0));
 		assert!(drawn_rows(4).iter().all(|&y| y >= 6), "x = 4: {:?}", drawn_rows(4));
 		assert!(drawn_rows(12).iter().all(|&y| y <= 1), "x = 12: {:?}", drawn_rows(12));

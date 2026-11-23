@@ -4,7 +4,7 @@ use serde::{Serialize, Serializer};
 use crate::RpcMethod;
 
 /// Neovim's [`nvim_input_mouse`](https://neovim.io/doc/user/api/#nvim_input_mouse()) function: a mouse event, on a
-/// cell of a grid
+/// cell of a grid.
 pub struct InputMouse;
 
 impl RpcMethod for InputMouse {
@@ -18,7 +18,7 @@ impl RpcMethod for InputMouse {
 pub struct InputMouseParams {
 	pub input: MouseInput,
 
-	/// Modifier keys held, in key notation without dashes, e.g. "CS" for Ctrl+Shift
+	/// Modifier keys held, in key notation without dashes, e.g. "CS" for Ctrl+Shift.
 	pub modifiers: String,
 
 	/// The grid and its cell. A drag can go past the grid's edges, e.g. to select beyond the window, which scrolls it.
@@ -27,7 +27,7 @@ pub struct InputMouseParams {
 	pub col: i64,
 }
 
-/// What the mouse did
+/// What the mouse did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseInput {
 	Press(MouseButton),
@@ -35,7 +35,7 @@ pub enum MouseInput {
 	Release(MouseButton),
 	Wheel(WheelDirection),
 
-	/// Moved with no button held, reported to Neovim when the `mousemoveevent` option is set
+	/// Moved with no button held, reported to Neovim when the `mousemoveevent` option is set.
 	Move,
 }
 
@@ -45,12 +45,12 @@ pub enum MouseButton {
 	Right,
 	Middle,
 
-	/// The "back" and "forward" side buttons
+	/// The "back" and "forward" side buttons.
 	X1,
 	X2,
 }
 
-/// Which way the content scrolls: a wheel turned down shows text further down
+/// Which way the content scrolls: a wheel turned down shows text further down.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WheelDirection {
 	Up,
@@ -60,7 +60,7 @@ pub enum WheelDirection {
 }
 
 impl MouseInput {
-	/// Neovim's names for the button and the action
+	/// Neovim's names for the button and the action.
 	fn names(self) -> (&'static str, &'static str) {
 		let button = |button| match button {
 			MouseButton::Left => "left",
@@ -83,7 +83,7 @@ impl MouseInput {
 	}
 }
 
-/// As positional arguments, the way Neovim takes them
+/// As positional arguments, the way Neovim takes them.
 impl Serialize for InputMouseParams {
 	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
 		let (button, action) = self.input.names();

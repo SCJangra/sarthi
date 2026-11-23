@@ -7,7 +7,7 @@ use syn::{Ident, Type};
 
 use crate::utils;
 
-/// Name of the fallback variant, which receives every tag no other variant matches
+/// Name of the fallback variant, which receives every tag no other variant matches.
 const OTHER: &str = "Other";
 
 #[derive(FromDeriveInput)]
@@ -17,7 +17,7 @@ pub(crate) struct TaggedEnumInput {
 	generics: syn::Generics,
 	data: ast::Data<EnumVariantInput, ()>,
 
-	/// Only accepted to report that it belongs on a field
+	/// Only accepted to report that it belongs on a field.
 	#[darling(default)]
 	flatten: Flag,
 }
@@ -33,7 +33,7 @@ pub(crate) struct EnumVariantInput {
 	pub(crate) ident: Ident,
 	pub(crate) fields: ast::Fields<EnumVariantFieldInput>,
 
-	/// Only accepted to report that it belongs on a field
+	/// Only accepted to report that it belongs on a field.
 	#[darling(default)]
 	pub(crate) flatten: Flag,
 }
@@ -57,7 +57,7 @@ pub(crate) struct EnumVariantField {
 	pub(crate) ident: Option<Ident>,
 	pub(crate) ty: Type,
 
-	/// For `#[tagged_enum(flatten)]` fields, the element type `T` of the field's `Vec<T>`
+	/// For `#[tagged_enum(flatten)]` fields, the element type `T` of the field's `Vec<T>`.
 	pub(crate) flatten: Option<Type>,
 }
 
@@ -161,12 +161,12 @@ impl TaggedEnumInput {
 }
 
 impl EnumVariant {
-	/// Whether this is the fallback variant
+	/// Whether this is the fallback variant.
 	pub(crate) fn is_other(&self) -> bool {
 		self.ident == OTHER
 	}
 
-	/// The tag that selects this variant: its name in snake case, e.g. `GridLine` → `grid_line`
+	/// The tag that selects this variant: its name in snake case, e.g. `GridLine` → `grid_line`.
 	pub(crate) fn tag_name(&self) -> String {
 		self.ident.to_string().to_snake_case()
 	}
@@ -231,7 +231,7 @@ impl EnumVariant {
 }
 
 impl EnumVariantField {
-	/// Whether this is the `method` field, which the fallback variant fills with the tag
+	/// Whether this is the `method` field, which the fallback variant fills with the tag.
 	pub(crate) fn is_method(&self) -> bool {
 		self.ident.as_ref().is_some_and(|ident| ident == "method")
 	}

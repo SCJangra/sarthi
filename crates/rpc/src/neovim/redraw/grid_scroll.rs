@@ -13,7 +13,7 @@ pub struct GridScrollEvent {
 	pub right: u32,
 	pub rows: i32,
 
-	/// Always 0, reserved by Neovim for future use
+	/// Always 0, reserved by Neovim for future use.
 	pub cols: i32,
 }
 
@@ -29,7 +29,7 @@ mod tests {
 			GridScrollEvent { grid: crate::Grid(2), top: 1, bot: 5, left: 0, right: 40, rows: -3, cols: 0 },
 		]);
 
-		// ["grid_scroll", [1, 0, 10, 0, 80, 2, 0], [2, 1, 5, 0, 40, -3, 0]]
+		// ["grid_scroll", [1, 0, 10, 0, 80, 2, 0], [2, 1, 5, 0, 40, -3, 0]].
 		let event = vec![
 			0x93, 0xAB, 0x67, 0x72, 0x69, 0x64, 0x5F, 0x73, 0x63, 0x72, 0x6F, 0x6C, 0x6C, 0x97, 0x01, 0x00, 0x0A, 0x00,
 			0x50, 0x02, 0x00, 0x97, 0x02, 0x01, 0x05, 0x00, 0x28, 0xFD, 0x00,

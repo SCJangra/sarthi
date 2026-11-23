@@ -1,4 +1,4 @@
-//! Colors as Neovim sends them (`0xRRGGBB` in sRGB), converted to what the GPU and the surface take
+//! Colors as Neovim sends them (`0xRRGGBB` in sRGB), converted to what the GPU and the surface take.
 
 /// Converts a color as Neovim sends it, `0xRRGGBB` in sRGB, to a [`wgpu::Color`] for a surface of the
 /// given kind.
@@ -15,13 +15,13 @@ pub(crate) fn wgpu_color(rgb: u32, srgb_surface: bool) -> wgpu::Color {
 	wgpu::Color { r: channel(16), g: channel(8), b: channel(0), a: 1.0 }
 }
 
-/// Like [`wgpu_color`], as the `[f32; 4]` RGBA that shaders take
+/// Like [`wgpu_color`], as the `[f32; 4]` RGBA that shaders take.
 pub(crate) fn rgba(rgb: u32, srgb_surface: bool) -> [f32; 4] {
 	let color = wgpu_color(rgb, srgb_surface);
 	[color.r as f32, color.g as f32, color.b as f32, 1.0]
 }
 
-/// The inverse sRGB transfer function (IEC 61966-2-1), for a channel value in `0.0..=1.0`
+/// The inverse sRGB transfer function (IEC 61966-2-1), for a channel value in `0.0..=1.0`.
 fn srgb_to_linear(value: f64) -> f64 {
 	if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
 }

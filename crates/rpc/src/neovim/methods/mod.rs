@@ -1,4 +1,4 @@
-//! The API functions sarthi calls (`:help api-global`), one module each, with their parameters as Neovim takes them
+//! The API functions sarthi calls (`:help api-global`), one module each, with their parameters as Neovim takes them.
 
 #![allow(missing_docs, reason = "named and typed as in Neovim's help, which documents them")]
 

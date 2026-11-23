@@ -8,7 +8,7 @@ pub(crate) struct Gpu {
 	pub queue: wgpu::Queue,
 }
 
-/// The shared device, while no other test uses it, or `None` without a GPU
+/// The shared device, while no other test uses it, or `None` without a GPU.
 pub(crate) fn gpu() -> Option<MutexGuard<'static, Gpu>> {
 	static GPU: OnceLock<Option<Mutex<Gpu>>> = OnceLock::new();
 	let gpu = GPU.get_or_init(|| {

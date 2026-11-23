@@ -1,13 +1,13 @@
-//! What the clipboard provider in `runtime/lua/sarthi/clipboard.lua` sends and gets back
+//! What the clipboard provider in `runtime/lua/sarthi/clipboard.lua` sends and gets back.
 
 use serde::{Deserialize, Serialize};
 
-/// Text Neovim copied: its lines, and its register type (`v`, `V` or a block like `^V10`)
+/// Text Neovim copied: its lines, and its register type (`v`, `V` or a block like `^V10`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Copied {
-	/// The lines
+	/// The lines.
 	pub lines: Vec<String>,
-	/// The register type
+	/// The register type.
 	pub regtype: String,
 }
 
@@ -18,19 +18,19 @@ pub struct Copied {
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Paste {
-	/// The lines and their register type
+	/// The lines and their register type.
 	Typed((Vec<String>, String)),
-	/// Only the lines
+	/// Only the lines.
 	Lines(Vec<String>),
 }
 
-/// The `+` (clipboard) or `*` (primary selection) register, decoded from the name Neovim gives it
+/// The `+` (clipboard) or `*` (primary selection) register, decoded from the name Neovim gives it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
 pub enum Register {
-	/// The `+` register, the system clipboard
+	/// The `+` register, the system clipboard.
 	Clipboard,
-	/// The `*` register, the primary selection
+	/// The `*` register, the primary selection.
 	Primary,
 }
 

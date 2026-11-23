@@ -1,10 +1,10 @@
-//! sarthi's command line: its own few options, then Neovim's arguments, e.g. `sarthi -d a b` or `sarthi +42 file`
+//! sarthi's command line: its own few options, then Neovim's arguments, e.g. `sarthi -d a b` or `sarthi +42 file`.
 
 use std::ffi::OsString;
 
 use clap::{ArgAction, Parser};
 
-/// A GUI for Neovim
+/// A GUI for Neovim.
 #[derive(Debug, Parser)]
 #[command(
 	version,
@@ -14,15 +14,15 @@ use clap::{ArgAction, Parser};
 	              all are, even sarthi's options."
 )]
 pub struct Args {
-	/// The Neovim to run
+	/// The Neovim to run.
 	#[arg(long, value_name = "PATH", default_value = "nvim")]
 	pub nvim: OsString,
 
-	/// Print sarthi's version
+	/// Print sarthi's version.
 	#[arg(long, action = ArgAction::Version)]
 	version: (),
 
-	/// Neovim's arguments, e.g. files to edit
+	/// Neovim's arguments, e.g. files to edit.
 	#[arg(value_name = "NEOVIM ARGUMENTS", trailing_var_arg = true, allow_hyphen_values = true)]
 	pub args: Vec<OsString>,
 }
@@ -34,7 +34,7 @@ mod tests {
 
 	use super::Args;
 
-	/// Neovim, and its arguments, for `args`
+	/// Neovim, and its arguments, for `args`.
 	fn parse(args: &[&str]) -> (String, Vec<String>) {
 		let parsed = Args::try_parse_from(["sarthi"].iter().chain(args)).unwrap();
 		let strings = |args: Vec<_>| {
@@ -54,7 +54,7 @@ mod tests {
 		assert_eq!(parse(&[]), ("nvim".into(), vec![]));
 		assert_eq!(parse(&["-d", "a", "b"]), ("nvim".into(), vec!["-d".into(), "a".into(), "b".into()]));
 		assert_eq!(parse(&["+42", "file"]), ("nvim".into(), vec!["+42".into(), "file".into()]));
-		// Neovim's own `-V` (verbose), not sarthi's version
+		// Neovim's own `-V` (verbose), not sarthi's version.
 		assert_eq!(parse(&["-V9", "file"]), ("nvim".into(), vec!["-V9".into(), "file".into()]));
 	}
 
@@ -65,7 +65,7 @@ mod tests {
 		assert_eq!(kind(&["--version"]), ErrorKind::DisplayVersion);
 		assert_eq!(kind(&["--help"]), ErrorKind::DisplayHelp);
 		assert_eq!(kind(&["--nvim"]), ErrorKind::InvalidValue);
-		// After Neovim's arguments, or `--`, all Neovim's
+		// After Neovim's arguments, or `--`, all Neovim's.
 		assert_eq!(parse(&["file", "--nvim", "x"]), ("nvim".into(), vec!["file".into(), "--nvim".into(), "x".into()]));
 		assert_eq!(parse(&["--", "--help"]), ("nvim".into(), vec!["--help".into()]));
 	}

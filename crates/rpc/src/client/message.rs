@@ -1,78 +1,78 @@
-//! msgpack-rpc messages, to and from Neovim
+//! msgpack-rpc messages, to and from Neovim.
 
 use crate::{Notification, Request};
 
-/// A message to Neovim, whose arguments or result are `T`
+/// A message to Neovim, whose arguments or result are `T`.
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum OutgoingRpcMessage<T> {
-	/// A call, which Neovim answers
+	/// A call, which Neovim answers.
 	Request(RpcRequest<T>),
 
 	/// A call Neovim doesn't reply to. It reports errors from such calls with `nvim_error_event`.
 	Notification {
-		/// The API function
+		/// The API function.
 		method: &'static str,
-		/// Its arguments
+		/// Its arguments.
 		params: T,
 	},
 
-	/// Successful response to a request from the server
+	/// Successful response to a request from the server.
 	Response {
-		/// The request's id
+		/// The request's id.
 		id: u32,
-		/// What the request returns
+		/// What the request returns.
 		result: T,
 	},
 
-	/// Failed response to a request from the server
+	/// Failed response to a request from the server.
 	ErrorResponse {
-		/// The request's id
+		/// The request's id.
 		id: u32,
-		/// Why it failed
+		/// Why it failed.
 		message: String,
 	},
 }
 
 /// A message from the server: a request from sarthi's Lua, a response with a result of type `T`, or a
-/// notification
+/// notification.
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum IncomingRpcMessage<T> {
-	/// A request, which must be answered
+	/// A request, which must be answered.
 	Request {
-		/// Matches the answer to it
+		/// Matches the answer to it.
 		id: u32,
 
-		/// What's asked
+		/// What's asked.
 		request: Request,
 	},
 
-	/// The answer to a call of sarthi's
+	/// The answer to a call of sarthi's.
 	Response(RpcResponse<T>),
-	/// A notification, which isn't answered
+	/// A notification, which isn't answered.
 	Notification(Notification),
 }
 
-/// A call to Neovim, with arguments `P`
+/// A call to Neovim, with arguments `P`.
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct RpcRequest<P> {
-	/// Matches the call's response to it
+	/// Matches the call's response to it.
 	pub id: u32,
-	/// The API function
+	/// The API function.
 	pub method: &'static str,
-	/// Its arguments
+	/// Its arguments.
 	pub params: P,
 }
 
-/// Neovim's answer to a call, with a result `R`
+/// Neovim's answer to a call, with a result `R`.
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct RpcResponse<R> {
-	/// The id of the call it answers
+	/// The id of the call it answers.
 	pub id: u32,
-	/// The result, or the error Neovim raised
+	/// The result, or the error Neovim raised.
 	pub result: Result<R, rmpv::Value>,
 }
 
@@ -154,7 +154,7 @@ mod ser_de {
 				0 => {
 					let id = seq.next_element::<u32>()?.ok_or_else(|| DeError::invalid_length(1, &self))?;
 
-					// The method and its arguments, like a notification's
+					// The method and its arguments, like a notification's.
 					let request = Request::deserialize(SeqAccessDeserializer::new(seq))?;
 					Ok(IncomingRpcMessage::Request { id, request })
 				},
@@ -227,13 +227,13 @@ mod tests {
 
 	#[test]
 	fn de_request() {
-		// [0, 10, "get_clipboard", ["+"]]: the method and arguments decode straight into sarthi's request
+		// [0, 10, "get_clipboard", ["+"]]: the method and arguments decode straight into sarthi's request.
 		let request = [&[0x94, 0x00, 0x0A, 0xAD][..], b"get_clipboard", &[0x91, 0xA1, b'+']].concat();
 		let request: IncomingRpcMessage<()> = rmp_serde::from_slice(&request).unwrap();
 		let expected = Request::GetClipboard(GetClipboardArgs { register: Register::Clipboard });
 		assert_eq!(request, IncomingRpcMessage::Request { id: 10, request: expected });
 
-		// [0, 11, "other", []]
+		// [0, 11, "other", []].
 		let other = [&[0x94, 0x00, 0x0B, 0xA5][..], b"other", &[0x90]].concat();
 		let other: IncomingRpcMessage<()> = rmp_serde::from_slice(&other).unwrap();
 		let expected = Request::Other { method: String::from("other"), value: serde::de::IgnoredAny };
@@ -244,7 +244,7 @@ mod tests {
 	fn ser_notification() {
 		let notification = OutgoingRpcMessage::Notification { method: "nvim_input", params: ["ix"] };
 
-		// [2, "nvim_input", ["ix"]]
+		// [2, "nvim_input", ["ix"]].
 		let expected =
 			vec![0x93, 0x02, 0xAA, b'n', b'v', b'i', b'm', b'_', b'i', b'n', b'p', b'u', b't', 0x91, 0xA2, b'i', b'x'];
 
@@ -255,7 +255,7 @@ mod tests {
 	fn ser_error_response() {
 		let response = OutgoingRpcMessage::<()>::ErrorResponse { id: 3, message: String::from("x") };
 
-		// [1, 3, [0, "x"], nil]
+		// [1, 3, [0, "x"], nil].
 		let expected = vec![0x94, 0x01, 0x03, 0x92, 0x00, 0xA1, b'x', 0xC0];
 
 		assert_eq!(rmp_serde::to_vec_named(&response).unwrap(), expected);
@@ -265,7 +265,7 @@ mod tests {
 	fn ser_response() {
 		let response = OutgoingRpcMessage::Response { id: 3, result: 42 };
 
-		// [1, 3, nil, 42]
+		// [1, 3, nil, 42].
 		let expected = vec![0x94, 0x01, 0x03, 0xC0, 0x2A];
 
 		assert_eq!(rmp_serde::to_vec_named(&response).unwrap(), expected);

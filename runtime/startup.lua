@@ -10,7 +10,7 @@ end
 
 require('sarthi.rpc').channel = channel
 
--- What works without the user's config asking for it
+-- What works without the user's config asking for it.
 require('sarthi.clipboard')
 require('sarthi.scroll')
 require('sarthi.floats')

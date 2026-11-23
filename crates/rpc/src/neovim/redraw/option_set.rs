@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-/// A UI-related option changed, e.g. `guifont`, or its value when the UI attached (`:help ui-event-option_set`)
+/// A UI-related option changed, e.g. `guifont`, or its value when the UI attached (`:help ui-event-option_set`).
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct OptionSetEvent {
@@ -8,7 +8,7 @@ pub struct OptionSetEvent {
 	pub value: OptionValue,
 }
 
-/// The value of an option: Neovim's options are booleans, numbers or strings
+/// The value of an option: Neovim's options are booleans, numbers or strings.
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(untagged)]
@@ -27,7 +27,7 @@ mod tests {
 
 	#[test]
 	fn de_option_set() {
-		// From Neovim 0.12, at attach and after `:set guifont=…`
+		// From Neovim 0.12, at attach and after `:set guifont=…`.
 		let event = Value::Array(vec![
 			"option_set".into(),
 			Value::Array(vec!["termguicolors".into(), false.into()]),

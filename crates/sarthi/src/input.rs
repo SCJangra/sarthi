@@ -1,8 +1,8 @@
-//! Keys as Neovim's key notation (`:help key-notation`), for `nvim_input`
+//! Keys as Neovim's key notation (`:help key-notation`), for `nvim_input`.
 
 use winit::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 
-/// Text an input method committed, for `nvim_input`: typed as it is, but for `<`, which would start a key's name
+/// Text an input method committed, for `nvim_input`: typed as it is, but for `<`, which would start a key's name.
 pub fn committed_text(text: &str) -> String {
 	text.replace('<', "<lt>")
 }
@@ -50,14 +50,14 @@ fn notation(key: &str, special: bool, modifiers: ModifiersState) -> String {
 	}
 
 	match (prefix.is_empty() && !special, key.as_str()) {
-		// A literal "<" would start a key name
+		// A literal "<" would start a key name.
 		(true, _) => key.replace('<', "<lt>"),
 		(false, "<") => format!("<{prefix}lt>"),
 		(false, _) => format!("<{prefix}{key}>"),
 	}
 }
 
-/// Neovim's name for keys that aren't typed as text
+/// Neovim's name for keys that aren't typed as text.
 fn special_key(key: &Key, text: Option<&str>, location: KeyLocation) -> Option<&'static str> {
 	if location == KeyLocation::Numpad
 		&& let Some(name) = keypad_key(key)
@@ -92,7 +92,7 @@ fn special_key(key: &Key, text: Option<&str>, location: KeyLocation) -> Option<&
 	Some(name)
 }
 
-/// Keypad keys: digits and operators with NumLock on, navigation keys with it off
+/// Keypad keys: digits and operators with NumLock on, navigation keys with it off.
 fn keypad_key(key: &Key) -> Option<&'static str> {
 	let name = match key {
 		Key::Character(character) => match character.as_str() {
@@ -127,7 +127,7 @@ fn keypad_key(key: &Key) -> Option<&'static str> {
 			NamedKey::ArrowRight => "kRight",
 			NamedKey::Insert => "kInsert",
 			NamedKey::Delete => "kDel",
-			// The middle key (5) with NumLock off
+			// The middle key (5) with NumLock off.
 			NamedKey::Clear => "kOrigin",
 			_ => return None,
 		},
@@ -136,7 +136,7 @@ fn keypad_key(key: &Key) -> Option<&'static str> {
 	Some(name)
 }
 
-/// F1 to F35, all that winit reports
+/// F1 to F35, all that winit reports.
 fn function_key(key: &NamedKey) -> Option<&'static str> {
 	match key {
 		NamedKey::F1 => Some("F1"),
@@ -190,7 +190,7 @@ mod tests {
 	const ALT: ModifiersState = ModifiersState::ALT;
 	const SUPER: ModifiersState = ModifiersState::SUPER;
 
-	/// A key that types `text`, like winit reports it
+	/// A key that types `text`, like winit reports it.
 	fn text(text: &str, modifiers: ModifiersState) -> Option<String> {
 		neovim_keys(&Key::Character(text.into()), Some(text), KeyLocation::Standard, modifiers)
 	}
@@ -214,7 +214,7 @@ mod tests {
 	fn shifted_text_is_just_the_character() {
 		assert_eq!(text("A", SHIFT).as_deref(), Some("A"));
 		assert_eq!(text("$", SHIFT).as_deref(), Some("$"));
-		// winit may report a shifted letter in lowercase
+		// winit may report a shifted letter in lowercase.
 		assert_eq!(text("a", SHIFT).as_deref(), Some("A"));
 	}
 

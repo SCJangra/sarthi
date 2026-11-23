@@ -11,7 +11,7 @@ use crate::Window;
 pub struct WinPosEvent {
 	pub grid: Grid,
 
-	/// The window handle, unused
+	/// The window handle, unused.
 	pub win: IgnoredAny,
 
 	pub start_row: u32,
@@ -31,7 +31,7 @@ pub struct WinFloatPosEvent {
 
 	pub win: Window,
 
-	/// "NW", "NE", "SW" or "SE"
+	/// "NW", "NE", "SW" or "SE".
 	pub anchor: String,
 	pub anchor_grid: Grid,
 	pub anchor_row: f64,
@@ -39,7 +39,7 @@ pub struct WinFloatPosEvent {
 
 	pub mouse_enabled: bool,
 
-	// Sent since Neovim 0.10
+	// Sent since Neovim 0.10.
 	#[serde(default)]
 	pub zindex: u32,
 	#[serde(default)]
@@ -61,39 +61,39 @@ pub struct WinExternalPosEvent {
 	pub win: Window,
 }
 
-/// Hides the window of `grid`, e.g. when switching tabs; it can be shown again later
+/// Hides the window of `grid`, e.g. when switching tabs; it can be shown again later.
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinHideEvent {
 	pub grid: Grid,
 }
 
-/// Closes the window of `grid`
+/// Closes the window of `grid`.
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinCloseEvent {
 	pub grid: Grid,
 }
 
-/// Frees `grid`; it won't be used again
+/// Frees `grid`; it won't be used again.
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct GridDestroyEvent {
 	pub grid: Grid,
 }
 
-/// Shows the message grid at `row` of grid 1, across its full width (`:help ui-multigrid`)
+/// Shows the message grid at `row` of grid 1, across its full width (`:help ui-multigrid`).
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct MsgSetPosEvent {
 	pub grid: Grid,
 	pub row: u32,
 
-	/// Whether messages scrolled up over other windows; the TUI then draws a line of `sep_char` above them
+	/// Whether messages scrolled up over other windows; the TUI then draws a line of `sep_char` above them.
 	pub scrolled: bool,
 	pub sep_char: String,
 
-	// Sent since Neovim 0.10
+	// Sent since Neovim 0.10.
 	#[serde(default)]
 	pub zindex: u32,
 	#[serde(default)]
@@ -108,7 +108,7 @@ mod tests {
 	use super::{MsgSetPosEvent, WinCloseEvent, WinExternalPosEvent, WinFloatPosEvent, WinHideEvent, WinPosEvent};
 	use crate::{RedrawNotification, Window};
 
-	/// Decodes `[name, args...]` the way Neovim sends it
+	/// Decodes `[name, args...]` the way Neovim sends it.
 	fn decode(name: &str, args: Vec<Vec<Value>>) -> RedrawNotification {
 		let event: Vec<Value> = std::iter::once(Value::from(name))
 			.chain(args.into_iter().map(Value::Array))
@@ -116,14 +116,14 @@ mod tests {
 		rmp_serde::from_slice(&rmp_serde::to_vec(&Value::Array(event)).unwrap()).unwrap()
 	}
 
-	/// A window handle: msgpack extension type 1
+	/// A window handle: msgpack extension type 1.
 	fn win(id: u8) -> Value {
 		Value::Ext(1, vec![0xCD, 0x03, id])
 	}
 
 	#[test]
 	fn de_win_pos() {
-		// From Neovim 0.12: ["win_pos", [2, win, 0, 31, 29, 13]]
+		// From Neovim 0.12: ["win_pos", [2, win, 0, 31, 29, 13]].
 		let event = decode("win_pos", vec![vec![2.into(), win(0xE8), 0.into(), 31.into(), 29.into(), 13.into()]]);
 		let expected =
 			WinPosEvent { grid: crate::Grid(2), win: IgnoredAny, start_row: 0, start_col: 31, width: 29, height: 13 };
@@ -132,7 +132,7 @@ mod tests {
 
 	#[test]
 	fn de_win_float_pos() {
-		// From Neovim 0.12: a float at (3, 10) with compindex 1, and the popup menu anchored to grid 5
+		// From Neovim 0.12: a float at (3, 10) with compindex 1, and the popup menu anchored to grid 5.
 		let float = vec![
 			6.into(),
 			win(0xEB),
@@ -173,7 +173,7 @@ mod tests {
 
 	#[test]
 	fn de_win_external_pos() {
-		// From Neovim 0.12, after `nvim_open_win(buf, false, { external = true, width = 20, height = 5 })`
+		// From Neovim 0.12, after `nvim_open_win(buf, false, { external = true, width = 20, height = 5 })`.
 		let event = decode("win_external_pos", vec![vec![4.into(), win(0xE9)]]);
 		let expected = WinExternalPosEvent { grid: crate::Grid(4), win: Window(0x3E9) };
 		assert_eq!(event, RedrawNotification::WinExternalPos(vec![expected]));
@@ -200,7 +200,7 @@ mod tests {
 
 	#[test]
 	fn de_msg_set_pos() {
-		// From Neovim 0.12, after a long message scrolled up
+		// From Neovim 0.12, after a long message scrolled up.
 		let event =
 			decode("msg_set_pos", vec![vec![3.into(), 10.into(), true.into(), " ".into(), 200.into(), 2.into()]]);
 		let expected = MsgSetPosEvent {

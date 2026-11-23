@@ -7,7 +7,7 @@ pub struct Grid(pub u32);
 
 impl Grid {
 	/// The global grid, the whole screen: what isn't in a window, like window separators, status lines and the command
-	/// line, with the windows' grids placed on it
+	/// line, with the windows' grids placed on it.
 	pub const GLOBAL: Self = Self(1);
 }
 

@@ -1,4 +1,4 @@
-//! The cursor's style from Neovim's modes (`:help ui-event-mode_info_set`), and how its moves animate
+//! The cursor's style from Neovim's modes (`:help ui-event-mode_info_set`), and how its moves animate.
 
 use renderer::{CellSize, CursorMotion};
 use rpc::neovim::{CursorShape, HlId, ModeInfo};
@@ -6,62 +6,62 @@ use rpc::sarthi::{CursorAnimationSettings, CursorMove, Mode};
 use smart_default::SmartDefault;
 
 /// How Neovim wants the cursor drawn, from `mode_info_set`, `mode_change`, `busy_start` and `busy_stop`
-/// (`:help ui-event-mode_info_set`), and how it moves to where it's drawn next
+/// (`:help ui-event-mode_info_set`), and how it moves to where it's drawn next.
 #[derive(Debug, SmartDefault)]
 pub struct CursorState {
-	/// Whether to use the modes' styles; otherwise the cursor is always a block
+	/// Whether to use the modes' styles; otherwise the cursor is always a block.
 	style_enabled: bool,
 	modes: Vec<ModeInfo>,
 	mode: usize,
 
-	/// The mode's name, like `insert` or `cmdline_normal`, and the one the cursor was last drawn in
+	/// The mode's name, like `insert` or `cmdline_normal`, and the one the cursor was last drawn in.
 	mode_name: String,
 	drawn_mode: String,
 
-	/// Where the cursor was last drawn: its cell's top-left corner, in pixels; none before it's drawn
+	/// Where the cursor was last drawn: its cell's top-left corner, in pixels; none before it's drawn.
 	drawn_at: Option<[u32; 2]>,
 
-	/// Neovim asked not to draw the cursor
+	/// Neovim asked not to draw the cursor.
 	hidden: bool,
 
-	/// How its moves animate
+	/// How its moves animate.
 	animation: CursorAnimationSettings,
 
-	/// Whether the window has the focus
+	/// Whether the window has the focus.
 	#[default(true)]
 	focused: bool,
 }
 
-/// The cursor's look in the current mode
+/// The cursor's look in the current mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CursorStyle {
-	/// Block, vertical or horizontal bar
+	/// Block, vertical or horizontal bar.
 	pub shape: CursorShape,
 
-	/// How much of the cell a horizontal or vertical cursor covers, in percent
+	/// How much of the cell a horizontal or vertical cursor covers, in percent.
 	pub percentage: u32,
 
-	/// Highlight for the cursor's colors; 0 means the cell's colors swapped
+	/// Highlight for the cursor's colors; 0 means the cell's colors swapped.
 	pub attr_id: HlId,
 
-	/// Drawn as an outline, the cell's character in its own colors: while the window doesn't have the focus
+	/// Drawn as an outline, the cell's character in its own colors: while the window doesn't have the focus.
 	pub outline: bool,
 }
 
 impl CursorState {
-	/// Neovim's modes, from `mode_info_set`, and whether its cursor styles are used at all (`'guicursor'`)
+	/// Neovim's modes, from `mode_info_set`, and whether its cursor styles are used at all (`'guicursor'`).
 	pub fn set_modes(&mut self, style_enabled: bool, modes: Vec<ModeInfo>) {
 		self.style_enabled = style_enabled;
 		self.modes = modes;
 	}
 
-	/// The current mode, by its index in the modes and its name (`mode_change`)
+	/// The current mode, by its index in the modes and its name (`mode_change`).
 	pub fn set_mode(&mut self, mode: usize, name: &str) {
 		self.mode = mode;
 		name.clone_into(&mut self.mode_name);
 	}
 
-	/// How the cursor's moves animate, from its next move on
+	/// How the cursor's moves animate, from its next move on.
 	pub fn set_animation(&mut self, animation: CursorAnimationSettings) {
 		self.animation = animation;
 	}
@@ -77,7 +77,7 @@ impl CursorState {
 		self.drawn_at = Some(at);
 	}
 
-	/// Hides the cursor while Neovim is busy (`busy_start`), or shows it again (`busy_stop`)
+	/// Hides the cursor while Neovim is busy (`busy_start`), or shows it again (`busy_stop`).
 	pub fn set_hidden(&mut self, hidden: bool) {
 		self.hidden = hidden;
 	}
@@ -105,10 +105,10 @@ impl CursorState {
 
 	/// How the cursor moves to a cell whose top-left corner is at `to`, in pixels, `cell` large: as the animation
 	/// settings say for the move, or at once while they're off, without the focus, for its first place, and for a
-	/// curve of `none`
+	/// curve of `none`.
 	pub fn motion_to(&self, to: [u32; 2], cell: CellSize) -> Option<CursorMotion> {
 		let from = self.drawn_at.filter(|_| self.animation.enabled && self.focused)?;
-		// In whole cells of where it goes, so a move to a window with other fonts counts its cells
+		// In whole cells of where it goes, so a move to a window with other fonts counts its cells.
 		let cells = |from: u32, to: u32, size: u32| (from.abs_diff(to) + size / 2) / size.max(1);
 		let mode = mode_of(&self.mode_name).filter(|mode| mode_of(&self.drawn_mode) == Some(*mode));
 		let step =
@@ -119,7 +119,7 @@ impl CursorState {
 }
 
 /// The mode `vim.keymap.set()` names for a mode's name in `mode_change`, if it has one, e.g. [`Mode::Cmdline`] for
-/// `cmdline_insert`
+/// `cmdline_insert`.
 fn mode_of(name: &str) -> Option<Mode> {
 	match name {
 		"normal" => Some(Mode::Normal),
@@ -171,7 +171,7 @@ mod tests {
 		cursor.set_mode(1, "insert");
 		assert_eq!(cursor.style(), Some(CursorStyle { shape: CursorShape::Vertical, percentage: 25, ..BLOCK }));
 
-		// Missing keys fall back to the block
+		// Missing keys fall back to the block.
 		cursor.set_mode(2, "visual");
 		assert_eq!(cursor.style(), Some(BLOCK));
 
@@ -215,30 +215,30 @@ mod tests {
 		};
 		let expected = |curve, trail| crate::motion(curve).map(|motion| (motion, trail));
 
-		// Its first place: at once
+		// Its first place: at once.
 		assert_eq!(step(&cursor, 3, 0), None);
 		cursor.set_mode(0, "normal");
 		cursor.drawn(at(3, 0));
-		// `l`, `2l`: quick and without a trail; 3 columns, or a row down: the base
+		// `l`, `2l`: quick and without a trail; 3 columns, or a row down: the base.
 		assert_eq!(step(&cursor, 4, 0), expected(quick, 0.0));
 		assert_eq!(step(&cursor, 1, 0), expected(quick, 0.0));
 		assert_eq!(step(&cursor, 6, 0), expected(spring, 1.0));
 		assert_eq!(step(&cursor, 3, 1), expected(spring, 1.0));
 
-		// Into insert mode, e.g. with `A`: a move between modes, which insert mode's override isn't for
+		// Into insert mode, e.g. with `A`: a move between modes, which insert mode's override isn't for.
 		cursor.set_mode(1, "insert");
 		assert_eq!(step(&cursor, 40, 0), expected(spring, 1.0));
 		cursor.drawn(at(40, 0));
-		// Typing in it, Replace mode too: both overrides apply, the later one's curve over the earlier one's, a jump
+		// Typing in it, Replace mode too: both overrides apply, the later one's curve over the earlier one's, a jump.
 		assert_eq!(step(&cursor, 41, 0), expected(Animation::None, 0.0));
 		cursor.set_mode(1, "replace");
 		assert_eq!(step(&cursor, 41, 0), expected(Animation::None, 0.0));
-		// Out of it
+		// Out of it.
 		cursor.set_mode(0, "normal");
 		assert_eq!(step(&cursor, 41, 0), expected(quick, 0.0));
 		cursor.drawn(at(41, 0));
 
-		// The command line's modes are one: into it with `:`, then within it
+		// The command line's modes are one: into it with `:`, then within it.
 		cursor.set_mode(2, "cmdline_normal");
 		assert_eq!(step(&cursor, 0, 30), expected(spring, 1.0));
 		cursor.drawn(at(0, 30));

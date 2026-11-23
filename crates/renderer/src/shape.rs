@@ -1,19 +1,19 @@
-//! The cursor's shape on its way between cells: a quadrilateral through its four corners
+//! The cursor's shape on its way between cells: a quadrilateral through its four corners.
 
 use bytemuck::{Pod, Zeroable};
 
-/// What [`ShapePipeline`] draws: see `shaders/shape.wgsl`
+/// What [`ShapePipeline`] draws: see `shaders/shape.wgsl`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 struct Shape {
 	viewport: [f32; 4],
 	corners: [[f32; 2]; 4],
 
-	/// RGBA as the surface expects it (see [`crate::color::rgba`]), not premultiplied
+	/// RGBA as the surface expects it (see [`crate::color::rgba`]), not premultiplied.
 	color: [f32; 4],
 }
 
-/// Draws one filled shape with four corners, like the cursor while it moves
+/// Draws one filled shape with four corners, like the cursor while it moves.
 pub(crate) struct ShapePipeline {
 	pipeline: wgpu::RenderPipeline,
 	shape: wgpu::Buffer,

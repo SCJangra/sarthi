@@ -7,6 +7,6 @@ use serde::{Deserialize, Serialize};
 pub struct HlId(pub u32);
 
 impl HlId {
-	/// The default highlight: Neovim's default colors, without attributes
+	/// The default highlight: Neovim's default colors, without attributes.
 	pub const DEFAULT: Self = Self(0);
 }

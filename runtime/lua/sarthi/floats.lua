@@ -6,13 +6,13 @@ local rpc = require('sarthi.rpc')
 
 local M = {}
 
--- What was last sent for each window, by handle
+-- What was last sent for each window, by handle.
 local sent = {}
 
--- The outline's highlight group in the settings, for managed windows that don't give their own
+-- The outline's highlight group in the settings, for managed windows that don't give their own.
 local highlight = 'FloatBorder'
 
---- Whether `win` is a floating window
+--- Whether `win` is a floating window.
 local function is_float(win)
   return win ~= nil and vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_config(win).relative ~= ''
 end
@@ -28,7 +28,7 @@ local function outline_color(win)
 end
 
 --- `win`'s background, as Neovim picks it: a floating window's `NormalFloat`, or an external one's `Normal`, or what
---- its 'winhighlight' maps them to, from its highlight namespace if it has one; `nil` for the default background
+--- its 'winhighlight' maps them to, from its highlight namespace if it has one; `nil` for the default background.
 local function background(win, external)
   local map = {}
   for _, item in ipairs(vim.split(vim.wo[win].winhighlight, ',', { trimempty = true })) do
@@ -53,7 +53,7 @@ local function background(win, external)
   return color(external and 'Normal' or 'NormalFloat')
 end
 
---- What's sent about `win`, if it's a floating or external window
+--- What's sent about `win`, if it's a floating or external window.
 local function facts(win)
   local config = vim.api.nvim_win_get_config(win)
   if config.relative == '' and not config.external then
@@ -102,7 +102,7 @@ function M.send(win)
   end
 end
 
---- Sends every floating window again, after the settings changed, with `outline_highlight` their outline's group
+--- Sends every floating window again, after the settings changed, with `outline_highlight` their outline's group.
 function M.resend(outline_highlight)
   highlight = outline_highlight
   sent = {}
@@ -130,7 +130,7 @@ vim.api.nvim_create_autocmd({ 'OptionSet', 'TabEnter' }, {
   end,
 })
 
--- So Sarthi forgets what the window functions kept about a window that closed
+-- So Sarthi forgets what the window functions kept about a window that closed.
 vim.api.nvim_create_autocmd('WinClosed', {
   group = vim.api.nvim_create_augroup('sarthi.api', {}),
   callback = function(args)

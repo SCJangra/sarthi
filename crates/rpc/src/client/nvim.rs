@@ -1,4 +1,4 @@
-//! Neovim: its process and the API functions sarthi calls
+//! Neovim: its process and the API functions sarthi calls.
 
 use std::ffi::{OsStr, OsString};
 use std::ops::Deref;
@@ -20,9 +20,9 @@ use crate::{
 /// while it writes ShaDa leaves a temporary file behind.
 const EXIT_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Neovim, running embedded, and the API functions sarthi calls
+/// Neovim, running embedded, and the API functions sarthi calls.
 pub struct Nvim {
-	/// What calls it, here and on other threads
+	/// What calls it, here and on other threads.
 	handle: NvimHandle,
 
 	// Fields drop in order: dropping `rpc` closes Neovim's input, which makes it exit, and then
@@ -50,14 +50,14 @@ impl Nvim {
 		Self::spawn(program, args, env)
 	}
 
-	/// Starts Neovim, `program`, with `args`, which must include `--embed`
+	/// Starts Neovim, `program`, with `args`, which must include `--embed`.
 	fn spawn<'a>(
 		program: &OsStr,
 		args: impl IntoIterator<Item = &'a OsStr>,
 		env: Option<&[(OsString, OsString)]>,
 	) -> Result<(Self, Receiver<Message>), Error> {
 		let mut command = process::Command::new(program);
-		// Only what's given, e.g. the login shell's
+		// Only what's given, e.g. the login shell's.
 		if let Some(env) = env {
 			command.env_clear().envs(env.iter().map(|(name, value)| (name, value)));
 		}
@@ -83,7 +83,7 @@ impl Nvim {
 	}
 }
 
-/// Calls through the handle, here on the thread that owns Neovim
+/// Calls through the handle, here on the thread that owns Neovim.
 impl Deref for Nvim {
 	type Target = NvimHandle;
 
@@ -92,7 +92,7 @@ impl Deref for Nvim {
 	}
 }
 
-/// The API functions sarthi calls, from any thread (see [`Nvim::handle`])
+/// The API functions sarthi calls, from any thread (see [`Nvim::handle`]).
 #[derive(Clone)]
 pub struct NvimHandle {
 	rpc: RpcHandle,

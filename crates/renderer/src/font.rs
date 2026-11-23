@@ -1,5 +1,5 @@
 //! The fonts text is drawn with: the bundled and system families of `guifont`, their faces and metrics, the size of a
-//! cell, and which face draws each character
+//! cell, and which face draws each character.
 
 use std::sync::Arc;
 
@@ -20,33 +20,33 @@ const FACES: [&[u8]; 2] = [
 	include_bytes!("../assets/fonts/JetBrainsMono-Italic[wght].ttf"),
 ];
 
-/// Most families a set of fonts can name
+/// Most families a set of fonts can name.
 const MAX_FAMILIES: usize = 32;
 
-/// Size of a grid cell, in physical pixels
+/// Size of a grid cell, in physical pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellSize {
-	/// Width, in physical pixels
+	/// Width, in physical pixels.
 	pub width: u32,
-	/// Height, in physical pixels: the font's line height plus the line space
+	/// Height, in physical pixels: the font's line height plus the line space.
 	pub height: u32,
 }
 
-/// How large text and its underlines are drawn, in physical pixels
+/// How large text and its underlines are drawn, in physical pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextSize {
-	/// Size of the font, in physical pixels
+	/// Size of the font, in physical pixels.
 	pub font_size: f32,
 
-	/// Added to the height of each row, or taken from it if negative (Neovim's `linespace`)
+	/// Added to the height of each row, or taken from it if negative (Neovim's `linespace`).
 	pub line_space: i32,
 
-	/// How thick underlines are, and where they go
+	/// How thick underlines are, and where they go.
 	pub underlines: UnderlineSize,
 }
 
 impl TextSize {
-	/// Text of `font_size` pixels, without line space, with underlines as the font has them
+	/// Text of `font_size` pixels, without line space, with underlines as the font has them.
 	pub fn new(font_size: f32) -> Self {
 		Self { font_size, line_space: 0, underlines: UnderlineSize::default() }
 	}
@@ -55,13 +55,13 @@ impl TextSize {
 /// How underlines are drawn, in pixels, as adjustments to what the font says. The default follows the font.
 #[derive(Debug, Clone, Copy, PartialEq, SmartDefault)]
 pub struct UnderlineSize {
-	/// Moves underlines down from the font's position, or up if negative
+	/// Moves underlines down from the font's position, or up if negative.
 	pub offset: f32,
 
-	/// Replaces the font's thickness of every line: underlines, overlines and strikethroughs
+	/// Replaces the font's thickness of every line: underlines, overlines and strikethroughs.
 	pub thickness: Option<f32>,
 
-	/// Height of an undercurl's wave, in line thicknesses
+	/// Height of an undercurl's wave, in line thicknesses.
 	#[default(2.0)]
 	pub wave_height: f32,
 
@@ -71,7 +71,7 @@ pub struct UnderlineSize {
 }
 
 impl UnderlineSize {
-	/// These sizes `scale` times larger, e.g. from logical to physical pixels; the wave height is in thicknesses
+	/// These sizes `scale` times larger, e.g. from logical to physical pixels; the wave height is in thicknesses.
 	pub fn scaled(self, scale: f32) -> Self {
 		Self {
 			offset: self.offset * scale,
@@ -82,32 +82,32 @@ impl UnderlineSize {
 	}
 }
 
-/// Why fonts couldn't be chosen
+/// Why fonts couldn't be chosen.
 #[derive(Debug, thiserror::Error)]
 pub enum FontError {
-	/// None of the named fonts is installed
+	/// None of the named fonts is installed.
 	#[error("no font found of: {0}")]
 	NotFound(String),
 
-	/// The font lacks metrics to size cells by
+	/// The font lacks metrics to size cells by.
 	#[error("font {0} has no usable metrics")]
 	NoMetrics(String),
 
-	/// More families were named than a set takes
+	/// More families were named than a set takes.
 	#[error("at most {MAX_FAMILIES} fonts")]
 	TooMany,
 
-	/// More sets of fonts were chosen than [`crate::FontId`] can number
+	/// More sets of fonts were chosen than [`crate::FontId`] can number.
 	#[error("too many sets of fonts")]
 	TooManySets,
 }
 
-/// Identifies a set of fonts in [`Fonts`]: the fonts a layer's text is drawn with, at their size
+/// Identifies a set of fonts in [`Fonts`]: the fonts a layer's text is drawn with, at their size.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct FontId(u16);
 
 impl FontId {
-	/// The fonts `guifont` chooses, which Neovim's grids are drawn with
+	/// The fonts `guifont` chooses, which Neovim's grids are drawn with.
 	pub const MAIN: Self = Self(0);
 }
 
@@ -118,43 +118,43 @@ impl FontId {
 pub struct Fonts {
 	pub(crate) system: FontSystem,
 
-	/// By [`FontId`], the main set first
+	/// By [`FontId`], the main set first.
 	sets: Vec<FontSet>,
 }
 
-/// Fonts chosen to draw text with, at a size, and what's known about them
+/// Fonts chosen to draw text with, at a size, and what's known about them.
 struct FontSet {
-	/// The families asked for, as named
+	/// The families asked for, as named.
 	families: Vec<String>,
 
-	/// The chosen fonts, in order: the set's main font first
+	/// The chosen fonts, in order: the set's main font first.
 	faces: Vec<Face>,
 
-	/// Which of `faces` have each character seen so far, as a bit per face
+	/// Which of `faces` have each character seen so far, as a bit per face.
 	coverage: FxHashMap<char, u32>,
 
-	/// Whether the main font draws each character seen so far exactly one cell wide
+	/// Whether the main font draws each character seen so far exactly one cell wide.
 	one_cell: FxHashMap<char, bool>,
 
-	/// The weight and style to lay out text in with each chosen font, by face, bold and italic (see [`Fonts::variant`])
+	/// The weight and style to lay out text in with each chosen font, by face, bold and italic (see [`Fonts::variant`]).
 	variants: FxHashMap<(Option<u8>, bool, bool), (Weight, Style)>,
 
-	/// Metrics of the main font at a font size of 1 pixel
+	/// Metrics of the main font at a font size of 1 pixel.
 	em: EmMetrics,
 
 	size: TextSize,
 
-	/// Changes whenever the fonts or their size do, so text laid out with the old ones is laid out again
+	/// Changes whenever the fonts or their size do, so text laid out with the old ones is laid out again.
 	generation: u32,
 }
 
-/// A chosen font: the regular face of a family
+/// A chosen font: the regular face of a family.
 struct Face {
-	/// The family's name as the font spells it
+	/// The family's name as the font spells it.
 	family: String,
 	font: Arc<Font>,
 
-	/// Index of the face in its font file
+	/// Index of the face in its font file.
 	index: u32,
 }
 
@@ -163,7 +163,7 @@ impl Face {
 		FontRef::from_index(self.font.data(), self.index).is_ok_and(|font| font.charmap().map(c).is_some())
 	}
 
-	/// The advance of `c`'s glyph at a font size of 1 pixel, if the font has it
+	/// The advance of `c`'s glyph at a font size of 1 pixel, if the font has it.
 	fn advance(&self, c: char) -> Option<f32> {
 		let font = FontRef::from_index(self.font.data(), self.index).ok()?;
 		let glyph = font.charmap().map(c)?;
@@ -222,7 +222,7 @@ impl Fonts {
 		Ok(FontId(id))
 	}
 
-	/// Draws text of set `font` at `size` from now on
+	/// Draws text of set `font` at `size` from now on.
 	pub fn set_size(&mut self, font: FontId, size: TextSize) {
 		let set = self.set_mut(font);
 		if set.size != size {
@@ -231,7 +231,7 @@ impl Fonts {
 		}
 	}
 
-	/// How large set `font`'s text is drawn
+	/// How large set `font`'s text is drawn.
 	pub fn text_size(&self, font: FontId) -> TextSize {
 		self.set(font).size
 	}
@@ -243,17 +243,17 @@ impl Fonts {
 		self.set(font).cell_size()
 	}
 
-	/// Where underlines and strikethroughs go in a cell of set `font`'s text
+	/// Where underlines and strikethroughs go in a cell of set `font`'s text.
 	pub(crate) fn line_metrics(&self, font: FontId) -> LineMetrics {
 		self.set(font).line_metrics()
 	}
 
-	/// Changes whenever set `font`'s fonts or size do, so text laid out with the old ones is laid out again
+	/// Changes whenever set `font`'s fonts or size do, so text laid out with the old ones is laid out again.
 	pub(crate) fn generation(&self, font: FontId) -> u32 {
 		self.set(font).generation
 	}
 
-	/// Where `text`, one cell's characters, goes when a row of set `font`'s text is laid out (see [`FontSet::run_of`])
+	/// Where `text`, one cell's characters, goes when a row of set `font`'s text is laid out (see [`FontSet::run_of`]).
 	pub(crate) fn run_of(&mut self, font: FontId, text: &str) -> Run {
 		self.set_mut(font).run_of(text)
 	}
@@ -287,13 +287,13 @@ impl Fonts {
 	}
 
 	/// The family of chosen font `face` of set `font` (see [`FontSet::face_of`]), or of its main font for `None`, which
-	/// the system's fonts stand in for where it lacks characters
+	/// the system's fonts stand in for where it lacks characters.
 	pub(crate) fn family(&self, font: FontId, face: Option<u8>) -> &str {
 		let faces = &self.set(font).faces;
 		&faces[usize::from(face.unwrap_or(0)).min(faces.len() - 1)].family
 	}
 
-	/// Set `font`, or the main set if there's no such set
+	/// Set `font`, or the main set if there's no such set.
 	fn set(&self, font: FontId) -> &FontSet {
 		self.sets.get(usize::from(font.0)).unwrap_or(&self.sets[0])
 	}
@@ -324,7 +324,7 @@ impl FontSet {
 		}
 	}
 
-	/// See [`Fonts::cell_size`]
+	/// See [`Fonts::cell_size`].
 	fn cell_size(&self) -> CellSize {
 		let size = self.size;
 		let font_height = (self.em.cell_height * size.font_size).ceil() as i64;
@@ -341,13 +341,13 @@ impl FontSet {
 		(cell_height - (self.em.ascent + self.em.descent) * font_size) / 2.0 + self.em.ascent * font_size
 	}
 
-	/// See [`Fonts::line_metrics`]
+	/// See [`Fonts::line_metrics`].
 	fn line_metrics(&self) -> LineMetrics {
 		let em = &self.em;
 		let (cell_height, font_size) = (self.cell_size().height as f32, self.size.font_size);
 		let baseline = self.baseline();
 
-		// Whole pixels, so lines are sharp, and inside the cell
+		// Whole pixels, so lines are sharp, and inside the cell.
 		let line = |top: f32, thickness: f32| {
 			let thickness = thickness.round().clamp(1.0, cell_height);
 			(top.round().clamp(0.0, cell_height - thickness), thickness)
@@ -404,7 +404,7 @@ impl FontSet {
 		}
 	}
 
-	/// Whether the main font draws `text` exactly one cell wide: its first character, which combining ones follow
+	/// Whether the main font draws `text` exactly one cell wide: its first character, which combining ones follow.
 	fn one_cell(&mut self, text: &str) -> bool {
 		let Some(c) = text.chars().next() else { return true };
 		let (main, cell_width) = (&self.faces[0], self.em.cell_width);
@@ -415,7 +415,7 @@ impl FontSet {
 	}
 }
 
-/// The fonts of `families`, and the metrics of the first, which draws text: see [`Fonts::choose`]
+/// The fonts of `families`, and the metrics of the first, which draws text: see [`Fonts::choose`].
 fn resolve(system: &mut FontSystem, families: &[String]) -> Result<(Vec<Face>, EmMetrics), FontError> {
 	if families.len() > MAX_FAMILIES {
 		return Err(FontError::TooMany);
@@ -435,23 +435,23 @@ fn resolve(system: &mut FontSystem, families: &[String]) -> Result<(Vec<Face>, E
 }
 
 impl Face {
-	/// Metrics at a font size of 1 pixel
+	/// Metrics at a font size of 1 pixel.
 	fn metrics(&self) -> Option<EmMetrics> {
 		EmMetrics::measure(&FontRef::from_index(self.font.data(), self.index).ok()?)
 	}
 }
 
-/// Where a cell's text goes when a row is laid out (see [`FontSet::run_of`])
+/// Where a cell's text goes when a row is laid out (see [`FontSet::run_of`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Run {
-	/// Into a run of the main font's text
+	/// Into a run of the main font's text.
 	Main,
 
-	/// Into a run of its own, drawn with chosen font `face`, or the system's fonts for `None`
+	/// Into a run of its own, drawn with chosen font `face`, or the system's fonts for `None`.
 	Alone(Option<u8>),
 }
 
-/// The regular face of `family`, whose name may differ in case from the font's
+/// The regular face of `family`, whose name may differ in case from the font's.
 fn find(system: &mut FontSystem, family: &str) -> Option<Face> {
 	let db = system.db();
 	let name = db
@@ -474,18 +474,18 @@ impl Default for Fonts {
 	}
 }
 
-/// Where underlines and strikethroughs go in a cell, in pixels from its top
+/// Where underlines and strikethroughs go in a cell, in pixels from its top.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct LineMetrics {
 	pub underline_top: f32,
 
-	/// Thickness of underlines and overlines
+	/// Thickness of underlines and overlines.
 	pub thickness: f32,
 
-	/// Height of an undercurl's wave, centered on the underline
+	/// Height of an undercurl's wave, centered on the underline.
 	pub wave_height: f32,
 
-	/// Space kept between underlines and the text's ink, if they break around it (see [`UnderlineSize::ink_gaps`])
+	/// Space kept between underlines and the text's ink, if they break around it (see [`UnderlineSize::ink_gaps`]).
 	pub ink_gaps: Option<f32>,
 
 	pub strikeout_top: f32,
@@ -496,18 +496,18 @@ pub(crate) struct LineMetrics {
 /// weight). Distances from the baseline are positive upwards.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct EmMetrics {
-	/// Advance of `M`
+	/// Advance of `M`.
 	cell_width: f32,
 
-	/// Ascent, descent and line gap
+	/// Ascent, descent and line gap.
 	cell_height: f32,
 
 	ascent: f32,
 
-	/// Below the baseline, as a positive distance
+	/// Below the baseline, as a positive distance.
 	descent: f32,
 
-	/// Offset of the top edge from the baseline, and thickness
+	/// Offset of the top edge from the baseline, and thickness.
 	underline: (f32, f32),
 	strikeout: (f32, f32),
 }
@@ -542,12 +542,12 @@ mod tests {
 
 	const MAIN: FontId = FontId::MAIN;
 
-	/// The main set
+	/// The main set.
 	fn main(fonts: &mut Fonts) -> &mut FontSet {
 		fonts.set_mut(MAIN)
 	}
 
-	/// Fonts whose main set is at `size`
+	/// Fonts whose main set is at `size`.
 	fn sized(size: TextSize) -> Fonts {
 		let mut fonts = Fonts::new();
 		fonts.set_size(MAIN, size);
@@ -567,7 +567,7 @@ mod tests {
 	#[test]
 	fn line_metrics() {
 		let mut fonts = Fonts::new();
-		// JetBrains Mono: underline 155 units below the baseline, strikeout 320 above, both 50 thick
+		// JetBrains Mono: underline 155 units below the baseline, strikeout 320 above, both 50 thick.
 		let em = main(&mut fonts).em;
 		assert_eq!((em.underline, em.strikeout), ((-0.155, 0.05), (0.32, 0.05)));
 
@@ -682,7 +682,7 @@ mod tests {
 			return;
 		}
 
-		// Measured from DejaVu Sans Mono: 1233 of 2048 units wide
+		// Measured from DejaVu Sans Mono: 1233 of 2048 units wide.
 		assert_eq!(fonts.cell_size(MAIN).width, 8);
 		assert!((main(&mut fonts).em.cell_width - 1233.0 / 2048.0).abs() < 1e-6);
 		assert_eq!(fonts.family(MAIN, Some(0)), "DejaVu Sans Mono");

@@ -1,9 +1,9 @@
-//! How many cells fit in the window
+//! How many cells fit in the window.
 
 use renderer::CellSize;
 use winit::dpi::PhysicalSize;
 
-/// Dimensions of a grid, in cells
+/// Dimensions of a grid, in cells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridSize {
 	pub width: u32,

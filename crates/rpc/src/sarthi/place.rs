@@ -1,4 +1,4 @@
-//! Where an external window goes, as `require('sarthi').api` takes it in `sarthi.place`
+//! Where an external window goes, as `require('sarthi').api` takes it in `sarthi.place`.
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -19,67 +19,67 @@ use crate::sarthi::notifications::optional_window_number;
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(default, deny_unknown_fields)]
 pub struct WindowPlace {
-	/// Centered over the screen
+	/// Centered over the screen.
 	pub center: Option<bool>,
-	/// What `row` and `col` count from
+	/// What `row` and `col` count from.
 	pub relative: Option<PlaceRelative>,
 
-	/// The window it's relative to, for `relative = 'win'`; the current window if left out, like for floats
+	/// The window it's relative to, for `relative = 'win'`; the current window if left out, like for floats.
 	#[serde(deserialize_with = "optional_window_number")]
 	pub win: Option<Window>,
 
-	/// The corner at `row`, `col`
+	/// The corner at `row`, `col`.
 	pub anchor: Option<PlaceAnchor>,
-	/// Rows from what it's relative to
+	/// Rows from what it's relative to.
 	pub row: Option<f64>,
-	/// Columns from what it's relative to
+	/// Columns from what it's relative to.
 	pub col: Option<f64>,
 
-	/// Moves it further, in logical pixels, e.g. past another window's padding: `{ x = …, y = … }`
+	/// Moves it further, in logical pixels, e.g. past another window's padding: `{ x = …, y = … }`.
 	pub offset: Option<PlaceOffset>,
 
-	/// Not moved sideways to stay on the screen, unless anchored on the right, like a float's `fixed`
+	/// Not moved sideways to stay on the screen, unless anchored on the right, like a float's `fixed`.
 	pub fixed: Option<bool>,
 }
 
-/// `sarthi.place.offset`, right and down in logical pixels, or left and up if negative; either left out is 0
+/// `sarthi.place.offset`, right and down in logical pixels, or left and up if negative; either left out is 0.
 #[derive(Debug, Default, Clone, Copy, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(default, deny_unknown_fields)]
 pub struct PlaceOffset {
-	/// Right, or left if negative
+	/// Right, or left if negative.
 	pub x: f64,
-	/// Down, or up if negative
+	/// Down, or up if negative.
 	pub y: f64,
 }
 
-/// What a window's `row` and `col` count from, named like a float's `relative`
+/// What a window's `row` and `col` count from, named like a float's `relative`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[schemars(inline)]
 pub enum PlaceRelative {
-	/// The screen's top-left corner
+	/// The screen's top-left corner.
 	Editor,
-	/// Window `win`'s text
+	/// Window `win`'s text.
 	Win,
-	/// The cursor
+	/// The cursor.
 	Cursor,
 }
 
-/// Which corner is at `row`, `col`, named like Neovim's `anchor`
+/// Which corner is at `row`, `col`, named like Neovim's `anchor`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[schemars(inline)]
 pub enum PlaceAnchor {
-	/// The top-left corner
+	/// The top-left corner.
 	#[serde(rename = "NW")]
 	NorthWest,
-	/// The top-right corner
+	/// The top-right corner.
 	#[serde(rename = "NE")]
 	NorthEast,
-	/// The bottom-left corner
+	/// The bottom-left corner.
 	#[serde(rename = "SW")]
 	SouthWest,
-	/// The bottom-right corner
+	/// The bottom-right corner.
 	#[serde(rename = "SE")]
 	SouthEast,
 }
@@ -92,7 +92,7 @@ mod tests {
 	use crate::Window;
 
 	fn decode(fields: Vec<(&str, Value)>) -> Result<WindowPlace, String> {
-		// From msgpack, like Neovim sends it
+		// From msgpack, like Neovim sends it.
 		let map = Value::Map(fields.into_iter().map(|(key, value)| (Value::from(key), value)).collect());
 		rmp_serde::from_slice(&rmp_serde::to_vec(&map).unwrap()).map_err(|error| error.to_string())
 	}
@@ -120,7 +120,7 @@ mod tests {
 		};
 		assert_eq!(relative, expected);
 
-		// An offset, either side left out
+		// An offset, either side left out.
 		let offset = Value::Map(vec![(Value::from("y"), Value::from(16))]);
 		let place = decode(vec![("relative", Value::from("editor")), ("offset", offset)]).unwrap();
 		assert_eq!(place.offset, Some(PlaceOffset { x: 0.0, y: 16.0 }));

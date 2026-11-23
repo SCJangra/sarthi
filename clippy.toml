@@ -1,2 +1,2 @@
-# Names in docs that are words, not code
+# Names in docs that are words, not code.
 doc-valid-idents = ["JetBrains", "ShaDa", "KWin", "IBus", "MessagePack", "NumLock", "LuaCATS", ".."]

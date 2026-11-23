@@ -1,4 +1,4 @@
-//! Splitting the msgpack stream from Neovim into whole messages before decoding them
+//! Splitting the msgpack stream from Neovim into whole messages before decoding them.
 
 use std::io;
 
@@ -17,10 +17,10 @@ pub(crate) struct FrameReader<R> {
 	/// Read buffer. Its length is its usable size; only `buf[start..end]` holds unread data.
 	buf: Vec<u8>,
 
-	/// Start of the bytes that haven't been returned as a frame yet
+	/// Start of the bytes that haven't been returned as a frame yet.
 	start: usize,
 
-	/// End of the bytes read so far
+	/// End of the bytes read so far.
 	end: usize,
 }
 
@@ -82,16 +82,16 @@ where
 
 /// How a msgpack value continues after its marker byte.
 enum Shape {
-	/// `n` more bytes of data
+	/// `n` more bytes of data.
 	Data(usize),
 
-	/// `n` nested values
+	/// `n` nested values.
 	Items(u64),
 
-	/// A big-endian length of `len_size` bytes, followed by `len + extra` bytes of data
+	/// A big-endian length of `len_size` bytes, followed by `len + extra` bytes of data.
 	SizedData { len_size: usize, extra: usize },
 
-	/// A big-endian length of `len_size` bytes, followed by `len * per_len` nested values
+	/// A big-endian length of `len_size` bytes, followed by `len * per_len` nested values.
 	SizedItems { len_size: usize, per_len: u64 },
 }
 
@@ -182,11 +182,11 @@ mod tests {
 
 	#[test]
 	fn frame_len_containers() {
-		// [1, "a", {2: [3]}]
+		// [1, "a", {2: [3]}].
 		let bytes = [0x93, 0x01, 0xA1, b'a', 0x81, 0x02, 0x91, 0x03];
 		assert_eq!(frame_len(&bytes).unwrap(), Some(bytes.len()));
 
-		// array16 with two elements
+		// array16 with two elements.
 		assert_eq!(frame_len(&[0xDC, 0x00, 0x02, 0x01, 0x02]).unwrap(), Some(5));
 	}
 
@@ -239,7 +239,7 @@ mod tests {
 
 	#[test]
 	fn reader_grows_for_large_frame() {
-		// str32 longer than the initial buffer, followed by a small frame
+		// str32 longer than the initial buffer, followed by a small frame.
 		let len = READ_CHUNK * 3 / 2;
 		let mut stream = vec![0xDB];
 		stream.extend_from_slice(&(len as u32).to_be_bytes());

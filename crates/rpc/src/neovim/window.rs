@@ -1,4 +1,4 @@
-//! A Neovim window's handle, as Neovim sends it
+//! A Neovim window's handle, as Neovim sends it.
 
 use std::fmt;
 
@@ -10,13 +10,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Window(pub i64);
 
-/// Neovim's extension type for window handles (`nvim_get_api_info()`'s `types`)
+/// Neovim's extension type for window handles (`nvim_get_api_info()`'s `types`).
 const WINDOW_EXT: i8 = 1;
 
-/// The name `rmp_serde` and `rmpv` decode msgpack extensions through, as `(type, bytes)`
+/// The name `rmp_serde` and `rmpv` decode msgpack extensions through, as `(type, bytes)`.
 const EXT_STRUCT: &str = "_ExtStruct";
 
-/// A number, as Lua passes a window
+/// A number, as Lua passes a window.
 impl schemars::JsonSchema for Window {
 	fn schema_name() -> std::borrow::Cow<'static, str> {
 		"Window".into()
@@ -27,7 +27,7 @@ impl schemars::JsonSchema for Window {
 	}
 }
 
-/// As a number, which Neovim's API functions take for a window too
+/// As a number, which Neovim's API functions take for a window too.
 impl Serialize for Window {
 	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
 		serializer.serialize_i64(self.0)
@@ -49,12 +49,12 @@ impl<'de> Visitor<'de> for WindowVisitor {
 		formatter.write_str("a window handle")
 	}
 
-	/// What the decoders wrap an extension in
+	/// What the decoders wrap an extension in.
 	fn visit_newtype_struct<D: Deserializer<'de>>(self, deserializer: D) -> Result<Window, D::Error> {
 		deserializer.deserialize_any(self)
 	}
 
-	/// An extension: its type, then the handle encoded as msgpack
+	/// An extension: its type, then the handle encoded as msgpack.
 	fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Window, A::Error> {
 		let ext: i8 = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(0, &self))?;
 		let Bytes(bytes) = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(1, &self))?;
@@ -67,7 +67,7 @@ impl<'de> Visitor<'de> for WindowVisitor {
 	}
 }
 
-/// An extension's bytes, which the decoders hand over as bytes rather than as a sequence
+/// An extension's bytes, which the decoders hand over as bytes rather than as a sequence.
 struct Bytes(Vec<u8>);
 
 impl<'de> Deserialize<'de> for Bytes {
@@ -109,7 +109,7 @@ mod tests {
 
 	#[test]
 	fn from_neovim() {
-		// Extension type 1 around 1000, encoded as a uint16
+		// Extension type 1 around 1000, encoded as a uint16.
 		let (rmp, rmpv) = decode(Value::Ext(1, vec![0xCD, 0x03, 0xE8]));
 		assert_eq!((rmp, rmpv), (Ok(Window(1000)), Ok(Window(1000))));
 

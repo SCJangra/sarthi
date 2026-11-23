@@ -6,27 +6,27 @@ use std::time::{Duration, Instant};
 use crate::animation::{Approach, Easing, Motion};
 use crate::{BarOrientation, Cursor, CursorShape, Layer, Rect};
 
-/// How the cursor makes a move to a new place
+/// How the cursor makes a move to a new place.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CursorMotion {
-	/// How its corners move there
+	/// How its corners move there.
 	pub motion: Motion,
 
 	/// How much the trailing corners lag behind the leading ones: from 0, where the cursor moves as it is, to 1, where
-	/// the leading corners are there at once
+	/// the leading corners are there at once.
 	pub trail: f32,
 }
 
 /// Below this share of a motion's time, a corner is at its place at once.
 const INSTANT: f32 = 0.01;
 
-/// The motion of a corner at rest: any, as it has no way to go
+/// The motion of a corner at rest: any, as it has no way to go.
 const AT_REST: Motion = Motion::Ease { easing: Easing::Linear, duration: Duration::ZERO };
 
-/// The cursor's corners on their way to where the cursor is
+/// The cursor's corners on their way to where the cursor is.
 #[derive(Default)]
 pub(crate) struct CursorAnimation {
-	/// Top-left, top-right, bottom-right and bottom-left; none before the first cursor
+	/// Top-left, top-right, bottom-right and bottom-left; none before the first cursor.
 	corners: Option<[Corner; 4]>,
 }
 
@@ -36,13 +36,13 @@ struct Corner {
 	/// move between layers with cells of different sizes.
 	target: [f32; 2],
 
-	/// How far it still is from there, in pixels, each moving towards 0
+	/// How far it still is from there, in pixels, each moving towards 0.
 	offset: [Approach; 2],
 }
 
 impl CursorAnimation {
 	/// Moves the cursor to `rect`, in pixels, at `now`: as `motion` says, or at once without one or for the first
-	/// cursor
+	/// cursor.
 	pub(crate) fn update(&mut self, rect: Rect<f32>, motion: Option<CursorMotion>, now: Instant) {
 		let targets = corners_of(rect);
 		let at_rest = |target: [f32; 2]| Corner { target, offset: [Approach::new(AT_REST, now); 2] };
@@ -72,13 +72,13 @@ impl CursorAnimation {
 		}
 	}
 
-	/// Where the corners are at `now`, in pixels: top-left, top-right, bottom-right and bottom-left
+	/// Where the corners are at `now`, in pixels: top-left, top-right, bottom-right and bottom-left.
 	pub(crate) fn corners(&self, now: Instant) -> Option<[[f32; 2]; 4]> {
 		let corners = self.corners.as_ref()?;
 		Some(corners.map(|corner| [0, 1].map(|axis| corner.target[axis] + corner.offset[axis].value(now))))
 	}
 
-	/// Whether the cursor is still on its way at `now`
+	/// Whether the cursor is still on its way at `now`.
 	pub(crate) fn is_animating(&self, now: Instant) -> bool {
 		let corners = self.corners.iter().flatten();
 		corners.flat_map(|corner| &corner.offset).any(|offset| offset.value(now) != 0.0)
@@ -91,7 +91,7 @@ pub(crate) fn cursor_rect(layer: &Layer, cursor: Cursor) -> Rect<f32> {
 	let cell = layer.cell;
 	let (left, top) = (layer.x + cursor.col * cell.width, layer.y + cursor.row * cell.height);
 	let width = cursor.width * cell.width;
-	// Like `cursor_quad`
+	// Like `cursor_quad`.
 	let thickness = |size: u32, percentage: u32| (size * percentage).div_ceil(100).clamp(1, size);
 	let rect = match cursor.shape {
 		CursorShape::Block | CursorShape::Outline => Rect::new(left, top, width, cell.height),
@@ -106,7 +106,7 @@ pub(crate) fn cursor_rect(layer: &Layer, cursor: Cursor) -> Rect<f32> {
 	rect.to_f32()
 }
 
-/// The corners of `rect`: top-left, top-right, bottom-right and bottom-left
+/// The corners of `rect`: top-left, top-right, bottom-right and bottom-left.
 fn corners_of(rect: Rect<f32>) -> [[f32; 2]; 4] {
 	let (left, top, right, bottom) = (rect.x, rect.y, rect.right(), rect.bottom());
 	[[left, top], [right, top], [right, bottom], [left, bottom]]
@@ -119,7 +119,7 @@ fn center(corners: &[[f32; 2]; 4]) -> [f32; 2] {
 /// How long each corner takes, as a share of the motion's time, on a move of `travel` pixels: 1 for the corner most
 /// behind, `1 - trail` for the one most ahead, in between for the others by how much they face the way.
 fn lead(travel: [f32; 2], trail: f32) -> [f32; 4] {
-	// Each corner's direction from the cursor's center
+	// Each corner's direction from the cursor's center.
 	const DIRECTIONS: [[f32; 2]; 4] = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
 	let ahead = DIRECTIONS.map(|[x, y]| x * travel[0] + y * travel[1]);
 	let (least, most) = ahead
@@ -149,7 +149,7 @@ mod tests {
 		Some(CursorMotion { motion: linear(100), trail })
 	}
 
-	/// A block cursor of a one-pixel cell
+	/// A block cursor of a one-pixel cell.
 	fn block(col: f32, row: f32) -> crate::Rect<f32> {
 		crate::Rect::new(col, row, 1.0, 1.0)
 	}
@@ -214,7 +214,7 @@ mod tests {
 		cursor.update(block(10.0, 0.0), moving, now);
 		let halfway = now + Duration::from_millis(50);
 		cursor.update(block(10.0, 4.0), moving, halfway);
-		// No jump: still halfway along the row, and only starting down
+		// No jump: still halfway along the row, and only starting down.
 		let corners = cursor.corners(halfway).unwrap();
 		assert!(close(corners, [[5.0, 0.0], [6.0, 0.0], [6.0, 1.0], [5.0, 1.0]]), "{corners:?}");
 	}
@@ -231,7 +231,7 @@ mod tests {
 
 	#[test]
 	fn a_held_key_keeps_the_cursor_going_one_way() {
-		// `j` held down: a row every 30 ms, faster than the spring settles
+		// `j` held down: a row every 30 ms, faster than the spring settles.
 		let spring = Some(CursorMotion { motion: Motion::Spring { stiffness: 700.0, damping: 53.0 }, trail: 1.0 });
 		let (start, mut cursor) = (Instant::now(), CursorAnimation::default());
 		let mut last = f32::NEG_INFINITY;
@@ -249,7 +249,7 @@ mod tests {
 
 	#[test]
 	fn cursor_rects() {
-		// At row 1, column 2 of the window's cells
+		// At row 1, column 2 of the window's cells.
 		let layer = Layer {
 			id: 1,
 			x: 20,

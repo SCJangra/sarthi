@@ -1,22 +1,22 @@
-//! Reading the JSON schemas `schemars` makes of the settings and the API: names, docs, Lua types and Lua values
+//! Reading the JSON schemas `schemars` makes of the settings and the API: names, docs, Lua types and Lua values.
 
 use serde_json::{Map, Value};
 
-/// A schema and the definitions its `$ref`s point into
+/// A schema and the definitions its `$ref`s point into.
 pub struct Schema {
 	pub root: Value,
 	defs: Map<String, Value>,
 }
 
 impl Schema {
-	/// The schema of `T`
+	/// The schema of `T`.
 	pub fn of<T: schemars::JsonSchema>() -> Self {
 		let root = schemars::schema_for!(T).to_value();
 		let defs = root.get("$defs").and_then(Value::as_object).cloned().unwrap_or_default();
 		Self { root, defs }
 	}
 
-	/// `schema` itself, or the definition it refers to
+	/// `schema` itself, or the definition it refers to.
 	pub fn resolve<'a>(&'a self, schema: &'a Value) -> &'a Value {
 		match schema.get("$ref").and_then(Value::as_str) {
 			Some(reference) => self.def(name_of(reference)),
@@ -24,23 +24,23 @@ impl Schema {
 		}
 	}
 
-	/// The definition named `name`
+	/// The definition named `name`.
 	pub fn def(&self, name: &str) -> &Value {
 		self.defs.get(name).unwrap_or_else(|| panic!("no definition of {name}"))
 	}
 
-	/// The definitions, by name
+	/// The definitions, by name.
 	pub fn defs(&self) -> impl Iterator<Item = (&String, &Value)> {
 		self.defs.iter()
 	}
 }
 
-/// The name a `$ref` points to, e.g. `ScrollSettings` for `#/$defs/ScrollSettings`
+/// The name a `$ref` points to, e.g. `ScrollSettings` for `#/$defs/ScrollSettings`.
 pub fn name_of(reference: &str) -> &str {
 	reference.rsplit('/').next().unwrap_or(reference)
 }
 
-/// The properties of an object schema, in order, as (name, schema)
+/// The properties of an object schema, in order, as (name, schema).
 pub fn properties(schema: &Value) -> Vec<(&str, &Value)> {
 	schema
 		.get("properties")
@@ -49,7 +49,7 @@ pub fn properties(schema: &Value) -> Vec<(&str, &Value)> {
 		.unwrap_or_default()
 }
 
-/// Whether property `name` of an object schema must be given
+/// Whether property `name` of an object schema must be given.
 pub fn required(schema: &Value, name: &str) -> bool {
 	schema
 		.get("required")
@@ -57,7 +57,7 @@ pub fn required(schema: &Value, name: &str) -> bool {
 		.is_some_and(|required| required.iter().any(|value| value.as_str() == Some(name)))
 }
 
-/// The doc comment of a schema, as Markdown: its paragraphs' lines joined, the paragraphs kept apart
+/// The doc comment of a schema, as Markdown: its paragraphs' lines joined, the paragraphs kept apart.
 pub fn doc(schema: &Value) -> String {
 	let text = schema.get("description").and_then(Value::as_str).unwrap_or_default();
 	text.split("\n\n")
@@ -66,7 +66,7 @@ pub fn doc(schema: &Value) -> String {
 		.join("\n\n")
 }
 
-/// The Lua type of a value of `schema`, as LuaCATS writes it, e.g. `number|false` or `sarthi.WindowPlace`
+/// The Lua type of a value of `schema`, as LuaCATS writes it, e.g. `number|false` or `sarthi.WindowPlace`.
 pub fn lua_type(schema: &Value) -> String {
 	if let Some(lua) = schema.get("x-lua-type").and_then(Value::as_str) {
 		return lua.to_owned();
@@ -112,7 +112,7 @@ pub fn lua_type(schema: &Value) -> String {
 }
 
 /// The Lua type of definition `name`: its own type for the handles and lists, which are numbers and strings, and a
-/// class of `sarthi` for the tables
+/// class of `sarthi` for the tables.
 fn named_type(name: &str) -> String {
 	match name {
 		"Window" | "Buffer" => String::from("integer"),
@@ -120,7 +120,7 @@ fn named_type(name: &str) -> String {
 	}
 }
 
-/// `value` as a Lua literal, e.g. `{ type = "spring", stiffness = 400 }`
+/// `value` as a Lua literal, e.g. `{ type = "spring", stiffness = 400 }`.
 pub fn lua_value(value: &Value) -> String {
 	match value {
 		Value::Null => String::from("nil"),

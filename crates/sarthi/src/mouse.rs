@@ -8,25 +8,25 @@ use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, MouseButton as WinitButton, MouseScrollDelta};
 use winit::keyboard::ModifiersState;
 
-/// Lines a wheel notch scrolls, the default of Neovim's `mousescroll`
+/// Lines a wheel notch scrolls, the default of Neovim's `mousescroll`.
 const LINES_PER_NOTCH: f64 = 3.0;
 
-/// What the mouse is doing over a window
+/// What the mouse is doing over a window.
 #[derive(Debug)]
 pub struct Mouse {
-	/// Lines a touchpad scrolls per row of finger movement (see [`rpc::sarthi::TouchpadSettings`])
+	/// Lines a touchpad scrolls per row of finger movement (see [`rpc::sarthi::TouchpadSettings`]).
 	touchpad_scroll: f64,
 
-	/// The pointer's position, in physical pixels from the window's top-left, while it's over the window
+	/// The pointer's position, in physical pixels from the window's top-left, while it's over the window.
 	position: Option<PhysicalPosition<f64>>,
 
-	/// The button held, and the grid it was pressed on, which gets the drags and the release
+	/// The button held, and the grid it was pressed on, which gets the drags and the release.
 	held: Option<(MouseButton, Grid)>,
 
-	/// The grid and cell of the last press, drag or move sent, so moving within a cell sends nothing
+	/// The grid and cell of the last press, drag or move sent, so moving within a cell sends nothing.
 	last: Option<(Grid, i64, i64)>,
 
-	/// Wheel turns not sent yet, in notches: across (right is positive) and down (up is positive)
+	/// Wheel turns not sent yet, in notches: across (right is positive) and down (up is positive).
 	wheel: (f64, f64),
 }
 
@@ -40,7 +40,7 @@ impl Mouse {
 	}
 
 	/// The pointer moved to `position` in the window: a drag while a button is held, otherwise a move if Neovim asks
-	/// for them
+	/// for them.
 	pub fn moved(
 		&mut self,
 		position: PhysicalPosition<f64>,
@@ -88,7 +88,7 @@ impl Mouse {
 		}
 	}
 
-	/// `button` was pressed or released: a press on the grid under the pointer, a release on the grid it was pressed on
+	/// `button` was pressed or released: a press on the grid under the pointer, a release on the grid it was pressed on.
 	pub fn button(
 		&mut self,
 		button: WinitButton,
@@ -129,7 +129,7 @@ impl Mouse {
 		}
 	}
 
-	/// The wheel turned, or a touchpad scrolled, over the grid under the pointer: a wheel event per notch
+	/// The wheel turned, or a touchpad scrolled, over the grid under the pointer: a wheel event per notch.
 	pub fn wheel(
 		&mut self,
 		delta: MouseScrollDelta,
@@ -139,7 +139,7 @@ impl Mouse {
 	) -> Vec<InputMouseParams> {
 		let (across, down) = match delta {
 			MouseScrollDelta::LineDelta(across, down) => (f64::from(across), f64::from(down)),
-			// A touchpad: rows (or columns) of movement, times the lines each scrolls, in notches
+			// A touchpad: rows (or columns) of movement, times the lines each scrolls, in notches.
 			MouseScrollDelta::PixelDelta(pixels) => {
 				let notches = self.touchpad_scroll / LINES_PER_NOTCH;
 				(pixels.x / f64::from(cell.width) * notches, pixels.y / f64::from(cell.height) * notches)
@@ -178,7 +178,7 @@ impl Mouse {
 	}
 }
 
-/// The modifiers held, as Neovim names them for mouse events: one letter each, e.g. "SC" for Shift+Ctrl
+/// The modifiers held, as Neovim names them for mouse events: one letter each, e.g. "SC" for Shift+Ctrl.
 fn notation(modifiers: ModifiersState) -> String {
 	[
 		(modifiers.shift_key(), 'S'),
@@ -208,7 +208,7 @@ mod tests {
 
 	const CELL: CellSize = CellSize { width: 8, height: 20 };
 
-	/// A 20×10 screen with window grid 2 (10×5) at row 2, col 4, and mouse input on
+	/// A 20×10 screen with window grid 2 (10×5) at row 2, col 4, and mouse input on.
 	fn editor() -> Editor {
 		let mut editor = Editor::default();
 		editor.set_cell_size(CELL);
@@ -226,7 +226,7 @@ mod tests {
 		editor
 	}
 
-	/// The middle of screen cell `row`, `col`
+	/// The middle of screen cell `row`, `col`.
 	fn at(row: f64, col: f64) -> PhysicalPosition<f64> {
 		PhysicalPosition::new((col + 0.5) * 8.0, (row + 0.5) * 20.0)
 	}
@@ -246,12 +246,12 @@ mod tests {
 		let press = mouse.button(WinitButton::Left, ElementState::Pressed, &editor, NONE);
 		assert_eq!(press, event(MouseInput::Press(left), 2, 1, 1));
 
-		// Within the same cell: nothing; into the next row: a drag, also past the window's bottom
+		// Within the same cell: nothing; into the next row: a drag, also past the window's bottom.
 		assert_eq!(mouse.moved(PhysicalPosition::new(47.0, 79.0), &editor, NONE), None);
 		assert_eq!(mouse.moved(at(4.0, 5.0), &editor, NONE), event(MouseInput::Drag(left), 2, 2, 1));
 		assert_eq!(mouse.moved(at(9.0, 2.0), &editor, NONE), event(MouseInput::Drag(left), 2, 7, -2));
 
-		// Released outside the window: still sent, where the pointer was last
+		// Released outside the window: still sent, where the pointer was last.
 		mouse.left();
 		let release = mouse.button(WinitButton::Left, ElementState::Released, &editor, NONE);
 		assert_eq!(release, event(MouseInput::Release(left), 2, 7, -2));
@@ -262,7 +262,7 @@ mod tests {
 	#[test]
 	fn an_external_window_gets_its_own_clicks() {
 		let (mut editor, mut mouse) = (editor(), Mouse::new(3.0));
-		// A 4×2 external window: 32×40 pixels, centered on the 160×200 pixel screen at (64, 80)
+		// A 4×2 external window: 32×40 pixels, centered on the 160×200 pixel screen at (64, 80).
 		let resize = RedrawNotification::GridResize(vec![GridResizeEvent { grid: Grid(4), width: 4, height: 2 }]);
 		let external =
 			RedrawNotification::WinExternalPos(vec![WinExternalPosEvent { grid: Grid(4), win: Window(1004) }]);
@@ -271,7 +271,7 @@ mod tests {
 		mouse.moved(PhysicalPosition::new(65.0, 81.0), &editor, NONE);
 		let press = mouse.button(WinitButton::Left, ElementState::Pressed, &editor, NONE);
 		assert_eq!(press, event(MouseInput::Press(MouseButton::Left), 4, 0, 0));
-		// Dragged out of it, past its top-left corner, in its own cells
+		// Dragged out of it, past its top-left corner, in its own cells.
 		let drag = mouse.moved(PhysicalPosition::new(50.0, 50.0), &editor, NONE);
 		assert_eq!(drag, event(MouseInput::Drag(MouseButton::Left), 4, -2, -2));
 	}
@@ -325,14 +325,14 @@ mod tests {
 		assert_eq!(mouse.wheel(MouseScrollDelta::LineDelta(0.0, 0.5), &editor, CELL, NONE), [up]);
 
 		// A touchpad scrolling 3 lines per row of movement: a notch per row (20 px), and content moving right reveals
-		// what's left of it
+		// what's left of it.
 		let pixels = |x, y| MouseScrollDelta::PixelDelta(PhysicalPosition::new(x, y));
 		assert_eq!(mouse.wheel(pixels(0.0, -19.0), &editor, CELL, NONE), []);
 		assert_eq!(mouse.wheel(pixels(0.0, -1.0), &editor, CELL, NONE), [down()]);
 		let left = event(MouseInput::Wheel(WheelDirection::Left), 2, 1, 1).unwrap();
 		assert_eq!(mouse.wheel(pixels(8.0, 0.0), &editor, CELL, NONE), [left]);
 
-		// At 1 line per row, the text follows the fingers: a notch per three rows
+		// At 1 line per row, the text follows the fingers: a notch per three rows.
 		let mut mouse = Mouse::new(1.0);
 		mouse.moved(at(3.0, 5.0), &editor, NONE);
 		assert_eq!(mouse.wheel(pixels(0.0, -59.0), &editor, CELL, NONE), []);

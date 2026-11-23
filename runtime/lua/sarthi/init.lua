@@ -3,12 +3,12 @@ local rpc = require('sarthi.rpc')
 
 local sarthi = {}
 
--- Neovim's window functions that take a window config, with a `sarthi` table in it
+-- Neovim's window functions that take a window config, with a `sarthi` table in it.
 sarthi.api = require('sarthi.api')
 
 ---Sets Sarthi's settings: those given, and the defaults of the rest, in place of what an earlier call gave. Applies at
 ---once, so it can be called again later, e.g. from a keymap. A mistake is an error at the call.
----@param settings? sarthi.Settings The settings (Settings); left out, all the defaults
+---@param settings? sarthi.Settings The settings (Settings); left out, all the defaults.
 function sarthi.setup(settings)
   return (rpc.request('setup', settings))
 end
@@ -21,14 +21,14 @@ function sarthi.settings()
 end
 
 ---Sets the font size, in points (4 to 96), by setting `:h` in `guifont`. Window fonts with a size of their own keep it.
----@param points number Size in points
+---@param points number Size in points.
 function sarthi.set_font_size(points)
   return (rpc.request('set_font_size', points))
 end
 
 ---Makes the font `delta` points bigger, or smaller if negative, by setting `:h` in `guifont`, and each window font with
 ---a size of its own (`sarthi.font.size`) too. Sizes stay within 4 to 96 points.
----@param delta number Points to add, or to take away if negative
+---@param delta number Points to add, or to take away if negative.
 function sarthi.change_font_size(delta)
   return (rpc.request('change_font_size', delta))
 end

@@ -21,7 +21,7 @@
       rustPlatform = pkgs.makeRustPlatform { cargo = rustToolchain; rustc = rustToolchain; };
 
       # Loaded at runtime by winit and wgpu, not linked: X11's for winit's X11 backend, libGL for wgpu's OpenGL
-      # backend where Vulkan isn't available
+      # backend where Vulkan isn't available.
       runtimeLibraries = with pkgs; [
         wayland
         libxkbcommon
@@ -63,7 +63,7 @@
           patchelf --add-rpath ${pkgs.lib.makeLibraryPath runtimeLibraries} $out/bin/sarthi
         '';
 
-        # The launcher entry, for desktops to list Sarthi and open files with it
+        # The launcher entry, for desktops to list Sarthi and open files with it.
         postInstall = ''
           install -Dm644 extra/linux/sarthi.desktop -t $out/share/applications
         '';
@@ -74,7 +74,7 @@
           rustToolchain
           wgsl-analyzer
           nil
-          # `cargo xtask docs`: renders the help file
+          # `cargo xtask docs`: renders the help file.
           pandoc
         ];
 

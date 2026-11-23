@@ -23,11 +23,11 @@ use winit::event_loop::EventLoopProxy;
 use crate::app::{App, AppEvent};
 use crate::guifont;
 
-/// Work only the main thread can do, which owns the window, the editor, the fonts and the settings
+/// Work only the main thread can do, which owns the window, the editor, the fonts and the settings.
 pub struct MainTask(Box<dyn FnOnce(&mut App) + Send>);
 
 impl MainTask {
-	/// Does the work, on the main thread
+	/// Does the work, on the main thread.
 	pub fn run(self, app: &mut App) {
 		(self.0)(app);
 	}
@@ -46,17 +46,17 @@ pub struct Ctx {
 	nvim: NvimHandle,
 	main: EventLoopProxy<AppEvent>,
 
-	/// `sarthi.place` and `sarthi.font` as each window was last given them, which aren't in its `w:sarthi`
+	/// `sarthi.place` and `sarthi.font` as each window was last given them, which aren't in its `w:sarthi`.
 	given: Arc<Mutex<HashMap<Window, window::Given>>>,
 }
 
 impl Ctx {
-	/// A context calling Neovim through `nvim`, and the main thread through `main`
+	/// A context calling Neovim through `nvim`, and the main thread through `main`.
 	pub fn new(nvim: NvimHandle, main: EventLoopProxy<AppEvent>) -> Self {
 		Self { nvim, main, given: Arc::default() }
 	}
 
-	/// Forgets what the API kept about `win`, which closed
+	/// Forgets what the API kept about `win`, which closed.
 	pub fn forget(&self, win: Window) {
 		self.given().remove(&win);
 	}
@@ -65,7 +65,7 @@ impl Ctx {
 		self.given.lock().unwrap_or_else(PoisonError::into_inner)
 	}
 
-	/// Runs `task` on the main thread, and waits for its result
+	/// Runs `task` on the main thread, and waits for its result.
 	fn on_main<R: Send + 'static>(&self, task: impl FnOnce(&mut App) -> R + Send + 'static) -> Result<R, String> {
 		let (reply, result) = flume::bounded(1);
 		let task = MainTask(Box::new(move |app| _ = reply.send(task(app))));
@@ -74,7 +74,7 @@ impl Ctx {
 	}
 }
 
-/// Answers `request`, on the calling thread: one of the pool's
+/// Answers `request`, on the calling thread: one of the pool's.
 pub fn handle(ctx: &Ctx, IncomingRequest { request, responder }: IncomingRequest) {
 	match request {
 		Request::Setup(SetupArgs { settings }) => {
@@ -119,7 +119,7 @@ pub fn handle(ctx: &Ctx, IncomingRequest { request, responder }: IncomingRequest
 }
 
 /// Uses `settings` from now on, if their values make sense, and sends the floating windows open again, which get them
-/// too
+/// too.
 fn setup(ctx: &Ctx, settings: Settings) -> Result<(), String> {
 	let highlight = settings.window.outline.highlight.clone();
 	ctx.on_main(move |app| app.apply_settings(settings))??;
@@ -128,7 +128,7 @@ fn setup(ctx: &Ctx, settings: Settings) -> Result<(), String> {
 		.map_err(neovim_error)
 }
 
-/// Sets `guifont` to what `size` makes of it, as it is now, with Neovim's default left out
+/// Sets `guifont` to what `size` makes of it, as it is now, with Neovim's default left out.
 fn set_guifont(
 	ctx: &Ctx,
 	size: impl FnOnce(&mut App, &str) -> Result<String, String> + Send + 'static,
@@ -141,7 +141,7 @@ fn set_guifont(
 	ctx.nvim.set_string_option("guifont", guifont).map_err(neovim_error)
 }
 
-/// Neovim's message for an error it raised, or what else went wrong
+/// Neovim's message for an error it raised, or what else went wrong.
 fn neovim_error(error: NvimError) -> String {
 	match error {
 		// Neovim's errors are `[type, message]`.
@@ -154,7 +154,7 @@ fn neovim_error(error: NvimError) -> String {
 	}
 }
 
-/// Why a request couldn't be answered: sarthi or Neovim is closing
+/// Why a request couldn't be answered: sarthi or Neovim is closing.
 fn closing() -> String {
 	String::from("sarthi is closing")
 }

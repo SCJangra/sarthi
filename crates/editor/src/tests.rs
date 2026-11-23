@@ -40,7 +40,7 @@ fn colors() -> RedrawNotification {
 	}])
 }
 
-/// The text of each row of the only layer of `redraw`
+/// The text of each row of the only layer of `redraw`.
 fn rows(redraw: &Redraw) -> Vec<String> {
 	let [layer] = redraw.layers.as_slice() else { panic!("expected one layer") };
 	layer
@@ -83,7 +83,7 @@ fn cursor_is_drawn_where_neovim_put_it() {
 	let events = vec![colors(), resize(1, 2, 1), line(1, 0, "ab"), goto(1, 0, 1), RedrawNotification::Flush];
 	let redraw = editor.apply(events).unwrap();
 	let [layer] = redraw.layers.as_slice() else { panic!("expected one layer") };
-	// A block cursor in the cell's swapped colors, on "b"
+	// A block cursor in the cell's swapped colors, on "b".
 	let cursor =
 		Cursor { row: 0, col: 1, width: 1, shape: CursorShape::Block, color: FG, text_color: BG, motion: None };
 	assert_eq!(layer.cursor, Some(cursor));
@@ -124,7 +124,7 @@ fn float(grid: u32, row: u32, col: u32, compindex: u32) -> RedrawNotification {
 	float_at_level(grid, row, col, compindex, 50)
 }
 
-/// Like [`float`], at `zindex`
+/// Like [`float`], at `zindex`.
 fn float_at_level(grid: u32, row: u32, col: u32, compindex: u32, zindex: u32) -> RedrawNotification {
 	RedrawNotification::WinFloatPos(vec![WinFloatPosEvent {
 		grid: Grid(grid),
@@ -153,12 +153,12 @@ fn messages(row: u32, scrolled: bool, compindex: u32) -> RedrawNotification {
 	}])
 }
 
-/// The middle of screen cell `row`, `col`, in pixels
+/// The middle of screen cell `row`, `col`, in pixels.
 fn middle(row: u32, col: u32) -> (f64, f64) {
 	((f64::from(col) + 0.5) * f64::from(CELL.width), (f64::from(row) + 0.5) * f64::from(CELL.height))
 }
 
-/// Where each layer of `redraw` is, in cells of the screen: (id, row, col, height)
+/// Where each layer of `redraw` is, in cells of the screen: (id, row, col, height).
 fn placement(redraw: &Redraw) -> Vec<(u64, u32, u32, u32)> {
 	redraw
 		.layers
@@ -172,7 +172,7 @@ fn flush(editor: &mut Editor, mut events: Vec<RedrawNotification>) -> Redraw {
 	editor.apply(events).expect("something changed")
 }
 
-/// An editor with a 10×5 screen (grid 1) of [`CELL`]s and a 4×3 window grid 2 that isn't placed yet
+/// An editor with a 10×5 screen (grid 1) of [`CELL`]s and a 4×3 window grid 2 that isn't placed yet.
 fn screen() -> Editor {
 	let mut editor = Editor::default();
 	editor.set_cell_size(CELL);
@@ -210,7 +210,7 @@ fn message_grid_shows_from_its_row_down() {
 	editor.apply(vec![resize(3, 10, 5), line(3, 0, "hello")]);
 	assert_eq!(placement(&flush(&mut editor, vec![messages(4, false, 1)])), [(1, 0, 0, 5), (3, 4, 0, 1)]);
 
-	// Scrolled up over the windows: a separator line in MsgSeparator above the messages
+	// Scrolled up over the windows: a separator line in MsgSeparator above the messages.
 	let separator = HlAttrs { foreground: Some(0x00FF00), ..crate::highlight::tests::attrs() };
 	let events = vec![
 		RedrawNotification::HlAttrDefine(vec![HlAttrDefineEvent {
@@ -259,11 +259,11 @@ fn cursor_is_drawn_in_its_window() {
 		let layer = &redraw.layers[index];
 		layer.cursor.map(|cursor| (cursor.row, cursor.col))
 	};
-	// On "b" in the window, and not in grid 1
+	// On "b" in the window, and not in grid 1.
 	assert_eq!((cursor(0), cursor(1)), (None, Some((0, 1))));
 }
 
-/// The window of grid `grid`, in these tests
+/// The window of grid `grid`, in these tests.
 fn win_of(grid: u32) -> Window {
 	Window(1000 + i64::from(grid))
 }
@@ -281,7 +281,7 @@ fn viewport(grid: u32, line_count: u32, scroll_delta: i64) -> RedrawNotification
 	}])
 }
 
-/// The scroll of grid `id`'s layer in `redraw`: (rows, top, bottom, left, right)
+/// The scroll of grid `id`'s layer in `redraw`: (rows, top, bottom, left, right).
 fn scroll_of(redraw: &Redraw, id: u64) -> Option<(i32, u32, u32, u32, u32)> {
 	let layer = redraw.layers.iter().find(|layer| layer.id == id)?;
 	layer
@@ -400,7 +400,7 @@ fn the_pointer_follows_whats_under_it() {
 	assert_eq!((at(0, 0), at(2, 3)), (Pointer::Text, Pointer::Text));
 	assert_eq!((at(0, 4), at(2, 4)), (Pointer::ResizeColumns, Pointer::ResizeColumns));
 	assert_eq!((at(3, 0), at(3, 3)), (Pointer::ResizeRows, Pointer::ResizeRows));
-	// Where they meet, and away from both
+	// Where they meet, and away from both.
 	assert_eq!((at(3, 4), at(4, 8), at(1, 7)), (Pointer::ResizeRows, Pointer::Arrow, Pointer::Arrow));
 }
 
@@ -418,7 +418,7 @@ fn external_windows_are_centered_over_everything() {
 	assert_eq!(ids, [1, 3, 4]);
 	let window = &redraw.layers[2];
 	assert_eq!((window.x, window.y), (24, 24));
-	// Its own shadow, under it
+	// Its own shadow, under it.
 	assert_eq!(shadow_of(&redraw, 4), Some(vec![[3, 1, 4, 2]]));
 
 	// A larger window is centered again.
@@ -434,7 +434,7 @@ fn external_windows_go_where_placed() {
 		let layer = redraw.layers.iter().find(|layer| layer.id == 4).unwrap();
 		(layer.x, layer.y)
 	};
-	// A 2×1 external window a row below window 2's top-left corner
+	// A 2×1 external window a row below window 2's top-left corner.
 	flush(&mut editor, vec![win_pos(2, 1, 6), viewport(2, 10, 0), resize(4, 2, 1), external(4)]);
 	let below = Place::Relative {
 		relative: Relative::Win(win_of(2)),
@@ -464,7 +464,7 @@ fn external_windows_go_where_placed() {
 	assert_eq!(at(&editor.refresh().expect("placed")), (4 * 8, 4 * 16));
 	assert_eq!(at(&flush(&mut editor, vec![goto(1, 0, 0)])), (4 * 8, 4 * 16));
 
-	// Relative to external window 5, at the top left with cells of its own (10×20): in those cells
+	// Relative to external window 5, at the top left with cells of its own (10×20): in those cells.
 	let events = vec![viewport(5, 10, 0), resize(5, 2, 1), external(5)];
 	flush(&mut editor, events);
 	editor.set_external_font(win_of(5), Some((FontId::MAIN, CellSize { width: 10, height: 20 })));
@@ -487,11 +487,11 @@ fn external_windows_go_where_placed() {
 	};
 	editor.set_external_place(win_of(4), below);
 	assert_eq!(at(&editor.refresh().expect("placed")), (2 * 10, 20));
-	// Counted from 5's text, inside its padding, like from inside a float's border
+	// Counted from 5's text, inside its padding, like from inside a float's border.
 	editor.set_float_style(win_of(5), FloatStyle { padding: Some(Edges::all(4.0)), ..FloatStyle::default() });
 	assert_eq!(at(&editor.refresh().expect("padded")), (2 * 10 + 4, 20 + 4));
 
-	// Placed relative to each other: no loop, centered past a few
+	// Placed relative to each other: no loop, centered past a few.
 	editor.set_external_place(
 		win_of(5),
 		Place::Relative {
@@ -509,16 +509,16 @@ fn external_windows_go_where_placed() {
 #[test]
 fn the_mouse_over_an_external_window() {
 	let mut editor = screen();
-	// A 4×2 external window, centered at (24, 24) on the 80×80 pixel screen, over window grid 2
+	// A 4×2 external window, centered at (24, 24) on the 80×80 pixel screen, over window grid 2.
 	flush(&mut editor, vec![win_pos(2, 0, 0), resize(4, 4, 2), external(4), RedrawNotification::MouseOn]);
 	let cell = |grid, row, col| Some(GridPosition { grid: Grid(grid), row, col });
 	assert_eq!(editor.grid_at(24.0, 24.0), cell(4, 0, 0));
 	assert_eq!(editor.grid_at(24.0 + 3.0 * 8.0 + 1.0, 24.0 + 16.0 + 1.0), cell(4, 1, 3));
 	assert_eq!(editor.pointer_at(30.0, 30.0), Pointer::Text);
-	// Next to it, what's below it
+	// Next to it, what's below it.
 	assert_eq!(editor.grid_at(23.0, 24.0), cell(2, 1, 2));
 
-	// Its cells reach past it, e.g. for a drag: two rows and three columns before its top-left corner
+	// Its cells reach past it, e.g. for a drag: two rows and three columns before its top-left corner.
 	assert_eq!(editor.grid_cell(Grid(4), 0.0, 0.0), Some((-2, -3)));
 	assert_eq!(editor.grid_cell(Grid(2), 8.0, 16.0), Some((1, 1)));
 	assert_eq!(editor.grid_cell(Grid(9), 0.0, 0.0), None);
@@ -528,7 +528,7 @@ fn the_mouse_over_an_external_window() {
 fn an_external_window_in_fonts_of_its_own() {
 	let mut editor = screen();
 	flush(&mut editor, vec![resize(4, 4, 2), external(4)]);
-	// Cells of 10×20 pixels: 40×40 for its 4×2 cells, centered on the 80×80 pixel screen
+	// Cells of 10×20 pixels: 40×40 for its 4×2 cells, centered on the 80×80 pixel screen.
 	let cell = CellSize { width: 10, height: 20 };
 	editor.set_external_font(win_of(4), Some((FontId::MAIN, cell)));
 	assert_eq!(editor.external_fonts().collect::<Vec<_>>(), [win_of(4)]);
@@ -538,7 +538,7 @@ fn an_external_window_in_fonts_of_its_own() {
 	// The mouse goes by its cells too.
 	assert_eq!(editor.grid_at(20.0 + 10.0 + 1.0, 20.0 + 1.0), Some(GridPosition { grid: Grid(4), row: 0, col: 1 }));
 
-	// Back to the main fonts
+	// Back to the main fonts.
 	editor.set_external_font(win_of(4), None);
 	let redraw = editor.refresh().expect("its cells changed");
 	let window = redraw.layers.iter().find(|layer| layer.id == 4).unwrap();
@@ -584,22 +584,22 @@ fn outlines_around_external_windows() {
 		let layer = redraw.layers.iter().find(|layer| layer.id == id).unwrap();
 		layer.outline
 	};
-	// A float and an external window; none until a style has one
+	// A float and an external window; none until a style has one.
 	let events = vec![resize(3, 2, 1), float(3, 0, 0, 1), resize(4, 2, 1), external(4)];
 	let redraw = flush(&mut editor, events);
 	assert_eq!((outline_of(&redraw, 3), outline_of(&redraw, 4)), (None, None));
 
-	// In the highlight group's text color, here the default one, in physical pixels
+	// In the highlight group's text color, here the default one, in physical pixels.
 	let outline = |width| Some(OutlineStyle { width, highlight: String::from("FloatBorder"), color: None });
 	editor.set_default_float_style(FloatStyle { outline: outline(2.0), ..FloatStyle::default() });
 	editor.set_scale(1.5);
 	let redraw = editor.refresh().expect("outlines changed");
 	let drawn = Some(renderer::Outline { width: 3.0, color: FG });
-	// Never around floats, which Neovim places without room for it, tiled windows or the screen
+	// Never around floats, which Neovim places without room for it, tiled windows or the screen.
 	assert_eq!((outline_of(&redraw, 3), outline_of(&redraw, 4)), (None, drawn));
 	assert_eq!(outline_of(&redraw, 1), None);
 
-	// A window's own style: one of its own, or none; a float's own still none
+	// A window's own style: one of its own, or none; a float's own still none.
 	editor.set_float_style(win_of(3), FloatStyle { outline: outline(3.0), ..FloatStyle::default() });
 	editor.set_float_style(win_of(4), FloatStyle { outline: outline(3.0), ..FloatStyle::default() });
 	let redraw = editor.refresh().expect("their styles changed");
@@ -608,7 +608,7 @@ fn outlines_around_external_windows() {
 	editor.set_float_style(win_of(4), FloatStyle::default());
 	assert_eq!(outline_of(&editor.refresh().expect("its style changed"), 4), None);
 
-	// In the color Lua found for its group, which the editor may not know
+	// In the color Lua found for its group, which the editor may not know.
 	let green = OutlineStyle { width: 1.0, highlight: String::from("Comment"), color: Some(0x00FF00) };
 	editor.set_float_style(win_of(4), FloatStyle { outline: Some(green), ..FloatStyle::default() });
 	let redraw = editor.refresh().expect("its style changed");
@@ -624,7 +624,7 @@ fn rounded_corners_of_external_windows() {
 		let layer = redraw.layers.iter().find(|layer| layer.id == id).unwrap();
 		(layer.corner_radius, layer.shadow.as_ref().map(|shadow| shadow.radius))
 	};
-	// A lone float, two floats side by side at another level, and an external window
+	// A lone float, two floats side by side at another level, and an external window.
 	let events = vec![
 		resize(3, 2, 1),
 		float_at_level(3, 0, 0, 1, 50),
@@ -641,14 +641,14 @@ fn rounded_corners_of_external_windows() {
 	editor.set_default_float_style(FloatStyle { shadow, corners: Some(3.0), ..FloatStyle::default() });
 	editor.set_scale(2.0);
 	let redraw = editor.refresh().expect("corners changed");
-	// In physical pixels, and the shadow too
+	// In physical pixels, and the shadow too.
 	assert_eq!(radius_of(&redraw, 4), (6.0, Some(6.0)));
-	// Never floats', which Neovim places in its cells, alone or side by side, nor the screen's or tiled windows'
+	// Never floats', which Neovim places in its cells, alone or side by side, nor the screen's or tiled windows'.
 	assert_eq!(radius_of(&redraw, 3), (0.0, Some(0.0)));
 	assert_eq!((radius_of(&redraw, 5), radius_of(&redraw, 6)), ((0.0, Some(0.0)), (0.0, None)));
 	assert_eq!(radius_of(&redraw, 1).0, 0.0);
 
-	// A window's own radius, with the shadow round its outline
+	// A window's own radius, with the shadow round its outline.
 	let outline = Some(OutlineStyle { width: 1.0, highlight: String::from("FloatBorder"), color: None });
 	editor.set_float_style(
 		win_of(4),
@@ -671,7 +671,7 @@ fn padding_around_external_windows() {
 			.map(|shadow| shadow.area.iter().map(|&rect| <[u32; 4]>::from(rect)).collect::<Vec<_>>());
 		(<[u32; 4]>::from(layer.padding), area)
 	};
-	// A float at row 1, column 1, and an external window at the top left; none until a style has it
+	// A float at row 1, column 1, and an external window at the top left; none until a style has it.
 	let events = vec![resize(3, 2, 1), float(3, 1, 1, 1), resize(4, 2, 1), external(4)];
 	flush(&mut editor, events);
 	let place = Place::Relative {
@@ -695,11 +695,11 @@ fn padding_around_external_windows() {
 	let redraw = editor.refresh().expect("padding changed");
 	// The external window's cells move 8 pixels away from its anchor (NW), so its frame starts where it's placed.
 	assert_eq!(padding_of(&redraw, 4), ([6; 4], Some(vec![[0, 0, 32, 32]])));
-	// Never a float's, which Neovim places without room for it, nor the screen's or tiled windows'
+	// Never a float's, which Neovim places without room for it, nor the screen's or tiled windows'.
 	assert_eq!(padding_of(&redraw, 3), ([0; 4], Some(vec![[8, 16, 16, 16]])));
 	assert_eq!(padding_of(&redraw, 1).0, [0; 4]);
 
-	// A window's own size, or none
+	// A window's own size, or none.
 	editor.set_float_style(win_of(4), FloatStyle { padding: Some(Edges::all(1.0)), ..style.clone() });
 	let redraw = editor.refresh().expect("its style changed");
 	assert_eq!(padding_of(&redraw, 4).0, [2; 4]);
@@ -712,7 +712,7 @@ fn padding_around_external_windows() {
 	editor.set_float_style(win_of(4), FloatStyle { shadow, ..FloatStyle::default() });
 	assert_eq!(padding_of(&editor.refresh().expect("none"), 4).0, [0; 4]);
 
-	// In the window's own background, whatever its cells', or Neovim's default one until known
+	// In the window's own background, whatever its cells', or Neovim's default one until known.
 	let background_of = |redraw: &Redraw| {
 		let layer = redraw.layers.iter().find(|layer| layer.id == 4).unwrap();
 		layer.padding_background
@@ -729,7 +729,7 @@ fn padding_around_external_windows() {
 fn external_windows_are_laid_out_like_floats_with_a_border() {
 	let mut editor = screen();
 	// Window 2 at row 1 with a winbar, and a 2×1 external window with 4 pixels of padding, on the 80×80 pixel
-	// screen
+	// screen.
 	let margins = WinViewportMarginsEvent { grid: Grid(2), win: IgnoredAny, top: 1, bottom: 0, left: 0, right: 0 };
 	let events = vec![
 		resize(2, 10, 3),
@@ -756,14 +756,14 @@ fn external_windows_are_laid_out_like_floats_with_a_border() {
 		fixed,
 	};
 
-	// From window 2's text, below its winbar; its frame there, its cells inside it
+	// From window 2's text, below its winbar; its frame there, its cells inside it.
 	assert_eq!(at(&mut editor, place(Relative::Win(win_of(2)), 0.0, 0.0, false)), (4, 2 * 16 + 4));
-	// Kept on the screen with its frame: 24×24 pixels at most at 56, 56
+	// Kept on the screen with its frame: 24×24 pixels at most at 56, 56.
 	assert_eq!(at(&mut editor, place(Relative::Editor, 4.0, 9.0, false)), (60, 60));
-	// Above the command line
+	// Above the command line.
 	editor.set_command_rows(1);
 	assert_eq!(at(&mut editor, place(Relative::Editor, 4.0, 9.0, false)), (60, 44));
-	// `fixed`: not moved sideways, so cut off on the right
+	// `fixed`: not moved sideways, so cut off on the right.
 	assert_eq!(at(&mut editor, place(Relative::Editor, 4.0, 9.0, true)), (9 * 8 + 4, 44));
 }
 
@@ -772,7 +772,7 @@ fn external_windows_placed_together_share_a_shadow() {
 	let mut editor = screen();
 	let shadow = Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0, opacity: 0.5 };
 	editor.set_default_float_style(FloatStyle { shadow: Some(shadow), ..FloatStyle::default() });
-	// 2×1 external windows: 4 at the top left, 5 just below it, and 6 on its own, centered
+	// 2×1 external windows: 4 at the top left, 5 just below it, and 6 on its own, centered.
 	let mut events = vec![];
 	for id in 4..=6 {
 		events.extend([viewport(id, 10, 0), resize(id, 2, 1), external(id)]);
@@ -801,7 +801,7 @@ fn a_float_stays_in_its_cells() {
 	let mut editor = screen();
 	let outline = Some(OutlineStyle { width: 2.0, highlight: String::from("FloatBorder"), color: None });
 	editor.set_default_float_style(FloatStyle { outline, padding: Some(Edges::all(2.0)), ..FloatStyle::default() });
-	// Placed at row 2, column 2: drawn there whatever its style, with no frame to move it
+	// Placed at row 2, column 2: drawn there whatever its style, with no frame to move it.
 	let redraw = flush(&mut editor, vec![resize(3, 2, 1), float(3, 2, 2, 1)]);
 	let layer = redraw.layers.iter().find(|layer| layer.id == 3).unwrap();
 	assert_eq!((layer.x, layer.y, layer.padding, layer.outline), (2 * 8, 2 * 16, Edges::default(), None));
@@ -848,7 +848,7 @@ fn floating_windows_have_the_shadow() {
 	let mut editor = screen();
 	flush(&mut editor, vec![resize(3, 2, 1), win_pos(2, 0, 0), float(3, 1, 1, 1)]);
 
-	// None until set
+	// None until set.
 	let redraw = flush(&mut editor, vec![line(3, 0, "a")]);
 	assert_eq!(shadow_of(&redraw, 3), None);
 
@@ -892,7 +892,7 @@ fn floating_windows_have_the_shadow() {
 	let redraw = editor.refresh().expect("the shadow changed");
 	assert_eq!(shadow_of(&redraw, 3), None);
 
-	// Forgotten with the float's grid
+	// Forgotten with the float's grid.
 	flush(&mut editor, vec![RedrawNotification::GridDestroy(vec![GridDestroyEvent { grid: Grid(3) }])]);
 	assert!(editor.floats.is_empty());
 }
@@ -910,7 +910,7 @@ fn floats_at_one_level_share_a_shadow() {
 		..FloatStyle::default()
 	});
 	// 3 and 4 side by side at 50, like a picker's windows; 5 at 52 attached to 3, like a scrollbar; 6 at 100, a hover
-	// over them; 7 at 50, fully transparent
+	// over them; 7 at 50, fully transparent.
 	let mut events: Vec<_> = (3..=7).map(|id| resize(id, 2, 1)).collect();
 	events.extend([
 		float_at_level(3, 1, 1, 1, 50),
@@ -937,13 +937,13 @@ fn floats_at_one_level_share_a_shadow() {
 	);
 	let redraw = flush(&mut editor, vec![]);
 
-	// One shadow for 3, 4 and the attached 5, drawn with the first of them
+	// One shadow for 3, 4 and the attached 5, drawn with the first of them.
 	assert_eq!(shadow_of(&redraw, 3), Some(vec![[1, 1, 2, 1], [3, 1, 2, 1], [5, 1, 2, 1]]));
 	assert_eq!((shadow_of(&redraw, 4), shadow_of(&redraw, 5), shadow_of(&redraw, 7)), (None, None, None));
 	// The hover has its own.
 	assert_eq!(shadow_of(&redraw, 6), Some(vec![[2, 0, 2, 1]]));
 
-	// 4 with a shadow of its own: one for it, drawn with it, over 3's
+	// 4 with a shadow of its own: one for it, drawn with it, over 3's.
 	let own = Shadow { opacity: 0.8, ..shadow };
 	editor.set_float_style(
 		win_of(4),
@@ -961,7 +961,7 @@ fn floats_at_one_level_share_a_shadow() {
 	assert_eq!(shadow_of(&redraw, 4), Some(vec![[3, 1, 2, 1]]));
 }
 
-/// The area of the shadow drawn with grid `id`'s layer in `redraw`, in cells of the screen
+/// The area of the shadow drawn with grid `id`'s layer in `redraw`, in cells of the screen.
 fn shadow_of(redraw: &Redraw, id: u64) -> Option<Vec<[u32; 4]>> {
 	let layer = redraw.layers.iter().find(|layer| layer.id == id).unwrap();
 	let cells =
@@ -980,7 +980,7 @@ fn some_windows_jump_or_slide_their_own_way() {
 	let animation = ScrollAnimationSettings { curve: spring, overrides: vec![far], ..Default::default() };
 	flush(&mut editor, vec![win_pos(2, 0, 0), viewport(2, 100, 0)]);
 
-	// Told before the redraw that scrolls, like `WinScrolled` does
+	// Told before the redraw that scrolls, like `WinScrolled` does.
 	editor.set_scroll_animation(win_of(2), None);
 	let redraw = flush(&mut editor, vec![viewport(2, 100, 1), line(2, 0, "a")]);
 	assert_eq!(scroll_of(&redraw, 2), None);
@@ -990,11 +990,11 @@ fn some_windows_jump_or_slide_their_own_way() {
 	assert_eq!(scroll_of(&redraw, 2), Some((1, 0, 3, 0, 4)));
 	let Some(layer) = redraw.layers.iter().find(|layer| layer.id == 2) else { panic!() };
 	assert_eq!(layer.scroll.and_then(|scroll| scroll.motion), crate::motion(spring));
-	// Farther, a jump as its override says
+	// Farther, a jump as its override says.
 	let redraw = flush(&mut editor, vec![viewport(2, 100, -3), line(2, 0, "c")]);
 	assert_eq!(scroll_of(&redraw, 2), None);
 
-	// Forgotten with the window's grid
+	// Forgotten with the window's grid.
 	editor.set_scroll_animation(win_of(2), None);
 	flush(&mut editor, vec![RedrawNotification::GridDestroy(vec![GridDestroyEvent { grid: Grid(2) }])]);
 	assert!(editor.scroll_animations.is_empty());
@@ -1055,7 +1055,7 @@ fn mouse_on_and_off() {
 
 #[test]
 fn the_grid_under_a_cell() {
-	// The 10×5 screen, window grid 2 (4×3) at row 0, col 6, and float 6 (3×2) over it at row 1, col 5
+	// The 10×5 screen, window grid 2 (4×3) at row 0, col 6, and float 6 (3×2) over it at row 1, col 5.
 	let mut editor = screen();
 	flush(&mut editor, vec![resize(6, 3, 2), win_pos(2, 0, 6), float(6, 1, 5, 1)]);
 	let at = |editor: &Editor, row, col| {
@@ -1069,7 +1069,7 @@ fn the_grid_under_a_cell() {
 	// The float covers the window.
 	assert_eq!(at(&editor, 2, 6), cell(6, 1, 1));
 	assert_eq!(at(&editor, 2, 9), cell(2, 2, 3));
-	// Outside the screen
+	// Outside the screen.
 	assert_eq!(at(&editor, 5, 0), None);
 	assert_eq!(at(&editor, 0, 10), None);
 
@@ -1106,16 +1106,16 @@ fn the_cursor_moves_as_its_animation_says() {
 	let motion = |redraw: &Redraw| redraw.layers.iter().find_map(|layer| layer.cursor).map(|cursor| cursor.motion);
 	let moving = |curve| Some(Some(CursorMotion { motion: crate::motion(curve).unwrap(), trail: 1.0 }));
 
-	// Its first place: at once
+	// Its first place: at once.
 	assert_eq!(motion(&flush(&mut editor, vec![goto(1, 0, 0)])), Some(None));
-	// A column on, by default a short move; then a row down
+	// A column on, by default a short move; then a row down.
 	assert_eq!(motion(&flush(&mut editor, vec![goto(1, 0, 1)])), moving(Animation::EaseOut { duration: 40.0 }));
 	assert_eq!(
 		motion(&flush(&mut editor, vec![goto(1, 1, 1)])),
 		moving(Animation::Spring { stiffness: 700.0, damping: 53.0 })
 	);
 
-	// Off: at once
+	// Off: at once.
 	editor.set_cursor_animation(CursorAnimationSettings { enabled: false, ..Default::default() });
 	assert_eq!(motion(&flush(&mut editor, vec![goto(1, 2, 1)])), Some(None));
 }

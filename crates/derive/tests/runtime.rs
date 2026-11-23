@@ -19,20 +19,20 @@ struct Resize {
 
 #[derive(Debug, PartialEq, DeserializeTaggedEnum)]
 enum Event {
-	/// One element per occurrence, like most redraw events
+	/// One element per occurrence, like most redraw events.
 	CursorGoto(#[tagged_enum(flatten)] Vec<Pos>),
 
-	/// Plain fields read in order
+	/// Plain fields read in order.
 	Title(String),
 
-	/// Named fields read in order, then the occurrences
+	/// Named fields read in order, then the occurrences.
 	Named {
 		grid: u32,
 		#[tagged_enum(flatten)]
 		resizes: Vec<Resize>,
 	},
 
-	/// No parameters, like `flush`
+	/// No parameters, like `flush`.
 	Flush,
 
 	Other {
@@ -42,7 +42,7 @@ enum Event {
 	},
 }
 
-/// A fallback that keeps its data as one value, like `NvimNotification`
+/// A fallback that keeps its data as one value, like `NvimNotification`.
 #[derive(Debug, PartialEq, DeserializeTaggedEnum)]
 enum Notification {
 	Redraw(Vec<Event>),

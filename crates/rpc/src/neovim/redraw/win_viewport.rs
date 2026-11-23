@@ -4,7 +4,7 @@ use serde::de::IgnoredAny;
 
 use crate::Window;
 
-/// Which buffer lines the window of `grid` shows, sent when they change (`:help ui-event-win_viewport`)
+/// Which buffer lines the window of `grid` shows, sent when they change (`:help ui-event-win_viewport`).
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinViewportEvent {
@@ -12,9 +12,9 @@ pub struct WinViewportEvent {
 
 	pub win: Window,
 
-	/// First line shown, 0-based
+	/// First line shown, 0-based.
 	pub topline: u32,
-	/// Line after the last one shown, 0-based
+	/// Line after the last one shown, 0-based.
 	pub botline: u32,
 	pub curline: u32,
 	pub curcol: u32,
@@ -27,13 +27,13 @@ pub struct WinViewportEvent {
 }
 
 /// Rows and columns at the edges of the window of `grid` that don't scroll with the text, like the winbar
-/// (`:help ui-event-win_viewport_margins`)
+/// (`:help ui-event-win_viewport_margins`).
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinViewportMarginsEvent {
 	pub grid: Grid,
 
-	/// The window handle, unused
+	/// The window handle, unused.
 	pub win: IgnoredAny,
 
 	pub top: u32,
@@ -50,20 +50,20 @@ mod tests {
 	use super::{WinViewportEvent, WinViewportMarginsEvent};
 	use crate::{RedrawNotification, Window};
 
-	/// Decodes `[name, args...]` the way Neovim sends it
+	/// Decodes `[name, args...]` the way Neovim sends it.
 	fn decode(name: &str, args: Vec<Value>) -> RedrawNotification {
 		let event = Value::Array(vec![Value::from(name), Value::Array(args)]);
 		rmp_serde::from_slice(&rmp_serde::to_vec(&event).unwrap()).unwrap()
 	}
 
-	/// A window handle: msgpack extension type 1
+	/// A window handle: msgpack extension type 1.
 	fn win() -> Value {
 		Value::Ext(1, vec![0xCD, 0x03, 0xE8])
 	}
 
 	#[test]
 	fn de_win_viewport() {
-		// From Neovim 0.12, after scrolling up a line
+		// From Neovim 0.12, after scrolling up a line.
 		let args = [2, 16, 3, 0, 500, -1].into_iter().map(Value::from);
 		let event = decode("win_viewport", [2.into(), win()].into_iter().chain(args).collect());
 		let expected = WinViewportEvent {
@@ -87,7 +87,7 @@ mod tests {
 
 	#[test]
 	fn de_win_viewport_margins() {
-		// From Neovim 0.12, with a winbar
+		// From Neovim 0.12, with a winbar.
 		let args = [1, 0, 0, 0].into_iter().map(Value::from);
 		let event = decode("win_viewport_margins", [2.into(), win()].into_iter().chain(args).collect());
 		let expected =

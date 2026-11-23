@@ -8,7 +8,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
-use std::{fmt, io, thread};
+use std::{io, thread};
 
 use editor::Editor;
 use flume::Receiver;
@@ -19,64 +19,16 @@ use rpc::neovim::{
 };
 use rpc::sarthi::{FloatWindow, Settings, WindowOptions, WindowVariable};
 
+use crate::error::StartError;
 use crate::settings;
 
-/// The oldest Neovim sarthi works with, as major and minor version
+/// The oldest Neovim sarthi works with, as major and minor version.
 pub const MINIMUM: (u64, u64) = (0, 12);
 
-/// How long the login shell gets to print its environment
+/// How long the login shell gets to print its environment.
 const SHELL_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Why Neovim didn't start
-#[derive(Debug, PartialEq)]
-pub enum StartError {
-	NotFound {
-		nvim: OsString,
-	},
-	/// Older than [`MINIMUM`]; its version, if it could tell
-	TooOld {
-		nvim: OsString,
-		version: Option<String>,
-	},
-	Failed {
-		nvim: OsString,
-		error: String,
-	},
-}
-
-impl StartError {
-	/// A heading, and what happened and what to do
-	fn text(&self) -> (String, String) {
-		let (major, minor) = MINIMUM;
-		let hint = "or start Sarthi with --nvim /path/to/nvim.";
-		match self {
-			Self::NotFound { nvim } => (
-				String::from("Sarthi couldn't find Neovim"),
-				format!("`{}` wasn't found. Install Neovim {major}.{minor} or newer, {hint}", nvim.display()),
-			),
-			Self::TooOld { nvim, version } => (
-				format!("Sarthi needs Neovim {major}.{minor} or newer"),
-				format!(
-					"`{}` is {}. Update Neovim, {hint}",
-					nvim.display(),
-					version.as_deref().unwrap_or("older than 0.9")
-				),
-			),
-			Self::Failed { nvim, error } => {
-				(String::from("Sarthi couldn't start Neovim"), format!("`{}`: {error}", nvim.display()))
-			},
-		}
-	}
-}
-
-impl fmt::Display for StartError {
-	fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-		let (heading, body) = self.text();
-		write!(formatter, "{heading}: {body}")
-	}
-}
-
-/// Starts Neovim, `nvim`, with `args`, in `env` (or sarthi's), if it's at least [`MINIMUM`]
+/// Starts Neovim, `nvim`, with `args`, in `env` (or sarthi's), if it's at least [`MINIMUM`].
 pub fn start(
 	nvim: &OsStr,
 	args: &[OsString],
@@ -148,23 +100,23 @@ fn environment(output: &[u8]) -> Vec<(OsString, OsString)> {
 		.collect()
 }
 
-// Neovim's default dark colors (`:help default-colors`), what it looks like before a config loads
+// Neovim's default dark colors (`:help default-colors`), what it looks like before a config loads.
 const NORMAL_FG: u32 = 0xE0E2EA;
 const NORMAL_BG: u32 = 0x14161B;
 const FLOAT_BG: u32 = 0x07080D;
 const ERROR_FG: u32 = 0xFFC0B9;
 const COMMENT_FG: u32 = 0x9B9EA4;
 
-/// The grid and window of the error, which no Neovim uses
+/// The grid and window of the error, which no Neovim uses.
 const GRID: Grid = Grid(2);
 
-/// The highlights the message is drawn with
+/// The highlights the message is drawn with.
 const ERROR: HlId = HlId(1);
 const NORMAL: HlId = HlId(2);
 const COMMENT: HlId = HlId(3);
 const WIN: Window = Window(1000);
 
-/// Shows `error` on a `width` × `height` cell screen: centered, in an external window framed like Neovim's floats
+/// Shows `error` on a `width` × `height` cell screen: centered, in an external window framed like Neovim's floats.
 pub fn show(editor: &mut Editor, error: &StartError, width: u32, height: u32) {
 	let (heading, body) = error.text();
 	let text_width = width.saturating_sub(8).clamp(20, 64) as usize;
@@ -185,7 +137,7 @@ pub fn show(editor: &mut Editor, error: &StartError, width: u32, height: u32) {
 			.chars()
 			.map(|c| GridCell { text: cell(&c.to_string()), hl_id: Some(*hl_id), repeat: None })
 			.collect();
-		// The rest of the row in its background too
+		// The rest of the row in its background too.
 		let rest = grid_width.saturating_sub(cells.len() as u32);
 		if rest > 0 {
 			cells.push(GridCell { text: cell(" "), hl_id: Some(*hl_id), repeat: Some(rest) });
@@ -213,13 +165,13 @@ pub fn show(editor: &mut Editor, error: &StartError, width: u32, height: u32) {
 	events.extend(rows.map(|row| RedrawNotification::GridLine(vec![row])));
 	events.extend([
 		RedrawNotification::WinExternalPos(vec![WinExternalPosEvent { grid: GRID, win: WIN }]),
-		// No cursor, as Neovim hides it while busy
+		// No cursor, as Neovim hides it while busy.
 		RedrawNotification::BusyStart,
 		RedrawNotification::Flush,
 	]);
 	editor.apply(events);
 
-	// Like any window opened with `require('sarthi').api`, with the default settings: nothing of its own
+	// Like any window opened with `require('sarthi').api`, with the default settings: nothing of its own.
 	let window = FloatWindow {
 		win: WIN,
 		filetype: String::new(),
@@ -237,7 +189,7 @@ fn cell(text: &str) -> CellText {
 	CellText::from(text).unwrap_or_default()
 }
 
-/// `text` in lines of at most `width` characters, broken between words
+/// `text` in lines of at most `width` characters, broken between words.
 fn wrap(text: &str, width: usize) -> Vec<String> {
 	let mut lines = Vec::new();
 	let mut line = String::new();
@@ -316,7 +268,7 @@ mod tests {
 		let error = StartError::NotFound { nvim: "nvim".into() };
 		show(&mut editor, &error, 80, 24);
 		let redraw = editor.refresh().expect("drawn");
-		// The screen, and the error's window over it
+		// The screen, and the error's window over it.
 		assert_eq!(redraw.layers.len(), 2);
 		let screen = &redraw.layers[0];
 		assert!(screen.cursor.is_none());

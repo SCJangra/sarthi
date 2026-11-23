@@ -15,5 +15,5 @@ use neovim::*;
 #[allow(unused_imports)]
 use sarthi::*;
 
-/// Derives decoding for enums tagged by their first element, like redraw events and requests (`[method, args…]`)
+/// Derives decoding for enums tagged by their first element, like redraw events and requests (`[method, args…]`).
 pub use sarthi_derive::DeserializeTaggedEnum;

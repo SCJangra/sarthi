@@ -1,4 +1,4 @@
-//! Neovim's redraw events (`:help ui-events`) applied to the editor's state, drawn once a redraw ends
+//! Neovim's redraw events (`:help ui-events`) applied to the editor's state, drawn once a redraw ends.
 
 use renderer::{Edges, Layer};
 use rpc::neovim::{CellText, Grid, OptionSetEvent, OptionValue, RedrawNotification, WinViewportEvent, Window};
@@ -150,7 +150,7 @@ impl Editor {
 		None
 	}
 
-	/// Forgets `grid` and its window's styles, place and fonts (`grid_destroy`)
+	/// Forgets `grid` and its window's styles, place and fonts (`grid_destroy`).
 	fn destroy_grid(&mut self, grid: Grid) {
 		self.grids.remove(&grid);
 		if let Some(win) = self.viewports.remove(&grid).and_then(|viewport| viewport.win) {
@@ -228,7 +228,7 @@ impl Editor {
 		self.stale = true;
 	}
 
-	/// The layers to draw, if anything changed since the last `flush`
+	/// The layers to draw, if anything changed since the last `flush`.
 	pub(crate) fn flush(&mut self) -> Option<Redraw> {
 		let mut redraw =
 			std::mem::take(&mut self.stale).then(|| Redraw { background: self.background(), layers: self.layers() });
@@ -243,7 +243,7 @@ impl Editor {
 	}
 
 	/// Gives the cursor among `layers`, the first one's as the renderer draws it, how it moves there, and notes where
-	/// it's drawn
+	/// it's drawn.
 	fn move_cursor(&mut self, layers: &mut [Layer]) {
 		let found = layers.iter_mut().find_map(|layer| {
 			let (id, cell, x, y) = (layer.id, layer.cell, layer.x, layer.y);

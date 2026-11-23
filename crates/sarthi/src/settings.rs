@@ -1,4 +1,4 @@
-//! How sarthi's settings (`rpc::sarthi::Settings`, set with `require("sarthi").setup()`) apply to the renderer
+//! How sarthi's settings (`rpc::sarthi::Settings`, set with `require("sarthi").setup()`) apply to the renderer.
 
 use editor::{FloatStyle, OutlineStyle};
 use renderer::{Edges, Motion, Shadow, UnderlineSize};
@@ -7,13 +7,13 @@ use rpc::sarthi::{
 	WindowVariable,
 };
 
-/// How the renderer moves scrolled text
+/// How the renderer moves scrolled text.
 pub fn scroll_motion(settings: &Settings) -> Option<Motion> {
 	editor::motion(settings.window.scroll_animation.curve)
 }
 
 /// What a window's `w:sarthi` gives it, if it's one sarthi can decode with values that make sense; otherwise what's
-/// wrong with it
+/// wrong with it.
 pub fn window_options(settings: &Settings, variable: &WindowVariable) -> Result<WindowOptions, String> {
 	let WindowVariable::Options(options) = variable else {
 		return Err(String::from("has a key sarthi doesn't know, or a value of the wrong type"));
@@ -38,19 +38,19 @@ pub fn window_scroll(
 }
 
 /// How floating or external window `window` looks besides its cells, with `options` from its `w:sarthi`, in logical
-/// pixels (see [`style`])
+/// pixels (see [`style`]).
 pub fn float_style(settings: &Settings, window: &FloatWindow, options: &WindowOptions) -> FloatStyle {
 	let mut style = style(&settings.window.with(options), &window.filetype, window.winblend);
-	// In the color Neovim has for its highlight group, which sarthi may not know
+	// In the color Neovim has for its highlight group, which sarthi may not know.
 	if let Some(outline) = &mut style.outline {
 		outline.color = window.outline_color;
 	}
-	// Its background around its cells, whatever they're highlighted with
+	// Its background around its cells, whatever they're highlighted with.
 	let blend = window.winblend.min(100) as u8;
 	FloatStyle { parent: window.parent, background: window.background, blend, ..style }
 }
 
-/// How floating and external windows look until sarthi learns about them: as one with no `w:sarthi`
+/// How floating and external windows look until sarthi learns about them: as one with no `w:sarthi`.
 pub fn default_float_style(settings: &Settings) -> FloatStyle {
 	style(&settings.window.with(&WindowOptions::default()), "", 0)
 }
@@ -80,7 +80,7 @@ fn style(settings: &WindowSettings, filetype: &str, winblend: u32) -> FloatStyle
 	FloatStyle { shadow, outline, corners, padding, ..FloatStyle::default() }
 }
 
-/// How the renderer draws underlines, in logical pixels
+/// How the renderer draws underlines, in logical pixels.
 pub fn underlines(settings: &Settings) -> UnderlineSize {
 	let underline = &settings.underline;
 	UnderlineSize {
@@ -127,7 +127,7 @@ mod tests {
 		assert_eq!((cast.blur, cast.offset, cast.opacity), (8.0, [0.0, 2.0], 1.0));
 		assert_eq!(super::default_float_style(&settings).shadow, Some(cast));
 
-		// The window's own values, each in place of the setting's
+		// The window's own values, each in place of the setting's.
 		let own = shadow(ShadowOptions { opacity: Some(0.6), offset: Some([1.0, 2.0]), ..Default::default() });
 		let cast = super::float_style(&settings, &float("lua"), &own).shadow.unwrap();
 		assert_eq!((cast.blur, cast.offset, cast.opacity), (8.0, [1.0, 2.0], 0.6));
@@ -143,7 +143,7 @@ mod tests {
 		settings.window.shadow.enabled = false;
 		assert!(super::float_style(&settings, &float("lua"), &none).shadow.is_none());
 		assert!(super::float_style(&settings, &float("lua"), &on).shadow.is_some());
-		// Fully transparent: no shadow, whatever the window says
+		// Fully transparent: no shadow, whatever the window says.
 		let transparent = FloatWindow { winblend: 100, ..float("lua") };
 		assert!(super::float_style(&settings, &transparent, &on).shadow.is_none());
 	}
@@ -163,11 +163,11 @@ mod tests {
 		assert_eq!(super::default_float_style(&settings).outline, None);
 		let style = super::float_style(&settings, &float("lua"), &managed).outline.unwrap();
 		assert_eq!((style.width, style.highlight.as_str()), (2.0, "FloatBorder"));
-		// Or one a window turns on itself, with the defaults where it gives no values
+		// Or one a window turns on itself, with the defaults where it gives no values.
 		let on = outline(OutlineOptions { enabled: Some(true), ..Default::default() });
 		assert_eq!(super::float_style(&settings, &float("lua"), &on).outline.unwrap().width, 1.0);
 
-		// Its own values over the settings'
+		// Its own values over the settings'.
 		let comment = WindowOptions {
 			outline: OutlineOptions { highlight: Some(String::from("Comment")), ..Default::default() },
 			..managed.clone()
@@ -181,7 +181,7 @@ mod tests {
 		let transparent = FloatWindow { winblend: 100, ..float("lua") };
 		assert_eq!(super::float_style(&settings, &transparent, &on).outline, None);
 
-		// In the color Neovim has for the group, if it has one
+		// In the color Neovim has for the group, if it has one.
 		let colored = FloatWindow { outline_color: Some(0xFF0000), ..float("lua") };
 		assert_eq!(super::float_style(&settings, &colored, &on).outline.unwrap().color, Some(0xFF0000));
 	}
@@ -199,7 +199,7 @@ mod tests {
 		};
 		let none = WindowOptions::default();
 
-		// Square, unless managed or the window turns them on, at the settings' radius or the default
+		// Square, unless managed or the window turns them on, at the settings' radius or the default.
 		assert_eq!(super::float_style(&settings, &float("lua"), &none).corners, None);
 		assert_eq!(
 			super::float_style(&settings, &float("lua"), &corners(Some(true), Default::default())).corners,
@@ -225,7 +225,7 @@ mod tests {
 			|managed, options: PaddingOptions| WindowOptions { managed, padding: options, ..Default::default() };
 		let none = WindowOptions::default();
 
-		// None, unless managed or the window turns it on, at the settings' size or the default
+		// None, unless managed or the window turns it on, at the settings' size or the default.
 		assert_eq!(super::float_style(&settings, &float("lua"), &none).padding, None);
 		let managed = padding(Some(true), Default::default());
 		assert_eq!(super::float_style(&settings, &float("lua"), &managed).padding, Some(renderer::Edges::all(6.0)));
@@ -235,7 +235,7 @@ mod tests {
 			Some(renderer::Edges::all(4.0))
 		);
 
-		// Each side its own
+		// Each side its own.
 		let sides = PaddingSize::Sides(PaddingSides { top: 1.0, left: 3.0, ..Default::default() });
 		let own = padding(Some(true), PaddingOptions { size: Some(sides), ..Default::default() });
 		assert_eq!(
@@ -297,7 +297,7 @@ mod tests {
 		assert!(slides(&settings, "lua", &none).is_none());
 		assert!(slides(&settings, "lua", &on).is_some());
 
-		// Its own animation
+		// Its own animation.
 		let linear = scroll(ScrollAnimationOptions { curve: Some(Animation::None), ..Default::default() });
 		let animation = slides(&Settings::default(), "lua", &linear);
 		assert_eq!(animation.map(|animation| animation.curve), Some(Animation::None));

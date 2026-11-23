@@ -4,7 +4,7 @@ use serde::{Serialize, Serializer};
 use crate::RpcMethod;
 
 /// Neovim's [`nvim_ui_try_resize_grid`](https://neovim.io/doc/user/api/#nvim_ui_try_resize_grid()) function: resizes the
-/// window of a grid, e.g. an external window the UI sized
+/// window of a grid, e.g. an external window the UI sized.
 pub struct UiTryResizeGrid;
 
 impl RpcMethod for UiTryResizeGrid {
@@ -16,13 +16,13 @@ impl RpcMethod for UiTryResizeGrid {
 
 #[derive(Debug)]
 pub struct UiTryResizeGridParams {
-	/// The grid, not its window's handle
+	/// The grid, not its window's handle.
 	pub grid: Grid,
 	pub width: u32,
 	pub height: u32,
 }
 
-/// As positional arguments, the way Neovim takes them
+/// As positional arguments, the way Neovim takes them.
 impl Serialize for UiTryResizeGridParams {
 	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
 		(self.grid, self.width, self.height).serialize(serializer)
@@ -36,7 +36,7 @@ mod tests {
 	#[test]
 	fn positional_arguments() {
 		let params = UiTryResizeGridParams { grid: crate::Grid(4), width: 30, height: 8 };
-		// [4, 30, 8]
+		// [4, 30, 8].
 		assert_eq!(rmp_serde::to_vec(&params).unwrap(), [0x93, 0x04, 0x1E, 0x08]);
 	}
 }

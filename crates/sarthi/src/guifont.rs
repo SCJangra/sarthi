@@ -33,20 +33,20 @@ pub fn parse(value: &str) -> Result<Font, String> {
 	Ok(Font { family: FontFamily::Named(families), size })
 }
 
-/// Font sizes the size functions (`require("sarthi").set_font_size()` …) and windows' fonts take, in points
+/// Font sizes the size functions (`require("sarthi").set_font_size()` …) and windows' fonts take, in points.
 const SIZES: RangeInclusive<f32> = 4.0..=96.0;
 
-/// Points in `pixels` logical pixels
+/// Points in `pixels` logical pixels.
 pub fn points(pixels: f32) -> f32 {
 	pixels / PIXELS_PER_POINT
 }
 
-/// Logical pixels in a font size of `points`
+/// Logical pixels in a font size of `points`.
 pub fn pixels(points: f32) -> f32 {
 	points * PIXELS_PER_POINT
 }
 
-/// `points`, or what's wrong with it: a size outside [`SIZES`]
+/// `points`, or what's wrong with it: a size outside [`SIZES`].
 pub fn checked(points: f32) -> Result<f32, String> {
 	if !SIZES.contains(&points) {
 		return Err(format!("font size {points} is outside {}..{} points", SIZES.start(), SIZES.end()));
@@ -54,7 +54,7 @@ pub fn checked(points: f32) -> Result<f32, String> {
 	Ok(points)
 }
 
-/// `points` plus `delta`, kept within [`SIZES`]
+/// `points` plus `delta`, kept within [`SIZES`].
 pub fn changed(points: f32, delta: f32) -> f32 {
 	(points + delta).clamp(*SIZES.start(), *SIZES.end())
 }
@@ -62,7 +62,7 @@ pub fn changed(points: f32, delta: f32) -> f32 {
 /// `guifont` with its size set to `points`: the first family gets `:h<points>`, any other `:h` goes, and the rest
 /// stays as it was.
 pub fn with_size(guifont: &str, points: f32) -> String {
-	// To hundredths, so steps like 10.1 + 0.1 don't show as 10.200001
+	// To hundredths, so steps like 10.1 + 0.1 don't show as 10.200001.
 	let points = (points * 100.0).round() / 100.0;
 	let entries = guifont.split(',').enumerate().map(|(index, entry)| {
 		let mut parts = entry.split(':');
@@ -99,11 +99,11 @@ mod tests {
 		let expected = Font { family: named(&["JetBrains Mono", "Symbols Nerd Font"]), size: FontSize::Points(13.5) };
 		assert_eq!(font, expected);
 
-		// A size after any family, underscores for spaces, spaces around commas
+		// A size after any family, underscores for spaces, spaces around commas.
 		let font = parse("Fira_Code, Noto Color Emoji:h12").unwrap();
 		assert_eq!(font, Font { family: named(&["Fira Code", "Noto Color Emoji"]), size: FontSize::Points(12.0) });
 
-		// Only a size
+		// Only a size.
 		assert_eq!(parse(":h11").unwrap(), Font { family: named(&[]), size: FontSize::Points(11.0) });
 	}
 
@@ -111,7 +111,7 @@ mod tests {
 	fn sizes() {
 		assert_eq!(pixels(12.0), 16.0);
 		assert_eq!(changed(16.0, 1.0), 17.0);
-		// Kept within the sizes for changes, an error otherwise
+		// Kept within the sizes for changes, an error otherwise.
 		assert_eq!((changed(95.0, 5.0), changed(5.0, -5.0)), (96.0, 4.0));
 		assert_eq!(checked(100.0).unwrap_err(), "font size 100 is outside 4..96 points");
 	}

@@ -1,4 +1,4 @@
-//! The connection to Neovim: its process, msgpack-rpc over its stdin and stdout, and what arrives unasked
+//! The connection to Neovim: its process, msgpack-rpc over its stdin and stdout, and what arrives unasked.
 
 mod error;
 mod frame;

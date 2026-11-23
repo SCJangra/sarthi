@@ -5,12 +5,12 @@
 
 use zeno::{Cap, Command, Fill, Mask, PathBuilder, Stroke};
 
-/// Whether sarthi draws `text` itself
+/// Whether sarthi draws `text` itself.
 pub(crate) fn is_builtin(text: &str) -> bool {
 	builtin_char(text).is_some()
 }
 
-/// The character sarthi draws for `text`, if it draws it
+/// The character sarthi draws for `text`, if it draws it.
 pub(crate) fn builtin_char(text: &str) -> Option<char> {
 	let mut chars = text.chars();
 	let c = chars.next()?;
@@ -30,7 +30,7 @@ pub(crate) fn rasterize(c: char, width: u32, height: u32, thickness: f32) -> Opt
 	Some(canvas.data)
 }
 
-/// Line weight of one arm of a box drawing character
+/// Line weight of one arm of a box drawing character.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Weight {
 	None,
@@ -40,7 +40,7 @@ enum Weight {
 }
 
 /// The arms of a box drawing line character, up, right, down, left, from a table entry like `".lh."`: `.` none,
-/// `l` light, `h` heavy, `d` double
+/// `l` light, `h` heavy, `d` double.
 fn arms(code: &str) -> [Weight; 4] {
 	let mut arms = [Weight::None; 4];
 	for (arm, c) in arms.iter_mut().zip(code.chars()) {
@@ -54,7 +54,7 @@ fn arms(code: &str) -> [Weight; 4] {
 	arms
 }
 
-/// Arms (up, right, down, left) of the box drawing characters made of lines, by code point
+/// Arms (up, right, down, left) of the box drawing characters made of lines, by code point.
 fn line_arms(c: char) -> Option<&'static str> {
 	Some(match c {
 		'─' => ".l.l",
@@ -170,13 +170,13 @@ fn line_arms(c: char) -> Option<&'static str> {
 	})
 }
 
-/// Where the lines of two opposite arms (up and down, or left and right) lie across the cell
+/// Where the lines of two opposite arms (up and down, or left and right) lie across the cell.
 struct Band {
-	/// The pixels all their lines cover, `start..end`
+	/// The pixels all their lines cover, `start..end`.
 	start: u32,
 	end: u32,
 
-	/// Whether either arm is double, and where the first and second line of a double arm start
+	/// Whether either arm is double, and where the first and second line of a double arm start.
 	double: bool,
 	first: u32,
 	second: u32,
@@ -198,13 +198,13 @@ impl Band {
 	}
 }
 
-/// An alpha mask of one cell, drawn in whole pixels
+/// An alpha mask of one cell, drawn in whole pixels.
 struct Canvas {
 	width: u32,
 	height: u32,
 
 	/// Thickness of light lines; heavy lines are twice as thick, and double lines are two light lines with a light
-	/// line between them
+	/// line between them.
 	light: u32,
 
 	data: Vec<u8>,
@@ -215,7 +215,7 @@ impl Canvas {
 		Self { width, height, light, data: vec![0; (width * height) as usize] }
 	}
 
-	/// Fills the pixels `x0..x1` × `y0..y1` with `alpha`, keeping any more opaque pixels
+	/// Fills the pixels `x0..x1` × `y0..y1` with `alpha`, keeping any more opaque pixels.
 	fn rect(&mut self, x0: u32, y0: u32, x1: u32, y1: u32, alpha: u8) {
 		for y in y0.min(self.height)..y1.min(self.height) {
 			for x in x0.min(self.width)..x1.min(self.width) {
@@ -225,12 +225,12 @@ impl Canvas {
 		}
 	}
 
-	/// Fills `path`, in pixel coordinates, anti-aliased
+	/// Fills `path`, in pixel coordinates, anti-aliased.
 	fn fill(&mut self, path: &Vec<Command>) {
 		self.render(Mask::new(path).style(Fill::NonZero).size(self.width, self.height).render().0);
 	}
 
-	/// Strokes `path`, in pixel coordinates, `width` pixels wide, anti-aliased
+	/// Strokes `path`, in pixel coordinates, `width` pixels wide, anti-aliased.
 	fn stroke(&mut self, path: &Vec<Command>, width: f32) {
 		let mut stroke = Stroke::new(width);
 		stroke.cap(Cap::Butt);
@@ -243,7 +243,7 @@ impl Canvas {
 		}
 	}
 
-	/// Thickness of a line of `weight`, and for double lines the thickness of both lines and their gap
+	/// Thickness of a line of `weight`, and for double lines the thickness of both lines and their gap.
 	fn thickness(&self, weight: Weight) -> u32 {
 		match weight {
 			Weight::None => 0,
@@ -253,7 +253,7 @@ impl Canvas {
 		}
 	}
 
-	/// Start of a line of `thickness` centered in `size`, in whole pixels, so it's at the same place in every cell
+	/// Start of a line of `thickness` centered in `size`, in whole pixels, so it's at the same place in every cell.
 	fn centered(size: u32, thickness: u32) -> u32 {
 		size.saturating_sub(thickness) / 2
 	}
@@ -290,13 +290,13 @@ impl Canvas {
 	/// that run through stops at the near one (`╧`); otherwise lines reach across (`╪`, `╓`).
 	fn lines(&mut self, [up, right, down, left]: [Weight; 4]) {
 		let (width, height, light) = (self.width, self.height, self.light);
-		// Where the vertical arms lie across x, and the horizontal arms across y
+		// Where the vertical arms lie across x, and the horizontal arms across y.
 		let columns = Band::new(self, width, up, down);
 		let rows = Band::new(self, height, left, right);
 		let rows_run_through = rows.double && left != Weight::None && right != Weight::None;
 		let columns_run_through = columns.double && up != Weight::None && down != Weight::None;
 
-		// Vertical arms: each line's start and end along y
+		// Vertical arms: each line's start and end along y.
 		for (weight, is_up) in [(up, true), (down, false)] {
 			let extent = |side: Weight| match (is_up, side == Weight::Double) {
 				(true, true) => (0, rows.first + light),
@@ -326,7 +326,7 @@ impl Canvas {
 			}
 		}
 
-		// Horizontal arms: each line's start and end along x
+		// Horizontal arms: each line's start and end along x.
 		for (weight, is_left) in [(left, true), (right, false)] {
 			let extent = |side: Weight| match (is_left, side == Weight::Double) {
 				(true, true) => (0, columns.first + light),
@@ -358,7 +358,7 @@ impl Canvas {
 	}
 
 	/// `count` dashes of equal length along the cell, each centered in its share, so they keep their rhythm across
-	/// cells
+	/// cells.
 	fn dashes(&mut self, horizontal: bool, weight: Weight, count: u32) {
 		let thickness = self.thickness(weight);
 		let (length, across) = if horizontal { (self.width, self.height) } else { (self.height, self.width) };
@@ -375,14 +375,14 @@ impl Canvas {
 		}
 	}
 
-	/// A rounded corner: the middle lines of `─` and `│`, joined by a quarter circle
+	/// A rounded corner: the middle lines of `─` and `│`, joined by a quarter circle.
 	fn arc(&mut self, c: char) {
 		let (width, height, light) = (self.width as f32, self.height as f32, self.light);
 		let x = Self::centered(self.width, light) as f32 + light as f32 / 2.0;
 		let y = Self::centered(self.height, light) as f32 + light as f32 / 2.0;
 		let radius = (width / 2.0).min(height / 2.0);
 
-		// Edge points of the horizontal and vertical arms, and the corner they turn around
+		// Edge points of the horizontal and vertical arms, and the corner they turn around.
 		let (horizontal_end, vertical_end) = match c {
 			'╭' => (width, height),
 			'╮' => (0.0, height),
@@ -392,7 +392,7 @@ impl Canvas {
 		let dx = if horizontal_end > x { radius } else { -radius };
 		let dy = if vertical_end > y { radius } else { -radius };
 
-		// A cubic Bézier close to a quarter circle
+		// A cubic Bézier close to a quarter circle.
 		const K: f32 = 0.552_284_8;
 		let mut path = Vec::new();
 		path.move_to([horizontal_end, y])
@@ -404,7 +404,7 @@ impl Canvas {
 
 	fn diagonals(&mut self, rising: bool, falling: bool) {
 		let (width, height) = (self.width as f32, self.height as f32);
-		// Past the corners, so the ends are cut by the cell edges and meet the next cell's line
+		// Past the corners, so the ends are cut by the cell edges and meet the next cell's line.
 		let (dx, dy) = (width / height, 1.0);
 		let mut path = Vec::new();
 		if rising {
@@ -418,16 +418,16 @@ impl Canvas {
 
 	fn block(&mut self, c: char) {
 		let (width, height) = (self.width, self.height);
-		// `n` eighths of `size`, in whole pixels
+		// `n` eighths of `size`, in whole pixels.
 		let eighths = |size: u32, n: u32| (size * n + 4) / 8;
 		let (mid_x, mid_y) = (eighths(width, 4), eighths(height, 4));
 		let code = c as u32;
 
 		match c {
 			'▀' => self.rect(0, 0, width, mid_y, 255),
-			// Lower one to seven eighths, then the full block
+			// Lower one to seven eighths, then the full block.
 			'▁'..='█' => self.rect(0, height - eighths(height, code - 0x2580), width, height, 255),
-			// Left seven eighths down to one eighth
+			// Left seven eighths down to one eighth.
 			'▉'..='▏' => self.rect(0, 0, eighths(width, 0x2590 - code), height, 255),
 			'▐' => self.rect(mid_x, 0, width, height, 255),
 			'░' => self.rect(0, 0, width, height, 64),
@@ -436,7 +436,7 @@ impl Canvas {
 			'▔' => self.rect(0, 0, width, eighths(height, 1), 255),
 			'▕' => self.rect(width - eighths(width, 1), 0, width, height, 255),
 			_ => {
-				// Quadrants: upper left, upper right, lower left, lower right
+				// Quadrants: upper left, upper right, lower left, lower right.
 				let quadrants: [bool; 4] = match c {
 					'▖' => [false, false, true, false],
 					'▗' => [false, false, false, true],
@@ -480,7 +480,7 @@ impl Canvas {
 			}
 			path
 		};
-		// Half an ellipse from the top to the bottom edge through `tip`, starting at `x`
+		// Half an ellipse from the top to the bottom edge through `tip`, starting at `x`.
 		let half_circle = |x: f32, tip: f32| {
 			const K: f32 = 0.552_284_8;
 			let mut path = Vec::new();
@@ -518,7 +518,7 @@ mod tests {
 	const W: u32 = 8;
 	const H: u32 = 19;
 
-	/// The mask of `c` in an 8×19 cell with 1 px light lines, as rows of booleans (mostly covered pixels)
+	/// The mask of `c` in an 8×19 cell with 1 px light lines, as rows of booleans (mostly covered pixels).
 	fn draw(c: char) -> Vec<Vec<bool>> {
 		let mask = rasterize(c, W, H, 1.0).unwrap();
 		mask.chunks(W as usize)
@@ -530,7 +530,7 @@ mod tests {
 		rasterize(c, W, H, 1.0).unwrap()[(y * W + x) as usize]
 	}
 
-	/// Rows and columns that are covered across the whole cell
+	/// Rows and columns that are covered across the whole cell.
 	fn full_rows(mask: &[Vec<bool>]) -> Vec<usize> {
 		(0..mask.len()).filter(|&y| mask[y].iter().all(|&on| on)).collect()
 	}
@@ -630,7 +630,7 @@ mod tests {
 	#[test]
 	fn dashes() {
 		let dashed = draw('┄');
-		// Three 1 px dashes along row 9, each centered in its third of the cell
+		// Three 1 px dashes along row 9, each centered in its third of the cell.
 		let row: Vec<bool> = dashed[9].clone();
 		assert_eq!(row, [true, false, false, true, false, false, true, false]);
 	}
@@ -638,10 +638,10 @@ mod tests {
 	#[test]
 	fn blocks_fill_exact_fractions() {
 		assert!(draw('█').iter().all(|row| row.iter().all(|&on| on)));
-		// Lower half: rows 9.5 rounded to 10 of 19
+		// Lower half: rows 9.5 rounded to 10 of 19.
 		assert_eq!(full_rows(&draw('▄')), (9..19).collect::<Vec<_>>());
 		assert_eq!(full_rows(&draw('▀')), (0..10).collect::<Vec<_>>());
-		// Lower one eighth (2 px) and left one eighth (1 px)
+		// Lower one eighth (2 px) and left one eighth (1 px).
 		assert_eq!(full_rows(&draw('▁')), [17, 18]);
 		assert_eq!(full_columns(&draw('▏')), [0]);
 		// The halves of ▌ and ▐ add up to the cell without overlapping.

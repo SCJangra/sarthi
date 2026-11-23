@@ -1,4 +1,4 @@
-//! Neovim's highlights (`:help ui-event-hl_attr_define`): the colors and attributes of each highlight id
+//! Neovim's highlights (`:help ui-event-hl_attr_define`): the colors and attributes of each highlight id.
 
 use std::collections::HashMap;
 
@@ -6,45 +6,45 @@ use renderer::Underline;
 use rpc::neovim::{DefaultColorsSetEvent, HlAttrDefineEvent, HlAttrs, HlGroupSetEvent, HlId};
 use smart_default::SmartDefault;
 
-/// Default colors until Neovim sends its own, matching what Neovim uses when none are set
+/// Default colors until Neovim sends its own, matching what Neovim uses when none are set.
 const INITIAL_DEFAULT_COLORS: DefaultColors =
 	DefaultColors { foreground: 0xFFFFFF, background: 0x000000, special: 0xFF0000 };
 
-/// Neovim's default colors (`default_colors_set`), as `0xRRGGBB`
+/// Neovim's default colors (`default_colors_set`), as `0xRRGGBB`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DefaultColors {
-	/// Text color
+	/// Text color.
 	pub foreground: u32,
-	/// Background color
+	/// Background color.
 	pub background: u32,
-	/// Color of underlines and undercurls
+	/// Color of underlines and undercurls.
 	pub special: u32,
 }
 
-/// How a cell looks, with every color resolved to `0xRRGGBB`
+/// How a cell looks, with every color resolved to `0xRRGGBB`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellStyle {
-	/// Text color
+	/// Text color.
 	pub foreground: u32,
-	/// Background color
+	/// Background color.
 	pub background: u32,
 
-	/// Color of underlines and undercurls
+	/// Color of underlines and undercurls.
 	pub special: u32,
 
-	/// Drawn in a bold face
+	/// Drawn in a bold face.
 	pub bold: bool,
-	/// Drawn in an italic face
+	/// Drawn in an italic face.
 	pub italic: bool,
 
-	/// The line drawn under the text, if any
+	/// The line drawn under the text, if any.
 	pub underline: Option<Underline>,
-	/// A line through the text
+	/// A line through the text.
 	pub strikethrough: bool,
-	/// A line over the text
+	/// A line over the text.
 	pub overline: bool,
 
-	/// How much of what's under the cell shows through its background, from 0 to 100 (`winblend`, `pumblend`)
+	/// How much of what's under the cell shows through its background, from 0 to 100 (`winblend`, `pumblend`).
 	pub blend: u8,
 }
 
@@ -62,7 +62,7 @@ pub struct HighlightState {
 }
 
 impl HighlightState {
-	/// Neovim's default colors, which highlights without colors of their own take
+	/// Neovim's default colors, which highlights without colors of their own take.
 	pub fn defaults(&self) -> DefaultColors {
 		self.defaults
 	}
@@ -80,13 +80,13 @@ impl HighlightState {
 		}
 	}
 
-	/// The highlight ids of Neovim's UI groups, by name (`hl_group_set`)
+	/// The highlight ids of Neovim's UI groups, by name (`hl_group_set`).
 	pub fn set_hl_groups(&mut self, groups: Vec<HlGroupSetEvent>) {
 		self.groups.extend(groups.into_iter().map(|group| (group.name, group.hl_id)));
 	}
 
 	/// The highlight id of Neovim's UI highlight group `name` (`:help highlight-groups`), or 0, the default highlight,
-	/// until Neovim sends it with `hl_group_set`
+	/// until Neovim sends it with `hl_group_set`.
 	pub fn group(&self, name: &str) -> HlId {
 		self.groups.get(name).copied().unwrap_or_default()
 	}
@@ -163,7 +163,7 @@ pub(crate) mod tests {
 		HlAttrDefineEvent { id: HlId(id), rgb_attr: rgb_attr.clone(), cterm_attr: rgb_attr, info: vec![] }
 	}
 
-	/// Attributes that set nothing
+	/// Attributes that set nothing.
 	pub(crate) fn attrs() -> HlAttrs {
 		HlAttrs {
 			foreground: None,
@@ -263,7 +263,7 @@ pub(crate) mod tests {
 			define(2, HlAttrs { blend: Some(250), ..attrs() }),
 		]);
 		assert_eq!((state.resolve(HlId(0)).blend, state.resolve(HlId(1)).blend), (0, 30));
-		// At most all of it
+		// At most all of it.
 		assert_eq!(state.resolve(HlId(2)).blend, 100);
 	}
 
@@ -271,7 +271,7 @@ pub(crate) mod tests {
 	fn reverse_swaps_resolved_colors() {
 		let mut state = state();
 		state.set_attrs(vec![
-			// Like StatusLine with `reverse` and no colors of its own
+			// Like StatusLine with `reverse` and no colors of its own.
 			define(1, HlAttrs { reverse: true, ..attrs() }),
 			define(2, HlAttrs { foreground: Some(0x112233), reverse: true, ..attrs() }),
 		]);
@@ -318,7 +318,7 @@ pub(crate) mod tests {
 			define(3, HlAttrs { underdouble: true, overline: true, ..attrs() }),
 			define(4, HlAttrs { underdotted: true, ..attrs() }),
 			define(5, HlAttrs { underdashed: true, ..attrs() }),
-			// Several underline styles: the more specific one wins
+			// Several underline styles: the more specific one wins.
 			define(6, HlAttrs { underline: true, undercurl: true, ..attrs() }),
 		]);
 

@@ -78,18 +78,18 @@ pub enum RedrawNotification {
 
 	OptionSet(#[tagged_enum(flatten)] Vec<OptionSetEvent>),
 
-	/// The UI must stop drawing the cursor until `BusyStop` (`:help ui-global`)
+	/// The UI must stop drawing the cursor until `BusyStop` (`:help ui-global`).
 	BusyStart,
 
 	BusyStop,
 
 	/// Mouse input is on in the current mode, as the `mouse` option says; the TUI only reports the mouse while it's on
-	/// (`:help ui-global`)
+	/// (`:help ui-global`).
 	MouseOn,
 
 	MouseOff,
 
-	/// Neovim is done redrawing the screen, so this is the time to show the result (`:help ui-global`)
+	/// Neovim is done redrawing the screen, so this is the time to show the result (`:help ui-global`).
 	Flush,
 
 	/// An event sarthi doesn't handle. Its arguments are skipped without being decoded; `value` only keeps
@@ -135,7 +135,7 @@ mod tests {
 
 	#[test]
 	fn de_busy_start_and_stop() {
-		// ["busy_start", []] and ["busy_stop", []]
+		// ["busy_start", []] and ["busy_stop", []].
 		let start = [&[0x92, 0xAA][..], b"busy_start", &[0x90]].concat();
 		let stop = [&[0x92, 0xA9][..], b"busy_stop", &[0x90]].concat();
 
@@ -145,7 +145,7 @@ mod tests {
 
 	#[test]
 	fn de_mouse_on_and_off() {
-		// ["mouse_on", []] and ["mouse_off", []]
+		// ["mouse_on", []] and ["mouse_off", []].
 		let on = [&[0x92, 0xA8][..], b"mouse_on", &[0x90]].concat();
 		let off = [&[0x92, 0xA9][..], b"mouse_off", &[0x90]].concat();
 
@@ -160,7 +160,7 @@ mod tests {
 			GridCursorGotoEvent { grid: crate::Grid(2), row: 7, col: 3 },
 		]);
 
-		// ["grid_cursor_goto", [1, 5, 9, "new"], [2, 7, 3]]: a newer Neovim may append parameters
+		// ["grid_cursor_goto", [1, 5, 9, "new"], [2, 7, 3]]: a newer Neovim may append parameters.
 		let event = vec![
 			0x93, 0xB0, 0x67, 0x72, 0x69, 0x64, 0x5F, 0x63, 0x75, 0x72, 0x73, 0x6F, 0x72, 0x5F, 0x67, 0x6F, 0x74, 0x6F,
 			0x94, 0x01, 0x05, 0x09, 0xA3, 0x6E, 0x65, 0x77, 0x93, 0x02, 0x07, 0x03,

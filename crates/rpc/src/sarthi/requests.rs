@@ -56,110 +56,110 @@ pub enum Request {
 	#[schemars(extend("x-lua" = "api.nvim_win_get_config", "x-returns" = "vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig }"))]
 	NvimWinGetConfig(NvimWinGetConfigArgs),
 
-	/// The clipboard provider copying to `+` or `*`
+	/// The clipboard provider copying to `+` or `*`.
 	#[schemars(skip)]
 	SetClipboard(SetClipboardArgs),
 
-	/// The clipboard provider pasting from `+` or `*`
+	/// The clipboard provider pasting from `+` or `*`.
 	#[schemars(skip)]
 	GetClipboard(GetClipboardArgs),
 
-	/// A method sarthi doesn't know
+	/// A method sarthi doesn't know.
 	#[schemars(skip)]
 	Other {
-		/// Its name
+		/// Its name.
 		method: String,
 
-		/// Its arguments, skipped
+		/// Its arguments, skipped.
 		value: IgnoredAny,
 	},
 }
 
-/// The arguments of [`Request::Setup`]
+/// The arguments of [`Request::Setup`].
 #[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SetupArgs {
-	/// The settings ([Settings](#sarthi-settings)); left out, all the defaults
+	/// The settings ([Settings](#sarthi-settings)); left out, all the defaults.
 	// Boxed: the settings are large, and other messages shouldn't take their room.
 	pub settings: Option<Box<Settings>>,
 }
 
-/// The arguments of [`Request::GetSettings`]: none
+/// The arguments of [`Request::GetSettings`]: none.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct GetSettingsArgs {}
 
-/// The arguments of [`Request::SetFontSize`]
+/// The arguments of [`Request::SetFontSize`].
 #[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SetFontSizeArgs {
-	/// Size in points
+	/// Size in points.
 	pub points: f32,
 }
 
-/// The arguments of [`Request::ChangeFontSize`]
+/// The arguments of [`Request::ChangeFontSize`].
 #[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct ChangeFontSizeArgs {
-	/// Points to add, or to take away if negative
+	/// Points to add, or to take away if negative.
 	pub delta: f32,
 }
 
-/// The arguments of [`Request::NvimOpenWin`]
+/// The arguments of [`Request::NvimOpenWin`].
 #[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct NvimOpenWinArgs {
-	/// The buffer it shows
+	/// The buffer it shows.
 	pub buf: Buffer,
 
-	/// Whether it becomes the current window
+	/// Whether it becomes the current window.
 	pub enter: bool,
 
-	/// Neovim's window config, with a `sarthi` table in it
+	/// Neovim's window config, with a `sarthi` table in it.
 	#[schemars(with = "NvimWinConfig")]
 	pub config: rmpv::Value,
 }
 
-/// The arguments of [`Request::NvimWinSetConfig`]
+/// The arguments of [`Request::NvimWinSetConfig`].
 #[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct NvimWinSetConfigArgs {
-	/// The window, or 0 for the current one
+	/// The window, or 0 for the current one.
 	#[serde(deserialize_with = "window_number")]
 	pub win: Window,
 
-	/// Neovim's window config, with a `sarthi` table in it
+	/// Neovim's window config, with a `sarthi` table in it.
 	#[schemars(with = "NvimWinConfig")]
 	pub config: rmpv::Value,
 }
 
-/// The arguments of [`Request::NvimWinGetConfig`]
+/// The arguments of [`Request::NvimWinGetConfig`].
 #[derive(Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct NvimWinGetConfigArgs {
-	/// The window, or 0 for the current one
+	/// The window, or 0 for the current one.
 	#[serde(deserialize_with = "window_number")]
 	pub win: Window,
 }
 
-/// The clipboard provider's copy
+/// The clipboard provider's copy.
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SetClipboardArgs {
-	/// `+` or `*`
+	/// `+` or `*`.
 	pub register: Register,
-	/// The lines copied
+	/// The lines copied.
 	pub lines: Vec<String>,
 
-	/// `v`, `V` or a block like `^V10`
+	/// `v`, `V` or a block like `^V10`.
 	pub regtype: String,
 }
 
-/// The clipboard provider's paste
+/// The clipboard provider's paste.
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct GetClipboardArgs {
-	/// `+` or `*`
+	/// `+` or `*`.
 	pub register: Register,
 }
 
@@ -168,7 +168,7 @@ pub struct GetClipboardArgs {
 struct NvimWinConfig;
 
 impl JsonSchema for NvimWinConfig {
-	/// Written where it's used, so its Lua type goes with it
+	/// Written where it's used, so its Lua type goes with it.
 	fn inline_schema() -> bool {
 		true
 	}
@@ -194,7 +194,7 @@ mod tests {
 	use super::{Request, SetClipboardArgs, SetFontSizeArgs};
 	use crate::Register;
 
-	/// `[method, [args…]]`, the way Neovim sends a request after its id
+	/// `[method, [args…]]`, the way Neovim sends a request after its id.
 	fn decode(method: &str, args: Vec<Value>) -> Result<Request, String> {
 		let request = Value::Array(vec![Value::from(method), Value::Array(args)]);
 		rmpv::ext::from_value(request).map_err(|rmpv::ext::Error::Syntax(message)| message)
@@ -215,15 +215,15 @@ mod tests {
 		let request = decode("get_clipboard", vec![Value::from("*")]).unwrap();
 		assert!(matches!(&request, Request::GetClipboard(args) if args.register == Register::Primary), "{request:?}");
 
-		// An empty Lua table arrives as an array: all settings at their defaults
+		// An empty Lua table arrives as an array: all settings at their defaults.
 		let request = decode("setup", vec![Value::Array(Vec::new())]).unwrap();
 		assert!(matches!(request, Request::Setup(_)), "{request:?}");
 
-		// No settings: the defaults
+		// No settings: the defaults.
 		let request = decode("setup", vec![Value::Nil]).unwrap();
 		assert_eq!(request, Request::Setup(super::SetupArgs { settings: None }));
 
-		// A Lua integer as a size
+		// A Lua integer as a size.
 		let request = decode("set_font_size", vec![Value::from(14)]).unwrap();
 		let expected = SetFontSizeArgs { points: 14.0 };
 		assert_eq!(request, Request::SetFontSize(expected));

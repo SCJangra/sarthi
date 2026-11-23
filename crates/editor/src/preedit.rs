@@ -1,4 +1,4 @@
-//! The text an input method is composing (its preedit), shown at the cursor until it's committed to Neovim
+//! The text an input method is composing (its preedit), shown at the cursor until it's committed to Neovim.
 
 use renderer::{BarOrientation, Cursor, CursorShape, Layer, Rect, RenderCell, Underline};
 use rpc::neovim::CellText;
@@ -7,12 +7,12 @@ use unicode_width::UnicodeWidthChar;
 /// An id no grid has: Neovim's grid ids are 32-bit, and the message separator takes the one after them.
 pub(crate) const PREEDIT_ID: u64 = u32::MAX as u64 + 2;
 
-/// Text an input method is composing, and where its caret is in it, as a byte offset
+/// Text an input method is composing, and where its caret is in it, as a byte offset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preedit {
-	/// The text, as the input method shows it
+	/// The text, as the input method shows it.
 	pub text: String,
-	/// Where the caret is in `text`, as a byte offset, if the input method shows one
+	/// Where the caret is in `text`, as a byte offset, if the input method shows one.
 	pub caret: Option<usize>,
 }
 
@@ -55,7 +55,7 @@ pub fn preedit_layer(layers: &mut [Layer], preedit: &Preedit) -> Option<Layer> {
 			Some(width) => {
 				let text = CellText::from(character.encode_utf8(&mut [0; 4])).ok()?;
 				cells.push(RenderCell { text, decoration, ..style });
-				// The right half of a double-width character
+				// The right half of a double-width character.
 				for _ in 1..width {
 					cells.push(RenderCell { text: CellText::new(), decoration, ..style });
 				}
@@ -69,7 +69,7 @@ pub fn preedit_layer(layers: &mut [Layer], preedit: &Preedit) -> Option<Layer> {
 		cursor_layer.cursor = Some(cursor);
 		return None;
 	}
-	// Room for a caret after the text
+	// Room for a caret after the text.
 	let width = cells.len() as u32 + u32::from(caret_col == Some(cells.len() as u32));
 	cells.resize(width as usize, RenderCell { text: CellText::from(" ").ok()?, ..style });
 
@@ -102,7 +102,7 @@ pub fn preedit_layer(layers: &mut [Layer], preedit: &Preedit) -> Option<Layer> {
 	})
 }
 
-/// How much of a cell the caret covers: as much as the cursor's own vertical bar, as in insert mode, otherwise a quarter
+/// How much of a cell the caret covers: as much as the cursor's own vertical bar, as in insert mode, otherwise a quarter.
 fn bar_percentage(shape: CursorShape) -> u32 {
 	match shape {
 		CursorShape::Bar { orientation: BarOrientation::Vertical, percentage } => percentage,
@@ -123,7 +123,7 @@ mod tests {
 	const FG: u32 = 0x112233;
 	const BG: u32 = 0x445566;
 
-	/// A 6×2 layer at (100, 40), its cursor at row 1, column 2, as an insert mode bar
+	/// A 6×2 layer at (100, 40), its cursor at row 1, column 2, as an insert mode bar.
 	fn layer() -> Layer {
 		let cell = RenderCell {
 			text: CellText::from("x").unwrap(),
@@ -192,7 +192,7 @@ mod tests {
 	#[test]
 	fn the_cursor_moves_to_the_caret() {
 		let mut layers = [layer()];
-		// After "日", 3 bytes in: its two cells
+		// After "日", 3 bytes in: its two cells.
 		let shown = preedit_layer(&mut layers, &preedit("日本", Some(3))).unwrap();
 		let caret = shown.cursor.unwrap();
 		assert_eq!((caret.col, caret.color, caret.motion), (2, 0xFF0000, None));

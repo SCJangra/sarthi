@@ -1,18 +1,18 @@
-//! The system clipboard and primary selection, for Neovim's `+` and `*` registers
+//! The system clipboard and primary selection, for Neovim's `+` and `*` registers.
 
 use std::time::{Duration, Instant};
 
 use rpc::sarthi::{Copied, Paste, Register};
 use winit::window::Window;
 
-/// The system clipboard, for Neovim's `+` and `*` registers
+/// The system clipboard, for Neovim's `+` and `*` registers.
 pub struct Clipboard {
 	clipboard: window_clipboard::Clipboard,
 	copies: Copies,
 }
 
 impl Clipboard {
-	/// Connects to the clipboard of `window`'s display
+	/// Connects to the clipboard of `window`'s display.
 	pub fn connect(window: &Window) -> Result<Self, String> {
 		// SAFETY: the display stays valid while `Clipboard` lives: the window state drops it before the window.
 		let clipboard = unsafe { window_clipboard::Clipboard::connect(window) }.map_err(|err| err.to_string())?;
@@ -47,13 +47,13 @@ impl Clipboard {
 /// sarthi copied, and reading before gets what it held before.
 const ANNOUNCE_TIME: Duration = Duration::from_millis(500);
 
-/// What sarthi copied to `+` and to `*`
+/// What sarthi copied to `+` and to `*`.
 #[derive(Debug, Default)]
 struct Copies {
-	/// The last copy to each register, with its register type, so pasting it back keeps the type
+	/// The last copy to each register, with its register type, so pasting it back keeps the type.
 	last: [Option<Copied>; 2],
 
-	/// When sarthi copied to each register, until the system clipboard shows the copy
+	/// When sarthi copied to each register, until the system clipboard shows the copy.
 	unannounced: [Option<Instant>; 2],
 }
 
@@ -81,7 +81,7 @@ impl Copies {
 	}
 }
 
-/// What pasting `text` returns, given what sarthi last `copied` to the register
+/// What pasting `text` returns, given what sarthi last `copied` to the register.
 fn paste(text: &str, copied: Option<&Copied>) -> Paste {
 	let lines: Vec<String> = text
 		.split('\n')

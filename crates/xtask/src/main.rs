@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// Width of the help file's text
+/// Width of the help file's text.
 const WIDTH: usize = 78;
 
 fn main() {
@@ -25,7 +25,7 @@ fn main() {
 	}
 }
 
-/// Writes the generated files, or with `check`, fails if one of them isn't what it would be
+/// Writes the generated files, or with `check`, fails if one of them isn't what it would be.
 fn docs(check: bool) {
 	let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
 	let files: [(PathBuf, String); 4] = [
@@ -59,7 +59,7 @@ fn docs(check: bool) {
 fn render(root: &Path, markdown: &str) -> String {
 	let mut pandoc = Command::new("pandoc")
 		.args(["--from=markdown", "--to=vimdoc", "--standalone", "--fail-if-warnings"])
-		// The sections, and in them the settings' sections and the window functions' tables
+		// The sections, and in them the settings' sections and the window functions' tables.
 		.args(["--toc", "--toc-depth=2"])
 		.arg(format!("--columns={WIDTH}"))
 		.args(["--metadata=filename:sarthi.txt", "--metadata=title:Sarthi, a GUI for Neovim"])

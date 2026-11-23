@@ -2,7 +2,7 @@
 
 #![allow(dead_code, non_camel_case_types)]
 
-/// A local `Result` alias, as many crates define
+/// A local `Result` alias, as many crates define.
 type Result<T> = core::result::Result<T, ()>;
 
 /// Shadow prelude items the generated code uses.
@@ -11,7 +11,7 @@ struct Some;
 struct Option;
 struct Vec;
 
-/// Types named like the generic parameters the generated code declares
+/// Types named like the generic parameters the generated code declares.
 #[derive(Debug, PartialEq, serde::Deserialize)]
 struct A(u32);
 #[derive(Debug, PartialEq, serde::Deserialize)]
@@ -21,7 +21,7 @@ struct T(u32);
 #[derive(Debug, PartialEq, serde::Deserialize)]
 struct E(u32);
 
-/// A type named like a visitor the generated code could have declared
+/// A type named like a visitor the generated code could have declared.
 struct EventVisitor;
 struct Tag;
 

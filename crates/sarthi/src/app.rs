@@ -1,4 +1,4 @@
-//! The app: the window, Neovim, and everything between them, driven by winit's events and Neovim's messages
+//! The app: the window, Neovim, and everything between them, driven by winit's events and Neovim's messages.
 
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
@@ -33,12 +33,12 @@ use rpc::sarthi::{
 use crate::api::{self, MainTask};
 use crate::blur::Blur;
 use crate::clipboard::Clipboard;
-use crate::error::Error;
+use crate::error::{Error, StartError};
 use crate::guifont;
 use crate::input::{committed_text, neovim_keys};
 use crate::mouse::Mouse;
 use crate::settings;
-use crate::startup::{self, StartError};
+use crate::startup;
 use crate::windows::{GridSize, WindowConfig};
 
 /// Sarthi's app ID (Wayland) and window class (X11), and the name of its desktop file.
@@ -50,60 +50,60 @@ pub struct App {
 	pub editor: Editor,
 	pub fonts: Fonts,
 
-	/// The main font, from `guifont`: always [`FontFamily::Named`] and [`FontSize::Points`]
+	/// The main font, from `guifont`.
 	pub font: Font,
 
-	/// The last applied `guifont` value
+	/// The last applied `guifont` value.
 	pub guifont: String,
 
-	/// The `linespace` value last applied, in logical pixels
+	/// The `linespace` value last applied, in logical pixels.
 	pub linespace: i64,
 
-	/// Neovim, or why it didn't start, which the window shows instead
+	/// Neovim, or why it didn't start, which the window shows instead.
 	pub nvim: Result<Nvim, StartError>,
 
-	/// Grid size last sent to Neovim, so resizes that don't change it aren't sent again
+	/// Grid size last sent to Neovim, so resizes that don't change it aren't sent again.
 	pub ui_size: GridSize,
 
-	/// The fonts external windows asked for (`sarthi.font`), by window, so they're sized again with the main one
+	/// The fonts external windows asked for (`sarthi.font`), by window, so they're sized again with the main one.
 	pub window_fonts: HashMap<rpc::neovim::Window, Font>,
 
-	/// Modifier keys held right now, for the keys and mouse events sent to Neovim
+	/// Modifier keys held right now, for the keys and mouse events sent to Neovim.
 	pub modifiers: ModifiersState,
 
-	/// What the mouse is doing over the window
+	/// What the mouse is doing over the window.
 	pub mouse: Mouse,
 
-	/// How the pointer looks over the window, as last set
+	/// How the pointer looks over the window, as last set.
 	pub pointer: Pointer,
 
-	/// What the user set with `require("sarthi").setup()`, or the defaults
+	/// What the user set with `require("sarthi").setup()`, or the defaults.
 	pub settings: Settings,
 
-	/// The mistake last reported in each window's `w:sarthi`, so each is reported once
+	/// The mistake last reported in each window's `w:sarthi`, so each is reported once.
 	pub window_mistakes: HashMap<rpc::neovim::Window, String>,
 
 	pub error: Option<Error>,
 }
 
-/// A window and its renderer, which holds what the window shows
+/// A window and its renderer, which holds what the window shows.
 pub struct WindowState {
 	/// The clipboard of the window's display, if it could connect. Dropped first: it needs the display.
 	pub clipboard: Option<Clipboard>,
 
-	/// The blur behind the window, which also needs the display
+	/// The blur behind the window, which also needs the display.
 	pub blur: Blur,
 
 	pub window: Arc<Window>,
 	pub renderer: Renderer,
 
 	/// Where the input method was last told the cursor is, so it puts its candidates by it: left, top, width, height in
-	/// pixels
+	/// pixels.
 	pub ime_area: Option<Rect<u32>>,
 }
 
 impl WindowState {
-	/// Logs what draws the window and which of its effects work, for bug reports
+	/// Logs what draws the window and which of its effects work, for bug reports.
 	fn log_display(&self) {
 		let backend = match self.window.display_handle().map(|display| display.as_raw()) {
 			Ok(RawDisplayHandle::Wayland(_)) => "Wayland",
@@ -122,7 +122,7 @@ impl WindowState {
 	}
 
 	/// Tells the input method where the cursor is, its `area` in pixels, so its candidates go by it; where it isn't drawn, they
-	/// stay where they were
+	/// stay where they were.
 	fn place_ime(&mut self, area: Option<Rect<u32>>) {
 		if let Some(area @ Rect { x, y, width, height }) = area
 			&& self.ime_area != Some(area)
@@ -133,7 +133,7 @@ impl WindowState {
 		}
 	}
 
-	/// What `settings` ask for that this display can't show
+	/// What `settings` ask for that this display can't show.
 	fn unsupported(&self, settings: &Settings) -> Vec<&'static str> {
 		let mut messages = Vec::new();
 		if settings.background.opacity < 1.0 && !self.renderer.is_see_through() {
@@ -148,18 +148,18 @@ impl WindowState {
 
 #[derive(Debug)]
 pub enum AppEvent {
-	/// A notification from Neovim
+	/// A notification from Neovim.
 	Nvim(Notification),
 
-	/// Work for the main thread, from a request answered on the API's thread pool
+	/// Work for the main thread, from a request answered on the API's thread pool.
 	Main(MainTask),
 
-	/// The connection to Neovim closed, e.g. after `:q`
+	/// The connection to Neovim closed, e.g. after `:q`.
 	NvimExited,
 }
 
 impl App {
-	/// Runs Neovim, `nvim`, with `args` from the command line, e.g. files to edit
+	/// Runs Neovim, `nvim`, with `args` from the command line, e.g. files to edit.
 	pub fn new(
 		config: WindowConfig,
 		nvim: &OsStr,
@@ -209,9 +209,9 @@ impl App {
 			.with_title(config.title.clone())
 			.with_inner_size(LogicalSize::new(f64::from(config.width), f64::from(config.height)))
 			.with_resizable(config.resizable)
-			// So `background.opacity` can make the background see-through: decided here, before the user's config runs
+			// So `background.opacity` can make the background see-through: decided here, before the user's config runs.
 			.with_transparent(true);
-		// Its app ID on Wayland and its class on X11, which desktops match to `sarthi.desktop` and its icon
+		// Its app ID on Wayland and its class on X11, which desktops match to `sarthi.desktop` and its icon.
 		let attributes = WindowAttributesExtWayland::with_name(attributes, APP_ID, "");
 		WindowAttributesExtX11::with_name(attributes, APP_ID, APP_ID)
 	}
@@ -245,16 +245,16 @@ impl App {
 		Ok(smol::block_on(Renderer::with_config(window.clone(), size.width, size.height, config))?)
 	}
 
-	/// Size of text in `window`, in physical pixels
+	/// Size of text in `window`, in physical pixels.
 	fn text_size(&self, window: &Window) -> TextSize {
 		self.text_size_of(window, self.main_font().1)
 	}
 
 	/// Size of text of `points` in `window`, in physical pixels, with the line space and underlines of the main font's
-	/// text
+	/// text.
 	fn text_size_of(&self, window: &Window, points: f32) -> TextSize {
 		let scale = window.scale_factor();
-		// Logical pixels like the font size, in whole physical ones
+		// Logical pixels like the font size, in whole physical ones.
 		let line_space = (self.linespace as f64 * scale)
 			.round()
 			.clamp(f64::from(i32::MIN), f64::from(i32::MAX));
@@ -262,12 +262,12 @@ impl App {
 		TextSize { font_size: guifont::pixels(points) * scale as f32, line_space: line_space as i32, underlines }
 	}
 
-	/// Size of a grid cell, in physical pixels: of the main fonts, as last sized (see [`App::update_text_size`])
+	/// Size of a grid cell, in physical pixels: of the main fonts, as last sized (see [`App::update_text_size`]).
 	fn cell_size(&self) -> CellSize {
 		self.fonts.cell_size(FontId::MAIN)
 	}
 
-	/// Number of grid cells that fit in `window`
+	/// Number of grid cells that fit in `window`.
 	fn grid_size(&self, window: &Window) -> GridSize {
 		GridSize::fit(window.inner_size(), self.cell_size())
 	}
@@ -293,7 +293,7 @@ impl App {
 	}
 
 	/// Draws external window `win`'s text in `font` (`sarthi.font`), or the main font for `None`; or what's wrong with
-	/// the font
+	/// the font.
 	pub(crate) fn set_window_font(&mut self, win: rpc::neovim::Window, font: Option<Font>) -> Result<(), String> {
 		let Some(font) = font else {
 			self.window_fonts.remove(&win);
@@ -324,13 +324,13 @@ impl App {
 		self.refresh();
 	}
 
-	/// The main font's families, and its size in points
+	/// The main font's families, and its size in points.
 	pub(crate) fn main_font(&self) -> (&[String], f32) {
 		(self.font.family.or(&[]), self.font.size.or(guifont::points(self.config.font_size)))
 	}
 
 	/// The fonts of `font` in `window`, and the size of their cells: the main font's families and size where it has none
-	/// of its own
+	/// of its own.
 	fn resolve_window_font(&mut self, window: &Window, font: &Font) -> Result<(FontId, CellSize), String> {
 		let (families, points) = self.main_font();
 		let (families, points) = (font.family.or(families).to_vec(), font.size.or(points));
@@ -381,7 +381,7 @@ impl App {
 		let params = UiTryResizeParams { width: size.width, height: size.height };
 		match &self.nvim {
 			Ok(nvim) => nvim.ui_try_resize(params)?,
-			// Why it didn't start, on the new screen
+			// Why it didn't start, on the new screen.
 			Err(error) => startup::show(&mut self.editor, error, size.width, size.height),
 		}
 		self.ui_size = size;
@@ -391,7 +391,7 @@ impl App {
 	fn handle_nvim_notification(&mut self, notification: Notification) {
 		match notification {
 			Notification::Redraw(events) => self.redraw_nvim(events),
-			// Before the redraw that scrolls them
+			// Before the redraw that scrolls them.
 			Notification::WinScrolled(WinScrolledArgs { windows }) => {
 				for window in windows {
 					let options = self.window_options(window.win, &window.sarthi);
@@ -399,7 +399,7 @@ impl App {
 					self.editor.set_scroll_animation(window.win, animation);
 				}
 			},
-			// Before Neovim draws them
+			// Before Neovim draws them.
 			Notification::FloatsChanged(FloatsChangedArgs { windows }) => {
 				for window in windows {
 					let options = self.window_options(window.win, &window.sarthi);
@@ -410,13 +410,13 @@ impl App {
 				self.refresh();
 			},
 			Notification::CmdheightChanged(CmdheightChangedArgs { rows }) => self.editor.set_command_rows(rows),
-			// Handled on the forwarding thread, where the API keeps what it forgets
+			// Handled on the forwarding thread, where the API keeps what it forgets.
 			Notification::WinClosed(_) => (),
 			Notification::Other { .. } => (),
 		}
 	}
 
-	/// Shows the pointer's look for what's under it in `window`, if it changed
+	/// Shows the pointer's look for what's under it in `window`, if it changed.
 	fn update_pointer(&mut self, window: &Window) {
 		let Some(pointer) = self.mouse.pointer(&self.editor) else { return };
 		if pointer != self.pointer {
@@ -431,7 +431,7 @@ impl App {
 	}
 
 	/// Gives the editor how floating windows look until sarthi learns about them, and the scale of the window's display,
-	/// which their styles are drawn at
+	/// which their styles are drawn at.
 	fn update_float_styles(&mut self) {
 		let scale = self.window.as_ref().map_or(1.0, |state| state.window.scale_factor()) as f32;
 		self.editor.set_scale(scale);
@@ -485,7 +485,7 @@ impl App {
 		self.show(redraw);
 	}
 
-	/// Shows what changed on sarthi's side, like a float's shadow, without waiting for Neovim's next redraw
+	/// Shows what changed on sarthi's side, like a float's shadow, without waiting for Neovim's next redraw.
 	pub(crate) fn refresh(&mut self) {
 		if let Some(redraw) = self.editor.refresh() {
 			self.show(redraw);
@@ -526,13 +526,13 @@ impl App {
 		}
 	}
 
-	/// The clipboard of the window's display
+	/// The clipboard of the window's display.
 	pub(crate) fn clipboard(&mut self) -> Result<&mut Clipboard, String> {
 		let clipboard = self.window.as_mut().and_then(|state| state.clipboard.as_mut());
 		clipboard.ok_or_else(|| String::from("no clipboard"))
 	}
 
-	/// Warns in Neovim about the settings this display can't show, which would otherwise seem to do nothing
+	/// Warns in Neovim about the settings this display can't show, which would otherwise seem to do nothing.
 	fn tell_unsupported(&mut self) {
 		let Some(state) = &self.window else { return };
 		for message in state.unsupported(&self.settings) {
@@ -626,11 +626,11 @@ impl App {
 		}
 	}
 
-	/// Shows the text the input method is composing at the cursor, and types what it commits
+	/// Shows the text the input method is composing at the cursor, and types what it commits.
 	fn input_method(&mut self, ime: Ime) {
 		match ime {
 			Ime::Preedit(text, caret) => {
-				// X11 gives a caret, Wayland a range it highlights, whose end is where typing goes on
+				// X11 gives a caret, Wayland a range it highlights, whose end is where typing goes on.
 				let caret = caret.map(|(_, end)| end);
 				self.editor.set_preedit(Some(Preedit { text, caret }));
 			},
@@ -789,7 +789,7 @@ impl ApplicationHandler<AppEvent> for App {
 	}
 }
 
-/// How sarthi introduces itself to Neovim (`:help nvim_set_client_info()`)
+/// How sarthi introduces itself to Neovim (`:help nvim_set_client_info()`).
 fn client_info() -> ClientInfo {
 	let number = |part: &str| part.parse().unwrap_or(0);
 	let version = ClientVersion {
@@ -801,7 +801,7 @@ fn client_info() -> ClientInfo {
 }
 
 /// Passes what Neovim sends on, until the connection closes: notifications to the main thread, and requests to the
-/// API's `pool`
+/// API's `pool`.
 fn forward(messages: &Receiver<Message>, main: &EventLoopProxy<AppEvent>, ctx: &api::Ctx, pool: &rayon::ThreadPool) {
 	for message in messages.iter() {
 		match message {

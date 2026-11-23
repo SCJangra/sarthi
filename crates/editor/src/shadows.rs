@@ -1,4 +1,4 @@
-//! The shadows under floating and external windows, shared by windows that belong together so they read as one
+//! The shadows under floating and external windows, shared by windows that belong together so they read as one.
 
 use std::collections::HashMap;
 
@@ -28,7 +28,7 @@ impl Editor {
 				.and_then(|float| float.parent)
 				.filter(|parent| zindex.contains_key(parent))
 		};
-		// Up to the float it's attached to, if any, and on from there; at most once per float, so a loop ends
+		// Up to the float it's attached to, if any, and on from there; at most once per float, so a loop ends.
 		let level = |mut win: Window| {
 			for _ in 0..floats.len() {
 				let Some(next) = parent(&win) else { break };
@@ -37,7 +37,7 @@ impl Editor {
 			zindex[&win]
 		};
 
-		// By level and shadow, in the order of their first windows: the level, the grid it's drawn with, and the shadow
+		// By level and shadow, in the order of their first windows: the level, the grid it's drawn with, and the shadow.
 		let mut groups: Vec<(u32, Grid, LayerShadow)> = Vec::new();
 		let mut first_of_level: HashMap<u32, Grid> = HashMap::new();
 		for &(id, win, _, [col, row]) in &floats {
@@ -46,7 +46,7 @@ impl Editor {
 			let Some(shadow) = self.shadow_of(win) else { continue };
 			let (grid, cell) = (&self.grids[&id], self.cell);
 			let [width, height] = [grid.width * cell.width, grid.height * cell.height];
-			// Its cells': a float has no frame
+			// Its cells': a float has no frame.
 			let rect = Rect::new(col * cell.width, row * cell.height, width, height);
 			let same = groups
 				.iter_mut()
@@ -55,7 +55,7 @@ impl Editor {
 				Some((_, _, group)) => group.area.push(rect),
 				None => {
 					let carrier = if groups.iter().any(|(group_level, ..)| *group_level == level) { id } else { first };
-					// Square, like its cells
+					// Square, like its cells.
 					groups.push((level, carrier, LayerShadow { shadow, area: vec![rect], radius: 0.0 }));
 				},
 			}
@@ -71,7 +71,7 @@ impl Editor {
 			let (&grid, _) = self.viewports.iter().find(|(_, viewport)| viewport.win == Some(win))?;
 			matches!(self.placements.get(&grid), Some(Placement::External { .. })).then_some(grid)
 		};
-		// The external window it's placed relative to, if any, and on from there; a few at most, so a loop ends
+		// The external window it's placed relative to, if any, and on from there; a few at most, so a loop ends.
 		let root = |mut win: Window| {
 			for _ in 0..8 {
 				let Some(Place::Relative { relative: Relative::Win(next), .. }) = self.places.get(&win) else { break };
@@ -83,7 +83,7 @@ impl Editor {
 			win
 		};
 
-		// By root and shadow, in the order of their first windows: the root, the grid it's drawn with, and the shadow
+		// By root and shadow, in the order of their first windows: the root, the grid it's drawn with, and the shadow.
 		let mut groups: Vec<(Window, Grid, LayerShadow)> = Vec::new();
 		for &(id, placement) in placed {
 			let Placement::External { win, .. } = placement else { continue };

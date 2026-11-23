@@ -1,4 +1,4 @@
-//! A grid as a layer for the renderer, with its highlights resolved and the cursor drawn
+//! A grid as a layer for the renderer, with its highlights resolved and the cursor drawn.
 
 use renderer::{BarOrientation, CellSize, Cursor, Decoration, FontId, Layer, RenderCell, TextStyle};
 use rpc::neovim::{CursorShape, HlId};
@@ -153,7 +153,7 @@ mod tests {
 		CursorStyle { shape, percentage, attr_id: HlId(attr_id), outline: false }
 	}
 
-	/// A 4×1 grid "ab漢" (the last cell is the right half of 漢) with the cursor at `col`
+	/// A 4×1 grid "ab漢" (the last cell is the right half of 漢) with the cursor at `col`.
 	fn grid_with_cursor(col: u32) -> GridState {
 		let mut grid = GridState::new(4, 1);
 		grid.set_line(0, 0, &[cell("a", None), cell("b", Some(1)), cell("漢", Some(0)), cell("", None)]);

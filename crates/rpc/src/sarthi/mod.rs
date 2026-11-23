@@ -19,10 +19,10 @@ pub use requests::*;
 pub use settings::*;
 
 /// What sarthi runs before the user's config (`runtime/startup.lua`), with its channel, [`MODULES`] and [`FILES`] as
-/// the arguments
+/// the arguments.
 pub const STARTUP: &str = include_str!("../../../../runtime/startup.lua");
 
-/// sarthi's Lua modules (`runtime/lua/`), by module name, preloaded at startup
+/// sarthi's Lua modules (`runtime/lua/`), by module name, preloaded at startup.
 pub const MODULES: [(&str, &str); 6] = [
 	("sarthi", include_str!("../../../../runtime/lua/sarthi/init.lua")),
 	("sarthi.api", include_str!("../../../../runtime/lua/sarthi/api.lua")),
@@ -51,7 +51,7 @@ mod tests {
 		let mut files: Vec<String> = std::fs::read_dir(dir.join("sarthi"))
 			.unwrap()
 			.map(|entry| entry.unwrap().file_name().into_string().unwrap())
-			// Not modules: types for lua-language-server
+			// Not modules: types for lua-language-server.
 			.filter(|name| !name.starts_with('_'))
 			.collect();
 		files.sort();

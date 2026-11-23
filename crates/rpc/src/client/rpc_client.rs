@@ -1,4 +1,4 @@
-//! A msgpack-rpc client over any reader and writer, reading and writing on threads of its own
+//! A msgpack-rpc client over any reader and writer, reading and writing on threads of its own.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -13,25 +13,25 @@ use crate::{
 	RpcRequest, RpcResponse,
 };
 
-/// A general msgpack RPC client
+/// A general msgpack RPC client.
 pub struct RpcClient {
 	inner: Arc<RpcClientInner>,
 	request: Sender<Vec<u8>>,
 
-	/// Handle for the thread that reads messages from the server
+	/// Handle for the thread that reads messages from the server.
 	#[allow(unused)]
 	read_handle: thread::JoinHandle<()>,
 
-	/// Handle for the thread that writes messages to the server
+	/// Handle for the thread that writes messages to the server.
 	#[allow(unused)]
 	write_handle: thread::JoinHandle<()>,
 }
 
 struct RpcClientInner {
-	/// Id of next RPC request
+	/// Id of next RPC request.
 	next_req_id: AtomicU32,
 
-	/// Whether the RPC client is running or not
+	/// Whether the RPC client is running or not.
 	running: AtomicBool,
 
 	/// Calls waiting for their response, by request id. Only the calling thread and the reader touch it, briefly,
@@ -88,7 +88,7 @@ impl RpcClientInner {
 			while self.running.load(Ordering::SeqCst) {
 				let frame = match frames.next_frame() {
 					Ok(Some(frame)) => frame,
-					// E.g. Neovim exited after `:qa`
+					// E.g. Neovim exited after `:qa`.
 					Ok(None) => {
 						tracing::debug!("RPC stream closed");
 						break;
@@ -272,7 +272,7 @@ impl RpcHandle {
 		self.send(rmp_serde::to_vec_named(&notification)?)
 	}
 
-	/// Hands an encoded message to the writer thread, while the client is still there
+	/// Hands an encoded message to the writer thread, while the client is still there.
 	fn send(&self, message: Vec<u8>) -> Result<(), RpcError> {
 		let request = self.request.upgrade().ok_or(RpcError::SendRequest)?;
 		request.send(message).map_err(|_| RpcError::SendRequest)
@@ -290,7 +290,7 @@ mod tests {
 		Request, RpcClient, RpcError, UiAttach, UiAttachParams, UiOptions,
 	};
 
-	/// Runs `call` on another thread, so a call that never returns fails the test instead of hanging it
+	/// Runs `call` on another thread, so a call that never returns fails the test instead of hanging it.
 	fn within_5s<T: Send + 'static>(call: impl FnOnce() -> T + Send + 'static) -> Option<T> {
 		let (done, result) = flume::bounded(1);
 		std::thread::spawn(move || done.send(call()));
@@ -462,7 +462,7 @@ mod tests {
 	/// delivered and nothing else is reported in its place.
 	#[test]
 	fn deliver_messages_after_one_that_fails_to_deserialize() {
-		// [2, "redraw", [["grid_line", ["x", 0, 0, [["a"]], false]]]]: the grid id must be an integer
+		// [2, "redraw", [["grid_line", ["x", 0, 0, [["a"]], false]]]]: the grid id must be an integer.
 		let bad_notification = [
 			&[0x93, 0x02, 0xA6][..],
 			b"redraw",
@@ -472,12 +472,12 @@ mod tests {
 		]
 		.concat();
 
-		// [2, "redraw", [["grid_cursor_goto", [1, 2, 3]]]]
+		// [2, "redraw", [["grid_cursor_goto", [1, 2, 3]]]].
 		let notification =
 			[&[0x93, 0x02, 0xA6][..], b"redraw", &[0x91, 0x92, 0xB0], b"grid_cursor_goto", &[0x93, 0x01, 0x02, 0x03]]
 				.concat();
 
-		// [1, 0, nil, 2]: response to the first request
+		// [1, 0, nil, 2]: response to the first request.
 		let response = [0x94, 0x01, 0x00, 0xC0, 0x02];
 
 		let (reader, pipe) = io::pipe().unwrap();

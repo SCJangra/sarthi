@@ -5,7 +5,7 @@ use serde::{Serialize, Serializer};
 use crate::RpcMethod;
 
 /// Neovim's [`nvim_set_client_info`](https://neovim.io/doc/user/api/#nvim_set_client_info()) function: identifies the
-/// client on its channel, so Lua code can find it with `nvim_list_chans()` or `nvim_get_chan_info()`
+/// client on its channel, so Lua code can find it with `nvim_list_chans()` or `nvim_get_chan_info()`.
 pub struct SetClientInfo;
 
 impl RpcMethod for SetClientInfo {
@@ -20,7 +20,7 @@ pub struct ClientInfo {
 	pub name: String,
 	pub version: ClientVersion,
 
-	/// "remote", "msgpack-rpc", "ui", "embedder", "host" or "plugin"
+	/// "remote", "msgpack-rpc", "ui", "embedder", "host" or "plugin".
 	pub kind: &'static str,
 }
 
@@ -31,7 +31,7 @@ pub struct ClientVersion {
 	pub patch: u32,
 }
 
-/// As positional arguments, the way Neovim takes them, without methods or attributes
+/// As positional arguments, the way Neovim takes them, without methods or attributes.
 impl Serialize for ClientInfo {
 	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
 		let none = HashMap::<String, ()>::new();

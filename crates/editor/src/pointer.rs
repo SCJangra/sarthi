@@ -1,39 +1,39 @@
-//! What's under the mouse pointer: which grid and cell, for mouse input, and how the pointer looks over it
+//! What's under the mouse pointer: which grid and cell, for mouse input, and how the pointer looks over it.
 
 use rpc::neovim::Grid;
 
 use crate::{Editor, Placement};
 
-/// How the mouse pointer looks, by what's under it (see [`Editor::pointer_at`])
+/// How the mouse pointer looks, by what's under it (see [`Editor::pointer_at`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pointer {
-	/// The default pointer
+	/// The default pointer.
 	Arrow,
 
-	/// Over text
+	/// Over text.
 	Text,
 
-	/// Over a separator between windows side by side, which drags left and right
+	/// Over a separator between windows side by side, which drags left and right.
 	ResizeColumns,
 
-	/// Over a status line, which drags up and down
+	/// Over a status line, which drags up and down.
 	ResizeRows,
 }
 
-/// A cell of a grid
+/// A cell of a grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridPosition {
-	/// The grid
+	/// The grid.
 	pub grid: Grid,
-	/// Row of the cell, from the grid's top
+	/// Row of the cell, from the grid's top.
 	pub row: u32,
-	/// Column of the cell, from the grid's left
+	/// Column of the cell, from the grid's left.
 	pub col: u32,
 }
 
 impl Editor {
 	/// The grid shown at `x`, `y` in pixels from the window's top-left corner, and the cell of it there: the topmost
-	/// grid there that takes the mouse, so not a float made with `mouse = false` (`:help ui-multigrid`)
+	/// grid there that takes the mouse, so not a float made with `mouse = false` (`:help ui-multigrid`).
 	pub fn grid_at(&self, x: f64, y: f64) -> Option<GridPosition> {
 		if let Some(grid) = self.external_at(x, y) {
 			let (row, col) = self.grid_cell(grid, x, y)?;
@@ -44,7 +44,7 @@ impl Editor {
 	}
 
 	/// The grid shown at cell `row`, `col` of the screen, and that cell in it, among the grids on the screen's cells
-	/// (not the external windows)
+	/// (not the external windows).
 	fn grid_at_cell(&self, row: u32, col: u32) -> Option<GridPosition> {
 		let screen_height = self.grids.get(&Grid::GLOBAL).map_or(0, |grid| grid.height);
 		let covers = |id: Grid, top: u32, left: u32, bottom: u32| {
@@ -69,7 +69,7 @@ impl Editor {
 		Some(GridPosition { grid, row: row - top, col: col - left })
 	}
 
-	/// The topmost external window at `x`, `y` in pixels, by its grid
+	/// The topmost external window at `x`, `y` in pixels, by its grid.
 	fn external_at(&self, x: f64, y: f64) -> Option<Grid> {
 		self.stacked().into_iter().rev().find_map(|(id, placement)| {
 			let Placement::External { win, .. } = placement else { return None };
@@ -99,7 +99,7 @@ impl Editor {
 	}
 
 	/// The cell of the screen at `x`, `y` in pixels, as (row, column), if it's on the screen's side of the window's
-	/// top-left corner
+	/// top-left corner.
 	fn screen_cell(&self, x: f64, y: f64) -> Option<(u32, u32)> {
 		let row = (y / f64::from(self.cell.height)).floor();
 		let col = (x / f64::from(self.cell.width)).floor();
@@ -107,7 +107,7 @@ impl Editor {
 	}
 
 	/// How the mouse pointer looks at `x`, `y` in pixels: text in windows, a resize arrow over separators and status
-	/// lines, which can be dragged, and an arrow elsewhere, or while Neovim's mouse is off
+	/// lines, which can be dragged, and an arrow elsewhere, or while Neovim's mouse is off.
 	pub fn pointer_at(&self, x: f64, y: f64) -> Pointer {
 		if !self.mouse {
 			return Pointer::Arrow;
@@ -119,7 +119,7 @@ impl Editor {
 		}
 	}
 
-	/// What of grid 1 cell `row`, `col` is: a window's separator, right of it, or its status line, below it
+	/// What of grid 1 cell `row`, `col` is: a window's separator, right of it, or its status line, below it.
 	fn border_at(&self, row: u32, col: u32) -> Pointer {
 		let windows = self.placements.iter().filter_map(|(id, placement)| match placement {
 			Placement::Tiled { row, col } => Some((*row, *col, self.grids.get(id)?)),
@@ -140,7 +140,7 @@ impl Editor {
 	}
 
 	/// The cell of the screen where grid `id`'s top-left cell is shown, if the grid is shown on the screen's cells (an
-	/// external window isn't)
+	/// external window isn't).
 	pub(crate) fn grid_origin(&self, id: Grid) -> Option<(u32, u32)> {
 		if id == Grid::GLOBAL {
 			return self.grids.contains_key(&Grid::GLOBAL).then_some((0, 0));

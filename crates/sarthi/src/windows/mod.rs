@@ -1,4 +1,4 @@
-//! The OS window's size, and how many cells fit in it
+//! The OS window's size, and how many cells fit in it.
 
 mod config;
 mod grid_size;

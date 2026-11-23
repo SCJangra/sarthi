@@ -1,4 +1,4 @@
-//! The renderer: draws the layers each frame, piece by piece, over the clear color
+//! The renderer: draws the layers each frame, piece by piece, over the clear color.
 
 use std::borrow::Cow;
 use std::ops::Range;
@@ -21,33 +21,33 @@ use crate::{
 	Cursor, CursorShape, Decoration, Fonts, Layer, Motion, Rect, RenderCell, RendererConfig, RendererError, TextStyle,
 };
 
-/// Draws [`Layer`]s to a window's surface with wgpu
+/// Draws [`Layer`]s to a window's surface with wgpu.
 pub struct Renderer {
 	surface: wgpu::Surface<'static>,
 	device: wgpu::Device,
 	queue: wgpu::Queue,
 	config: wgpu::SurfaceConfiguration,
 	adapter: wgpu::AdapterInfo,
-	/// The window's background, `0xRRGGBB` in sRGB, and how opaque it is, from 0 to 1: what the window is cleared to
+	/// The window's background, `0xRRGGBB` in sRGB, and how opaque it is, from 0 to 1: what the window is cleared to.
 	background: u32,
 	opacity: f32,
 	quads: QuadPipeline,
 	text: TextPipeline,
 	shape: ShapePipeline,
 
-	/// What to draw, the text sliding in it after scrolling, and the cursor on its way to where it is
+	/// What to draw, the text sliding in it after scrolling, and the cursor on its way to where it is.
 	layers: Vec<Layer>,
 	scrolls: ScrollAnimations,
 	cursor: CursorAnimation,
 
-	/// Whether the last frame drawn showed text sliding or the cursor on its way
+	/// Whether the last frame drawn showed text sliding or the cursor on its way.
 	animating: bool,
 
-	/// Quads of the current frame, layer by layer, and each layer's ranges of them; kept to reuse the allocations
+	/// Quads of the current frame, layer by layer, and each layer's ranges of them; kept to reuse the allocations.
 	frame_quads: FrameQuads,
 	layer_quads: Vec<LayerQuads>,
 
-	/// The surface's stencil buffer (see [`crate::stencil`]), as large as the surface
+	/// The surface's stencil buffer (see [`crate::stencil`]), as large as the surface.
 	stencil: wgpu::TextureView,
 }
 
@@ -133,7 +133,7 @@ impl Renderer {
 				.ok_or(RendererError::NoPresentMode)?,
 		};
 
-		// Premultiplied, like everything drawn, so the window can be see-through; otherwise whatever the surface offers
+		// Premultiplied, like everything drawn, so the window can be see-through; otherwise whatever the surface offers.
 		let alpha_mode = if capabilities.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
 			wgpu::CompositeAlphaMode::PreMultiplied
 		} else {
@@ -180,7 +180,7 @@ impl Renderer {
 		})
 	}
 
-	/// Resizes the surface to `width` × `height` pixels, for a resized window
+	/// Resizes the surface to `width` × `height` pixels, for a resized window.
 	pub fn resize(&mut self, width: u32, height: u32) {
 		self.config.width = width.max(1);
 		self.config.height = height.max(1);
@@ -188,7 +188,7 @@ impl Renderer {
 		self.stencil = stencil::view(&self.device, self.config.width, self.config.height);
 	}
 
-	/// Sets the color the window is cleared to, as `0xRRGGBB` in sRGB (the format Neovim uses)
+	/// Sets the color the window is cleared to, as `0xRRGGBB` in sRGB (the format Neovim uses).
 	pub fn set_clear_color(&mut self, rgb: u32) {
 		self.background = rgb;
 	}
@@ -199,18 +199,18 @@ impl Renderer {
 		self.opacity = opacity.clamp(0.0, 1.0);
 	}
 
-	/// The GPU and graphics API drawing the window
+	/// The GPU and graphics API drawing the window.
 	pub fn adapter(&self) -> &wgpu::AdapterInfo {
 		&self.adapter
 	}
 
 	/// Whether the window can show what's behind it: only where the surface takes premultiplied alpha; elsewhere
-	/// `set_opacity` changes nothing visible
+	/// `set_opacity` changes nothing visible.
 	pub fn is_see_through(&self) -> bool {
 		self.config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied
 	}
 
-	/// The color the window is cleared to: the background at its opacity, premultiplied like everything drawn
+	/// The color the window is cleared to: the background at its opacity, premultiplied like everything drawn.
 	fn clear_color(&self) -> wgpu::Color {
 		let color = wgpu_color(self.background, self.config.format.is_srgb());
 		let opacity = f64::from(self.opacity);
@@ -224,18 +224,18 @@ impl Renderer {
 		self.layers = layers;
 	}
 
-	/// Sets how text that scrolls moves to its new place, or none to jump there, from the next scroll on
+	/// Sets how text that scrolls moves to its new place, or none to jump there, from the next scroll on.
 	pub fn set_scroll_motion(&mut self, motion: Option<Motion>) {
 		self.scrolls.set_motion(motion);
 	}
 
-	/// The layers shown, as last set
+	/// The layers shown, as last set.
 	pub fn layers(&self) -> &[Layer] {
 		&self.layers
 	}
 
 	/// Whether the last frame drawn showed text sliding or the cursor moving, so the window should be drawn again: as of
-	/// when it was drawn, as a move that ended since still needs a frame at rest
+	/// when it was drawn, as a move that ended since still needs a frame at rest.
 	pub fn is_animating(&self) -> bool {
 		self.animating
 	}
@@ -352,7 +352,7 @@ impl Renderer {
 }
 
 /// The part of the cursor `piece`, within its clip, that the cursor's shape covers while on its way, with `corners` in
-/// pixels
+/// pixels.
 fn covered(piece: &Piece, corners: [[f32; 2]; 4]) -> Rect<u32> {
 	let (clip, layer) = (piece.clip, piece.layer.rect());
 	let (mut low, mut high) = ([clip.x, clip.y], [clip.right(), clip.bottom()]);
@@ -367,45 +367,45 @@ fn covered(piece: &Piece, corners: [[f32; 2]; 4]) -> Rect<u32> {
 	Rect::new(low[0], low[1], high[0].saturating_sub(low[0]), high[1].saturating_sub(low[1]))
 }
 
-/// What happened when rendering a frame
+/// What happened when rendering a frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Frame {
-	/// The frame was drawn and shown
+	/// The frame was drawn and shown.
 	Presented,
 
-	/// Nothing could be drawn right now (e.g. the window is hidden); try again on a later redraw
+	/// Nothing could be drawn right now (e.g. the window is hidden); try again on a later redraw.
 	Skipped,
 
-	/// The surface was out of date and has been reconfigured; draw again
+	/// The surface was out of date and has been reconfigured; draw again.
 	Reconfigured,
 }
 
 /// A cell layer as drawn in a frame: a whole layer, then over it the scrolling region of one whose text slides; and after
-/// all layers, the cursor
+/// all layers, the cursor.
 pub(crate) struct Piece<'a> {
 	pub layer: Cow<'a, Layer>,
 
-	/// Which part of its layer this is, which keeps its laid-out rows apart from the others'
+	/// Which part of its layer this is, which keeps its laid-out rows apart from the others'.
 	pub kind: PieceKind,
 
-	/// Pixels the layer is drawn below its row, or above if negative
+	/// Pixels the layer is drawn below its row, or above if negative.
 	pub offset: f32,
 
-	/// What's drawn outside this rectangle of the window, in pixels, is cut off
+	/// What's drawn outside this rectangle of the window, in pixels, is cut off.
 	pub clip: Rect<u32>,
 
 	/// Its layer's rectangle with its padding, in pixels, and corner radius, if the corners are rounded: its
-	/// quads are cut to them, whichever part of the layer it draws
+	/// quads are cut to them, whichever part of the layer it draws.
 	pub round: Option<(Rect<f32>, f32)>,
 }
 
-/// Which part of a layer a [`Piece`] draws
+/// Which part of a layer a [`Piece`] draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PieceKind {
-	/// The whole layer, without its cursor
+	/// The whole layer, without its cursor.
 	Layer,
 
-	/// The scrolling region of a layer whose text slides
+	/// The scrolling region of a layer whose text slides.
 	Region,
 
 	/// The layer's cursor, where Neovim put it: drawn over text that's still sliding into place, so it never leaves the
@@ -413,9 +413,9 @@ pub(crate) enum PieceKind {
 	Cursor,
 }
 
-/// The pieces to draw `layers` at `now`, in order, on a `surface` of width × height pixels
+/// The pieces to draw `layers` at `now`, in order, on a `surface` of width × height pixels.
 fn pieces<'a>(layers: &'a [Layer], scrolls: &ScrollAnimations, surface: (u32, u32), now: Instant) -> Vec<Piece<'a>> {
-	// A rectangle in pixels, cut to the surface: a scissor rectangle can't reach outside it
+	// A rectangle in pixels, cut to the surface: a scissor rectangle can't reach outside it.
 	let clip = |rect: Rect<u32>| {
 		let (left, top) = (rect.x.min(surface.0), rect.y.min(surface.1));
 		let (right, bottom) = (rect.right().min(surface.0), rect.bottom().min(surface.1));
@@ -448,12 +448,12 @@ fn pieces<'a>(layers: &'a [Layer], scrolls: &ScrollAnimations, surface: (u32, u3
 			cursor_piece = Some(Piece { layer, kind: PieceKind::Cursor, offset: 0.0, clip: whole, round });
 		}
 	}
-	// Over everything, like in the TUI
+	// Over everything, like in the TUI.
 	pieces.extend(cursor_piece);
 	pieces
 }
 
-/// `layer` without the text and backgrounds of its `region` that slides, which is drawn over it
+/// `layer` without the text and backgrounds of its `region` that slides, which is drawn over it.
 fn without(layer: &Layer, region: &SlidingRegion) -> Layer {
 	let (top, left) = (region.top, region.left);
 	let Some(&first) = layer.cells.first() else { return layer.clone() };
@@ -494,17 +494,17 @@ fn cursor_layer(layer: &Layer, cursor: Cursor) -> Layer {
 
 /// A layer's ranges of the frame's quads: its shadow and outline, drawn first and uncut since they reach past the layer;
 /// its backgrounds, drawn under its text, and its decorations and bar cursor, drawn over it; and the rectangle these and
-/// the text are cut to
+/// the text are cut to.
 struct LayerQuads {
 	around: Range<u32>,
 	under_text: Range<u32>,
 	over_text: Range<u32>,
 
-	/// Where its text may be drawn, for the stencil: its rounded rectangle, or all of it
+	/// Where its text may be drawn, for the stencil: its rounded rectangle, or all of it.
 	mask: Range<u32>,
 	clip: Rect<u32>,
 
-	/// Whether the cursor's shape is drawn first, uncut: for the cursor on its way
+	/// Whether the cursor's shape is drawn first, uncut: for the cursor on its way.
 	shape: bool,
 }
 
@@ -544,7 +544,7 @@ fn layer_quads(
 	}
 	for quad in &mut quads[start..] {
 		quad.rect[1] += piece.offset;
-		// Cut to the layer's rounded corners, which don't move with sliding text
+		// Cut to the layer's rounded corners, which don't move with sliding text.
 		if let Some((clip, radius)) = piece.round {
 			(quad.clip, quad.clip_radius) = (clip.into(), [radius, 0.0]);
 		}
@@ -606,10 +606,10 @@ mod tests {
 	use crate::text::TextPipeline;
 	use crate::{CellSize, Decoration, FontId, Fonts, Layer, RenderCell, RendererConfig, TextStyle};
 
-	/// Cells of the bundled font at 14 pixels, which the tests draw with
+	/// Cells of the bundled font at 14 pixels, which the tests draw with.
 	const CELL: CellSize = CellSize { width: 8, height: 19 };
 
-	/// A one-cell layer at the top-left corner showing `text` in white on `background`
+	/// A one-cell layer at the top-left corner showing `text` in white on `background`.
 	fn cell(id: u64, text: &str, background: u32) -> Layer {
 		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
 		let cell = RenderCell {
@@ -639,22 +639,22 @@ mod tests {
 	}
 
 	/// Draws `layers` like the renderer does, into a 64×19 texture, and returns the pixel in the middle of the first cell,
-	/// or `None` without a GPU
+	/// or `None` without a GPU.
 	fn middle_pixel(layers: &[Layer]) -> Option<[u8; 4]> {
 		drawn_pixel(layers, None)
 	}
 
-	/// Like [`middle_pixel`], with a cursor shape over the layers if given: its corners in pixels, and its color
+	/// Like [`middle_pixel`], with a cursor shape over the layers if given: its corners in pixels, and its color.
 	fn drawn_pixel(layers: &[Layer], shape: Option<([[f32; 2]; 4], u32)>) -> Option<[u8; 4]> {
 		let (pixels, cell) = drawn(layers, shape)?;
 		Some(pixels[(9 * WIDTH + cell.width / 2) as usize])
 	}
 
-	/// Width of the texture the GPU tests draw to, 19 pixels (a row of cells) high
+	/// Width of the texture the GPU tests draw to, 19 pixels (a row of cells) high.
 	const WIDTH: u32 = 64;
 
 	/// Draws `layers` like the renderer does, with a cursor shape over them if given, into a [`WIDTH`] × 19 texture,
-	/// and returns its pixels row by row and the cell size, or `None` without a GPU
+	/// and returns its pixels row by row and the cell size, or `None` without a GPU.
 	fn drawn(layers: &[Layer], shape: Option<([[f32; 2]; 4], u32)>) -> Option<(Vec<[u8; 4]>, crate::CellSize)> {
 		let (width, height) = (WIDTH, 19);
 		smol::block_on(async {
@@ -761,7 +761,7 @@ mod tests {
 		assert_eq!(block_on_top, [255, 255, 255, 255]);
 	}
 
-	/// `layer` with a cursor of `shape` on its top-left cell, red with white text
+	/// `layer` with a cursor of `shape` on its top-left cell, red with white text.
 	fn with_cursor(mut layer: Layer, shape: crate::CursorShape) -> Layer {
 		layer.cursor = Some(crate::Cursor {
 			row: 0,
@@ -783,13 +783,13 @@ mod tests {
 
 		let kinds: Vec<_> = pieces.iter().map(|piece| piece.kind).collect();
 		assert_eq!(kinds, [PieceKind::Layer, PieceKind::Cursor]);
-		// A block: the cell under it, in the cursor's colors, where Neovim put it
+		// A block: the cell under it, in the cursor's colors, where Neovim put it.
 		let cursor = &pieces[1].layer;
 		assert_eq!((cursor.x, cursor.y, cursor.width, cursor.height, pieces[1].offset), (0, 0, 1, 1, 0.0));
 		assert_eq!((cursor.cells[0].text.as_str(), cursor.cells[0].background), ("a", 0xFF0000));
 		assert_eq!(cursor.cells[0].style.foreground, 0xFFFFFF);
 
-		// A bar: drawn as a quad, over no cells
+		// A bar: drawn as a quad, over no cells.
 		let bar = crate::CursorShape::Bar { orientation: crate::BarOrientation::Vertical, percentage: 25 };
 		let layer = with_cursor(cell(1, "a", 0x000000), bar);
 		let drawn = super::pieces(std::slice::from_ref(&layer), &scrolls, (64, 19), Instant::now());
@@ -798,7 +798,7 @@ mod tests {
 
 	#[test]
 	fn gpu_cursor_shape_fills_between_its_corners() {
-		// A slanted shape across the middle of the first cell (4, 9), over a black cell
+		// A slanted shape across the middle of the first cell (4, 9), over a black cell.
 		let slanted = [[0.0, 0.0], [6.0, 0.0], [12.0, 19.0], [2.0, 19.0]];
 		let Some(pixel) = drawn_pixel(&[cell(1, " ", 0x000000)], Some((slanted, 0x00FF00))) else {
 			eprintln!("skipped: no GPU adapter");
@@ -822,19 +822,19 @@ mod tests {
 			layer.cells[0].blend = blend;
 			layer
 		};
-		// White, half see-through, over red
+		// White, half see-through, over red.
 		let Some(pixel) = middle_pixel(&[cell(1, " ", 0xFF0000), blended(50)]) else {
 			eprintln!("skipped: no GPU adapter");
 			return;
 		};
 		assert!(pixel[0] == 255 && (126..=129).contains(&pixel[1]) && pixel[1] == pixel[2], "{pixel:?}");
-		// All the way see-through: only the red
+		// All the way see-through: only the red.
 		assert_eq!(middle_pixel(&[cell(1, " ", 0xFF0000), blended(100)]).unwrap(), [255, 0, 0, 255]);
 	}
 
 	#[test]
 	fn gpu_a_shadow_isnt_drawn_under_what_casts_it() {
-		// A see-through cell at column 3, drawing no background, with a red shadow, on black
+		// A see-through cell at column 3, drawing no background, with a red shadow, on black.
 		let shadow = crate::Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
 		let mut clear = cell(1, " ", 0xFFFFFF);
 		clear.cells[0].blend = 100;
@@ -846,15 +846,15 @@ mod tests {
 			return;
 		};
 		let at = |x: u32| pixels[(9 * WIDTH + x) as usize];
-		// Under the cell, nothing: like CSS's box-shadow, only outside it
+		// Under the cell, nothing: like CSS's box-shadow, only outside it.
 		assert_eq!(at(3 * cell.width + cell.width / 2), [0, 0, 0, 255]);
-		// Around it, the shadow
+		// Around it, the shadow.
 		assert!(at(3 * cell.width - 1)[0] > 50, "{:?}", at(3 * cell.width - 1));
 	}
 
 	#[test]
 	fn gpu_a_shadow_fades_out_around_its_layer() {
-		// A white cell at column 3, with a red shadow, on black
+		// A white cell at column 3, with a red shadow, on black.
 		let shadow = crate::Shadow { blur: 8.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
 		let white = cell(1, " ", 0xFFFFFF);
 		let area = vec![crate::Rect::new(3 * CELL.width, 0, CELL.width, CELL.height)];
@@ -869,18 +869,18 @@ mod tests {
 
 		// The layer itself covers its shadow.
 		assert_eq!(at(left + 1), [255, 255, 255, 255]);
-		// Just outside, about half shadowed; less further out; gone past three standard deviations (12 pixels)
+		// Just outside, about half shadowed; less further out; gone past three standard deviations (12 pixels).
 		let reds: Vec<u8> = [1, 4, 8].map(|distance| at(left - distance)[0]).to_vec();
 		assert!((100..=140).contains(&reds[0]), "{reds:?}");
 		assert!(reds[0] > reds[1] && reds[1] > reds[2] && reds[2] > 0, "{reds:?}");
 		assert_eq!(at(left - 14), [0, 0, 0, 255]);
-		// It's only a shadow: no green or blue in it
+		// It's only a shadow: no green or blue in it.
 		assert_eq!(&at(left - 1)[1..3], &[0, 0]);
 	}
 
 	#[test]
 	fn gpu_an_outline_goes_around_its_layer() {
-		// A white cell at column 3, with a 1 px red outline, on black
+		// A white cell at column 3, with a 1 px red outline, on black.
 		let white = cell(1, " ", 0xFFFFFF);
 		let outline = crate::Outline { width: 1.0, color: 0xFF0000 };
 		let layer = Layer { x: 3 * CELL.width, outline: Some(outline), ..white };
@@ -897,7 +897,7 @@ mod tests {
 
 	#[test]
 	fn gpu_rounded_corners_cut_the_layer() {
-		// A white cell at column 3 with corners rounded by 3 px, on black
+		// A white cell at column 3 with corners rounded by 3 px, on black.
 		let white = cell(1, " ", 0xFFFFFF);
 		let layer = Layer { x: 3 * CELL.width, corner_radius: 3.0, ..white };
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
@@ -914,7 +914,7 @@ mod tests {
 
 	#[test]
 	fn gpu_a_group_s_shadow_follows_its_rounded_corners() {
-		// The red shadow of a menu with a scrollbar inside its right edge, on black, away from the layer drawn with it
+		// The red shadow of a menu with a scrollbar inside its right edge, on black, away from the layer drawn with it.
 		let shadow = crate::Shadow { blur: 4.0, offset: [0.0, 0.0], color: 0xFF0000, opacity: 1.0 };
 		let black = cell(1, " ", 0x000000);
 		let reds = |radius: f32| {
@@ -922,7 +922,7 @@ mod tests {
 			let shadow = crate::LayerShadow { shadow, area, radius };
 			let (pixels, _) = drawn(&[Layer { shadow: Some(shadow), ..black.clone() }], None)?;
 			let red = |x: u32, y: u32| pixels[(y * WIDTH + x) as usize][0];
-			// The menu's corner pixel, and one just above its straight top edge
+			// The menu's corner pixel, and one just above its straight top edge.
 			Some((u32::from(red(20, 3)), u32::from(red(30, 2))))
 		};
 		let Some((corner, edge)) = reds(6.0) else {
@@ -935,7 +935,7 @@ mod tests {
 
 	#[test]
 	fn gpu_rounded_corners_cut_the_text() {
-		// A full block in white, which inks its cell into the corners, on black: square, then rounded by 3 px
+		// A full block in white, which inks its cell into the corners, on black: square, then rounded by 3 px.
 		let block = cell(1, "█", 0x000000);
 		let corner_of = |radius: f32| {
 			let layer = Layer { x: 3 * CELL.width, corner_radius: radius, ..block.clone() };
@@ -956,7 +956,7 @@ mod tests {
 
 	#[test]
 	fn gpu_padding_goes_around_its_layer() {
-		// A white cell at column 3 with 2 px of the window's green padding, and a red outline around that, on black
+		// A white cell at column 3 with 2 px of the window's green padding, and a red outline around that, on black.
 		let white = cell(1, " ", 0xFFFFFF);
 		let outline = Some(crate::Outline { width: 1.0, color: 0xFF0000 });
 		let padding_background = (0x00FF00, 0);
@@ -967,7 +967,7 @@ mod tests {
 		};
 		let at = |x: u32| pixels[(9 * WIDTH + x) as usize];
 		let left = 3 * cell.width;
-		// The cell, its padding in the window's background, not the cell's, then the outline around it, then nothing
+		// The cell, its padding in the window's background, not the cell's, then the outline around it, then nothing.
 		let (white, green) = ([255, 255, 255, 255], [0, 255, 0, 255]);
 		assert_eq!((at(left), at(left - 1), at(left - 2)), (white, green, green));
 		assert_eq!((at(left - 3), at(left - 4)), ([255, 0, 0, 255], [0, 0, 0, 255]));
@@ -1001,7 +1001,7 @@ mod tests {
 
 	#[test]
 	fn gpu_an_outline_cursor_leaves_its_cell_as_it_is() {
-		// A red outline around a black cell
+		// A red outline around a black cell.
 		let layer = with_cursor(cell(1, " ", 0x000000), crate::CursorShape::Outline);
 		let Some((pixels, cell)) = drawn(&[layer], None) else {
 			eprintln!("skipped: no GPU adapter");
@@ -1028,7 +1028,7 @@ mod tests {
 
 	#[test]
 	fn the_cursor_stays_put_while_text_slides() {
-		// A 1×3 layer that scrolled up by a row, with the cursor on its last row
+		// A 1×3 layer that scrolled up by a row, with the cursor on its last row.
 		let column = |rows: [&str; 3], scroll: bool| {
 			let top = cell(1, rows[0], 0);
 			let cells = rows

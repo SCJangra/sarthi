@@ -1,5 +1,5 @@
 //! Derive macros for sarthi's RPC types: [`DeserializeTaggedEnum`] decodes Neovim's `[name, args...]` events and
-//! requests into enums
+//! requests into enums.
 
 mod tagged_enum;
 mod utils;

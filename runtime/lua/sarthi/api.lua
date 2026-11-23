@@ -6,9 +6,9 @@ local api = {}
 ---Like `vim.api.nvim_open_win()`, with a `sarthi` table in `config` (`WindowConfig`). Managed even without one: it has
 ---the settings' outline, corners and padding. A mistake in the `sarthi` table closes the window again, so the call does
 ---nothing but fail.
----@param buf integer The buffer it shows
----@param enter boolean Whether it becomes the current window
----@param config vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig } Neovim's window config, with a `sarthi` table in it
+---@param buf integer The buffer it shows.
+---@param enter boolean Whether it becomes the current window.
+---@param config vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig } Neovim's window config, with a `sarthi` table in it.
 ---@return integer
 function api.nvim_open_win(buf, enter, config)
   return (rpc.request('nvim_open_win', buf, enter, config))
@@ -16,14 +16,14 @@ end
 
 ---Like `vim.api.nvim_win_set_config()`, with a `sarthi` table in `config`: what it gives replaces what was given
 ---before, key by key, and a section's values key by key too.
----@param win integer The window, or 0 for the current one
----@param config vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig } Neovim's window config, with a `sarthi` table in it
+---@param win integer The window, or 0 for the current one.
+---@param config vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig } Neovim's window config, with a `sarthi` table in it.
 function api.nvim_win_set_config(win, config)
   return (rpc.request('nvim_win_set_config', win, config))
 end
 
 ---Like `vim.api.nvim_win_get_config()`, with the window's `sarthi` table: its `w:sarthi`, and what else was given.
----@param win integer The window, or 0 for the current one
+---@param win integer The window, or 0 for the current one.
 ---@return vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig }
 function api.nvim_win_get_config(win)
   return (rpc.request('nvim_win_get_config', win))

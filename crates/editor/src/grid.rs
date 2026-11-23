@@ -1,13 +1,13 @@
-//! What Neovim drew to a grid: its cells and cursor, kept up to date from `grid_*` events
+//! What Neovim drew to a grid: its cells and cursor, kept up to date from `grid_*` events.
 
 use rpc::neovim::{CellText, GridCell as NvimGridCell, HlId};
 
-/// A cell of a grid: its text and highlight
+/// A cell of a grid: its text and highlight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridCell {
-	/// A character, or a grapheme cluster; empty for the right half of a double-width character
+	/// A character, or a grapheme cluster; empty for the right half of a double-width character.
 	pub text: CellText,
-	/// Highlight from `hl_attr_define`; 0 is the default highlight
+	/// Highlight from `hl_attr_define`; 0 is the default highlight.
 	pub hl_id: HlId,
 }
 
@@ -22,23 +22,23 @@ impl GridCell {
 	}
 }
 
-/// What Neovim drew to a grid: its cells, and the cursor's place in it
+/// What Neovim drew to a grid: its cells, and the cursor's place in it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GridState {
-	/// Columns
+	/// Columns.
 	pub width: u32,
-	/// Rows
+	/// Rows.
 	pub height: u32,
-	/// The cells, a row after another
+	/// The cells, a row after another.
 	pub cells: Vec<GridCell>,
-	/// The cursor's row, where Neovim last put it in this grid
+	/// The cursor's row, where Neovim last put it in this grid.
 	pub cursor_row: u32,
-	/// The cursor's column
+	/// The cursor's column.
 	pub cursor_col: u32,
 }
 
 impl GridState {
-	/// A blank grid of `width` × `height` cells
+	/// A blank grid of `width` × `height` cells.
 	pub fn new(width: u32, height: u32) -> Self {
 		let mut grid = Self { width: 0, height: 0, cells: Vec::new(), cursor_row: 0, cursor_col: 0 };
 		grid.resize(width, height);
@@ -62,14 +62,14 @@ impl GridState {
 		self.cursor_col = self.cursor_col.min(width.saturating_sub(1));
 	}
 
-	/// Blanks every cell and puts the cursor at the top left (`grid_clear`)
+	/// Blanks every cell and puts the cursor at the top left (`grid_clear`).
 	pub fn clear(&mut self) {
 		self.cells.fill(GridCell::blank());
 		self.cursor_row = 0;
 		self.cursor_col = 0;
 	}
 
-	/// Sets the cells of row `row` from column `col_start` on (`grid_line`)
+	/// Sets the cells of row `row` from column `col_start` on (`grid_line`).
 	pub fn set_line(&mut self, row: u32, col_start: u32, cells: &[NvimGridCell]) {
 		if row >= self.height || self.width == 0 {
 			return;
@@ -117,7 +117,7 @@ impl GridState {
 		}
 	}
 
-	/// Puts the cursor at `row`, `col`, if that's in the grid (`grid_cursor_goto`)
+	/// Puts the cursor at `row`, `col`, if that's in the grid (`grid_cursor_goto`).
 	pub fn set_cursor(&mut self, row: u32, col: u32) {
 		if row >= self.height || col >= self.width {
 			return;
@@ -215,7 +215,7 @@ mod tests {
 		assert_eq!(hl_ids, [4, 4, 4, 4, 0, 0]);
 	}
 
-	/// A grid with one row per string, one character per cell
+	/// A grid with one row per string, one character per cell.
 	fn grid_of(rows: &[&str]) -> GridState {
 		let mut grid = GridState::new(rows[0].len() as u32, rows.len() as u32);
 		for (row, text) in (0..).zip(rows) {
@@ -253,7 +253,7 @@ mod tests {
 	#[test]
 	fn scroll_partial_region() {
 		let mut grid = grid_of(&["abcd", "efgh", "ijkl", "mnop"]);
-		// Rows 1..3, columns 1..3, up by one: like a window next to a split, above the status line
+		// Rows 1..3, columns 1..3, up by one: like a window next to a split, above the status line.
 		grid.scroll(1, 3, 1, 3, 1);
 		assert_eq!(rows_of(&grid), ["abcd", "ejkh", "ijkl", "mnop"]);
 

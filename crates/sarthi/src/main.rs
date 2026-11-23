@@ -1,4 +1,4 @@
-//! sarthi, a Neovim GUI: starts Neovim, opens the window, and runs the event loop
+//! sarthi, a Neovim GUI: starts Neovim, opens the window, and runs the event loop.
 
 mod api;
 mod app;

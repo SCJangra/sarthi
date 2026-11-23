@@ -1,4 +1,4 @@
-//! The window's size and font size at start, from the command line
+//! The window's size and font size at start, from the command line.
 
 use smart_default::SmartDefault;
 
@@ -13,7 +13,7 @@ pub struct WindowConfig {
 	#[default(true)]
 	pub resizable: bool,
 
-	/// Font size, in logical pixels, unless `guifont` sets one
+	/// Font size, in logical pixels, unless `guifont` sets one.
 	#[default(14.0)]
 	pub font_size: f32,
 }

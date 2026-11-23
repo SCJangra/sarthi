@@ -1,25 +1,25 @@
-//! What Neovim sends unasked: notifications, and requests sarthi answers through a [`Responder`]
+//! What Neovim sends unasked: notifications, and requests sarthi answers through a [`Responder`].
 
 use flume::WeakSender;
 use serde::Serialize;
 
 use crate::{Notification, OutgoingRpcMessage, Request};
 
-/// What Neovim sends without being asked, in the order it sent it: its notifications, and the requests of sarthi's Lua
+/// What Neovim sends without being asked, in the order it sent it: its notifications, and the requests of sarthi's Lua.
 #[derive(Debug)]
 pub enum Message {
-	/// A notification
+	/// A notification.
 	Notification(Notification),
-	/// A request, which must be answered
+	/// A request, which must be answered.
 	Request(IncomingRequest),
 }
 
-/// A request from Neovim, e.g. from `rpcrequest()` on sarthi's channel, and what answers it
+/// A request from Neovim, e.g. from `rpcrequest()` on sarthi's channel, and what answers it.
 #[derive(Debug)]
 pub struct IncomingRequest {
-	/// What's asked
+	/// What's asked.
 	pub request: Request,
-	/// Answers it, once
+	/// Answers it, once.
 	pub responder: Responder,
 }
 
@@ -29,7 +29,7 @@ pub struct IncomingRequest {
 pub struct Responder {
 	id: u32,
 
-	/// Sends the response through the client's writer, while the client still runs
+	/// Sends the response through the client's writer, while the client still runs.
 	replies: WeakSender<Vec<u8>>,
 	answered: bool,
 }
@@ -39,7 +39,7 @@ impl Responder {
 		Self { id, replies, answered: false }
 	}
 
-	/// Answers with `result`, or with an error carrying the message
+	/// Answers with `result`, or with an error carrying the message.
 	pub fn respond<T: Serialize>(mut self, result: Result<T, String>) {
 		self.answered = true;
 		let id = self.id;

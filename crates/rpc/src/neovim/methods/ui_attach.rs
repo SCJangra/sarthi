@@ -2,7 +2,7 @@ use serde::{Serialize, Serializer};
 
 use crate::RpcMethod;
 
-/// Neovim's [`nvim_ui_attach`](https://neovim.io/doc/user/api/#nvim_ui_attach()) function
+/// Neovim's [`nvim_ui_attach`](https://neovim.io/doc/user/api/#nvim_ui_attach()) function.
 pub struct UiAttach;
 
 impl RpcMethod for UiAttach {
@@ -19,14 +19,14 @@ pub struct UiAttachParams {
 	pub options: UiOptions,
 }
 
-/// As positional arguments, the way Neovim takes them
+/// As positional arguments, the way Neovim takes them.
 impl Serialize for UiAttachParams {
 	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
 		(self.width, self.height, &self.options).serialize(serializer)
 	}
 }
 
-/// Neovim's external UI [`options`](https://neovim.io/doc/user/api-ui-events/#ui-option)
+/// Neovim's external UI [`options`](https://neovim.io/doc/user/api-ui-events/#ui-option).
 #[derive(Debug, Default, Serialize)]
 pub struct UiOptions {
 	pub ext_multigrid: bool,

@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use crate::{Buffer, RpcMethod, Window};
 
-/// [`nvim_get_current_win`](https://neovim.io/doc/user/api/#nvim_get_current_win())
+/// [`nvim_get_current_win`](https://neovim.io/doc/user/api/#nvim_get_current_win()).
 pub struct GetCurrentWin;
 
 impl RpcMethod for GetCurrentWin {
@@ -11,7 +11,7 @@ impl RpcMethod for GetCurrentWin {
 	type Response = Window;
 }
 
-/// [`nvim_open_win`](https://neovim.io/doc/user/api/#nvim_open_win()), with its config as given
+/// [`nvim_open_win`](https://neovim.io/doc/user/api/#nvim_open_win()), with its config as given.
 pub struct OpenWin;
 
 impl RpcMethod for OpenWin {
@@ -20,7 +20,7 @@ impl RpcMethod for OpenWin {
 	type Response = Window;
 }
 
-/// [`nvim_win_close`](https://neovim.io/doc/user/api/#nvim_win_close())
+/// [`nvim_win_close`](https://neovim.io/doc/user/api/#nvim_win_close()).
 pub struct WinClose;
 
 impl RpcMethod for WinClose {
@@ -29,7 +29,7 @@ impl RpcMethod for WinClose {
 	type Response = ();
 }
 
-/// [`nvim_win_get_config`](https://neovim.io/doc/user/api/#nvim_win_get_config())
+/// [`nvim_win_get_config`](https://neovim.io/doc/user/api/#nvim_win_get_config()).
 pub struct WinGetConfig;
 
 impl RpcMethod for WinGetConfig {
@@ -38,7 +38,7 @@ impl RpcMethod for WinGetConfig {
 	type Response = rmpv::Value;
 }
 
-/// [`nvim_win_set_config`](https://neovim.io/doc/user/api/#nvim_win_set_config())
+/// [`nvim_win_set_config`](https://neovim.io/doc/user/api/#nvim_win_set_config()).
 pub struct WinSetConfig;
 
 impl RpcMethod for WinSetConfig {
@@ -47,7 +47,7 @@ impl RpcMethod for WinSetConfig {
 	type Response = ();
 }
 
-/// [`nvim_win_set_var`](https://neovim.io/doc/user/api/#nvim_win_set_var())
+/// [`nvim_win_set_var`](https://neovim.io/doc/user/api/#nvim_win_set_var()).
 pub struct WinSetVar;
 
 impl RpcMethod for WinSetVar {
@@ -56,6 +56,6 @@ impl RpcMethod for WinSetVar {
 	type Response = ();
 }
 
-/// No options, for the API functions that take an `opts` dictionary
+/// No options, for the API functions that take an `opts` dictionary.
 #[derive(Debug, Default, Serialize)]
 pub struct NoOpts {}

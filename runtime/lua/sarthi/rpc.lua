@@ -9,13 +9,13 @@ M.channel = nil
 function M.request(method, ...)
   local ok, answer = pcall(vim.rpcrequest, M.channel, method, ...)
   if not ok then
-    -- Without Neovim's "Vim:Invoking 'method' on channel …:" line before the message
+    -- Without Neovim's "Vim:Invoking 'method' on channel …:" line before the message.
     error('sarthi: ' .. answer:gsub('^Vim:Invoking.-\n', ''), 3)
   end
   return answer
 end
 
---- Tells sarthi `method` with the arguments, without waiting for it
+--- Tells sarthi `method` with the arguments, without waiting for it.
 function M.notify(method, ...)
   vim.rpcnotify(M.channel, method, ...)
 end

@@ -9,14 +9,14 @@ use smart_default::SmartDefault;
 
 use crate::{Window, WindowOptions};
 
-/// How many rows the command line takes (`'cmdheight'`), sent as it starts and whenever it changes
+/// How many rows the command line takes (`'cmdheight'`), sent as it starts and whenever it changes.
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct CmdheightChangedArgs {
 	pub rows: u32,
 }
 
-/// A window that closed (`WinClosed`), so what sarthi kept about it can go
+/// A window that closed (`WinClosed`), so what sarthi kept about it can go.
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinClosedArgs {
@@ -24,7 +24,7 @@ pub struct WinClosedArgs {
 	pub win: Window,
 }
 
-/// Windows that scrolled (`WinScrolled`), sent before Neovim redraws them
+/// Windows that scrolled (`WinScrolled`), sent before Neovim redraws them.
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct WinScrolledArgs {
@@ -37,15 +37,15 @@ pub struct ScrolledWindow {
 	#[serde(deserialize_with = "window_number")]
 	pub win: Window,
 
-	/// Of the buffer the window shows
+	/// Of the buffer the window shows.
 	pub filetype: String,
 
-	/// The window's `w:sarthi`, if set
+	/// The window's `w:sarthi`, if set.
 	#[serde(default)]
 	pub sarthi: WindowVariable,
 }
 
-/// Floating windows whose filetype or variables changed since they were last sent, sent before Neovim draws them
+/// Floating windows whose filetype or variables changed since they were last sent, sent before Neovim draws them.
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct FloatsChangedArgs {
@@ -58,28 +58,28 @@ pub struct FloatWindow {
 	#[serde(deserialize_with = "window_number")]
 	pub win: Window,
 
-	/// Of the buffer the window shows
+	/// Of the buffer the window shows.
 	pub filetype: String,
 
-	/// The window's `w:sarthi`, if set
+	/// The window's `w:sarthi`, if set.
 	#[serde(default)]
 	pub sarthi: WindowVariable,
 
-	/// How transparent the window is, from 0 to 100 (`winblend`)
+	/// How transparent the window is, from 0 to 100 (`winblend`).
 	#[serde(default)]
 	pub winblend: u32,
 
 	/// The text color of its outline's highlight group, as `0xRRGGBB`, if the group has one: Neovim only sends the
-	/// colors of its UI groups
+	/// colors of its UI groups.
 	#[serde(default)]
 	pub outline_color: Option<u32>,
 
 	/// The window's background, as `0xRRGGBB`, if its highlight group has one: `NormalFloat` for a floating window,
-	/// `Normal` for an external one, or what its 'winhighlight' maps them to
+	/// `Normal` for an external one, or what its 'winhighlight' maps them to.
 	#[serde(default)]
 	pub background: Option<u32>,
 
-	/// The floating window it's attached to (`relative = 'win'`), like a scrollbar to its menu
+	/// The floating window it's attached to (`relative = 'win'`), like a scrollbar to its menu.
 	#[serde(default, deserialize_with = "optional_window_number")]
 	pub parent: Option<Window>,
 }
@@ -89,7 +89,7 @@ pub struct FloatWindow {
 #[derive(Debug, Clone, PartialEq, Deserialize, SmartDefault)]
 #[serde(untagged)]
 pub enum WindowVariable {
-	/// Not set by default: nothing of the window's own
+	/// Not set by default: nothing of the window's own.
 	#[default]
 	Options(WindowOptions),
 	Invalid(IgnoredAny),
@@ -123,7 +123,7 @@ mod tests {
 
 	#[test]
 	fn win_scrolled() {
-		// `rpcnotify(channel, 'win_scrolled', { { win = 1000, filetype = 'lua' }, … })`
+		// `rpcnotify(channel, 'win_scrolled', { { win = 1000, filetype = 'lua' }, … })`.
 		let scroll = map(vec![("scroll_animation", map(vec![("enabled", Value::from(false))]))]);
 		let windows = vec![
 			map(vec![("win", Value::from(1000)), ("filetype", Value::from("lua"))]),
@@ -149,7 +149,7 @@ mod tests {
 
 	#[test]
 	fn floats_changed() {
-		// `rpcnotify(channel, 'floats_changed', { { win = 1002, filetype = '', sarthi = { shadow = { … } } } })`
+		// `rpcnotify(channel, 'floats_changed', { { win = 1002, filetype = '', sarthi = { shadow = { … } } } })`.
 		let shadow = map(vec![("enabled", Value::from(true)), ("blur", Value::from(4))]);
 		let windows = vec![
 			map(vec![

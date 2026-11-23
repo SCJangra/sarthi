@@ -30,54 +30,54 @@ pub use crate::motion::motion;
 pub use crate::pointer::{GridPosition, Pointer};
 use crate::preedit::Preedit;
 
-/// Neovim's UI state, kept up to date from its redraw events (`:help ui-events`)
+/// Neovim's UI state, kept up to date from its redraw events (`:help ui-events`).
 #[derive(Debug, SmartDefault)]
 pub struct Editor {
 	/// Neovim's grids (`:help ui-multigrid`). The global grid, [`Grid::GLOBAL`], is the screen: it holds what isn't in
 	/// a window, like window separators, status lines and the command line, and the windows' grids are placed on it.
 	grids: HashMap<Grid, GridState>,
 
-	/// Where each grid other than grid 1 is shown; grids without one aren't shown yet
+	/// Where each grid other than grid 1 is shown; grids without one aren't shown yet.
 	placements: HashMap<Grid, Placement>,
 
-	/// How each window's text scrolls, by grid
+	/// How each window's text scrolls, by grid.
 	viewports: HashMap<Grid, Viewport>,
 
 	/// How each window's text moves when it scrolls, if not as the renderer's other scrolled text does: as its scroll
-	/// animation settings say, or jumping to its new place for `None`
+	/// animation settings say, or jumping to its new place for `None`.
 	scroll_animations: HashMap<Window, Option<ScrollAnimationSettings>>,
 
-	/// Whether the window is see-through, so the default background isn't drawn in cells (see [`Editor::see_through_cells`])
+	/// Whether the window is see-through, so the default background isn't drawn in cells (see [`Editor::see_through_cells`]).
 	see_through: bool,
 
-	/// How each floating and external window looks besides its cells, and how one does until it has a style of its own
+	/// How each floating and external window looks besides its cells, and how one does until it has a style of its own.
 	floats: HashMap<Window, FloatStyle>,
 	default_float: FloatStyle,
 
-	/// Physical pixels in a logical one, which the float styles are in
+	/// Physical pixels in a logical one, which the float styles are in.
 	#[default(1.0)]
 	scale: f32,
 
 	highlights: HighlightState,
 	cursor: CursorState,
 
-	/// The grid the cursor is in
+	/// The grid the cursor is in.
 	#[default(Grid::GLOBAL)]
 	cursor_grid: Grid,
 
-	/// The `guifont` option, as Neovim sent it, or empty while it's Neovim's default
+	/// The `guifont` option, as Neovim sent it, or empty while it's Neovim's default.
 	guifont: String,
 
-	/// Neovim's default `guifont`, the first value it sent
+	/// Neovim's default `guifont`, the first value it sent.
 	default_guifont: Option<String>,
 
-	/// The `linespace` option: pixels added between rows, or taken away if negative
+	/// The `linespace` option: pixels added between rows, or taken away if negative.
 	linespace: i64,
 
-	/// Whether mouse input is on in the current mode (`mouse_on`, `mouse_off`)
+	/// Whether mouse input is on in the current mode (`mouse_on`, `mouse_off`).
 	mouse: bool,
 
-	/// Whether Neovim wants mouse moves without a button held (the `mousemoveevent` option)
+	/// Whether Neovim wants mouse moves without a button held (the `mousemoveevent` option).
 	mouse_move_events: bool,
 
 	/// Size of the screen's cells, in pixels, which places the layers in the window
@@ -85,31 +85,31 @@ pub struct Editor {
 	#[default(CellSize { width: 1, height: 1 })]
 	cell: CellSize,
 
-	/// The `order` of the next external window shown (see [`Placement::External`])
+	/// The `order` of the next external window shown (see [`Placement::External`]).
 	external_order: u64,
 
-	/// Where external windows go, by window; centered unless placed (see [`Editor::set_external_place`])
+	/// Where external windows go, by window; centered unless placed (see [`Editor::set_external_place`]).
 	places: HashMap<Window, Place>,
 
 	/// Rows of the command line at the bottom of the screen (`'cmdheight'`), which external windows stay above: none
-	/// until Lua says
+	/// until Lua says.
 	command_rows: u32,
 
 	/// The fonts of external windows that have their own, and the size of their cells, by window (see
-	/// [`Editor::set_external_font`])
+	/// [`Editor::set_external_font`]).
 	external_fonts: HashMap<Window, (FontId, CellSize)>,
 
-	/// The text an input method is composing, shown at the cursor
+	/// The text an input method is composing, shown at the cursor.
 	preedit: Option<Preedit>,
 
-	/// Whether anything changed since the last `flush`, so it's drawn on the next one
+	/// Whether anything changed since the last `flush`, so it's drawn on the next one.
 	stale: bool,
 }
 
-/// Where a grid is shown, from Neovim's multigrid events
+/// Where a grid is shown, from Neovim's multigrid events.
 #[derive(Debug, Clone, PartialEq)]
 enum Placement {
-	/// A window at a cell of grid 1 (`win_pos`)
+	/// A window at a cell of grid 1 (`win_pos`).
 	Tiled { row: u32, col: u32 },
 
 	/// Floating window `win` at a cell of the screen, in Neovim's drawing order of floats (`win_float_pos`). Without
@@ -124,28 +124,28 @@ enum Placement {
 	/// a line of `separator` goes above them.
 	Message { row: u32, compindex: u32, separator: Option<CellText> },
 
-	/// Not shown, e.g. a window of another tab (`win_hide`)
+	/// Not shown, e.g. a window of another tab (`win_hide`).
 	Hidden,
 }
 
-/// How a window's text scrolls, from `win_viewport` and `win_viewport_margins`
+/// How a window's text scrolls, from `win_viewport` and `win_viewport_margins`.
 #[derive(Debug, Default)]
 struct Viewport {
-	/// The window, from `win_viewport`
+	/// The window, from `win_viewport`.
 	win: Option<Window>,
 
 	/// Lines in the window's buffer. When it changes, the window likely shows another buffer, which Neovim also
 	/// reports as a scroll.
 	line_count: u32,
 
-	/// Rows and columns at the window's edges that don't scroll, like the winbar or a border
+	/// Rows and columns at the window's edges that don't scroll, like the winbar or a border.
 	margins: Edges<u32>,
 
-	/// Rows the text moved up since the last `flush`, or down if negative
+	/// Rows the text moved up since the last `flush`, or down if negative.
 	scrolled: i64,
 }
 
-/// How a floating or external window looks besides its cells, in logical pixels
+/// How a floating or external window looks besides its cells, in logical pixels.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FloatStyle {
 	/// The shadow it casts, if any, from its outer edge: its outline's, or a float's cells. Floats at one level share
@@ -156,54 +156,54 @@ pub struct FloatStyle {
 	/// places floats in its cells, without room for them.
 	pub outline: Option<OutlineStyle>,
 
-	/// The radius of its rounded corners, if they are: its padding's, which goes around its cells
+	/// The radius of its rounded corners, if they are: its padding's, which goes around its cells.
 	pub corners: Option<f32>,
 
 	/// The space around its cells, in its background, if it has any; its outline goes around it.
 	pub padding: Option<Edges<f32>>,
 
 	/// Its background, as `0xRRGGBB`, its padding's whatever its cells are highlighted with: Neovim's default one if
-	/// `None`
+	/// `None`.
 	pub background: Option<u32>,
 
-	/// How see-through its background is, from 0 to 100, like `winblend`
+	/// How see-through its background is, from 0 to 100, like `winblend`.
 	pub blend: u8,
 
 	/// The floating window it's attached to, like a scrollbar to its menu: it shares that window's shadow.
 	pub parent: Option<Window>,
 }
 
-/// A line around a floating or external window, in logical pixels
+/// A line around a floating or external window, in logical pixels.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutlineStyle {
-	/// Thickness
+	/// Thickness.
 	pub width: f32,
 
-	/// The highlight group whose text color the line has
+	/// The highlight group whose text color the line has.
 	pub highlight: String,
 
-	/// That color, as `0xRRGGBB`, if known: the editor only knows Neovim's UI groups' own
+	/// That color, as `0xRRGGBB`, if known: the editor only knows Neovim's UI groups' own.
 	pub color: Option<u32>,
 }
 
-/// What to draw after Neovim finished redrawing
+/// What to draw after Neovim finished redrawing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Redraw {
-	/// Neovim's default background, as `0xRRGGBB`, for the parts of a window no grid covers
+	/// Neovim's default background, as `0xRRGGBB`, for the parts of a window no grid covers.
 	pub background: u32,
 
-	/// Drawn in order, so later ones cover earlier ones
+	/// Drawn in order, so later ones cover earlier ones.
 	pub layers: Vec<Layer>,
 }
 
 impl Editor {
-	/// Sets the size of the screen's cells, in pixels: what the text is drawn with
+	/// Sets the size of the screen's cells, in pixels: what the text is drawn with.
 	pub fn set_cell_size(&mut self, cell: CellSize) {
 		self.stale |= self.cell != cell;
 		self.cell = cell;
 	}
 
-	/// Neovim's default background, as `0xRRGGBB`
+	/// Neovim's default background, as `0xRRGGBB`.
 	pub fn background(&self) -> u32 {
 		self.highlights.defaults().background
 	}
@@ -233,7 +233,7 @@ impl Editor {
 		self.stale = true;
 	}
 
-	/// How the cursor's moves animate, from its next move on
+	/// How the cursor's moves animate, from its next move on.
 	pub fn set_cursor_animation(&mut self, animation: CursorAnimationSettings) {
 		self.cursor.set_animation(animation);
 	}
@@ -245,32 +245,32 @@ impl Editor {
 	}
 
 	/// Shows `preedit`, the text an input method is composing, at the cursor from the next redraw on; `None` once it's
-	/// committed or abandoned
+	/// committed or abandoned.
 	pub fn set_preedit(&mut self, preedit: Option<Preedit>) {
 		let preedit = preedit.filter(|preedit| !preedit.text.is_empty());
 		self.stale |= self.preedit != preedit;
 		self.preedit = preedit;
 	}
 
-	/// Whether an input method is composing text, whose keys are its own
+	/// Whether an input method is composing text, whose keys are its own.
 	pub fn is_composing(&self) -> bool {
 		self.preedit.is_some()
 	}
 
-	/// Physical pixels in a logical one, which the float styles are drawn in
+	/// Physical pixels in a logical one, which the float styles are drawn in.
 	pub fn set_scale(&mut self, scale: f32) {
 		self.stale |= self.scale != scale;
 		self.scale = scale;
 	}
 
-	/// How floating and external windows look until they have a style of their own (see [`Editor::set_float_style`])
+	/// How floating and external windows look until they have a style of their own (see [`Editor::set_float_style`]).
 	pub fn set_default_float_style(&mut self, style: FloatStyle) {
 		self.stale |= self.default_float != style;
 		self.default_float = style;
 	}
 
 	/// Draws external window `win`'s text with the fonts of set `font`, in cells of `cell`, or with the main fonts for
-	/// `None`: from now on until it closes
+	/// `None`: from now on until it closes.
 	pub fn set_external_font(&mut self, win: Window, font: Option<(FontId, CellSize)>) {
 		let changed = match font {
 			Some(font) => self.external_fonts.insert(win, font) != Some(font),
@@ -279,12 +279,12 @@ impl Editor {
 		self.stale |= changed;
 	}
 
-	/// The windows with fonts of their own (see [`Editor::set_external_font`])
+	/// The windows with fonts of their own (see [`Editor::set_external_font`]).
 	pub fn external_fonts(&self) -> impl Iterator<Item = Window> + '_ {
 		self.external_fonts.keys().copied()
 	}
 
-	/// The fonts grid `id` is drawn with, and the size of its cells: an external window's own, or the main ones
+	/// The fonts grid `id` is drawn with, and the size of its cells: an external window's own, or the main ones.
 	fn font_of(&self, id: Grid) -> (FontId, CellSize) {
 		match self.placements.get(&id) {
 			Some(Placement::External { win, .. }) => self.external_fonts.get(win).copied(),
@@ -293,7 +293,7 @@ impl Editor {
 		.unwrap_or((FontId::MAIN, self.cell))
 	}
 
-	/// Size of grid `id`'s cells, in pixels (see [`Editor::font_of`])
+	/// Size of grid `id`'s cells, in pixels (see [`Editor::font_of`]).
 	fn cell_of(&self, id: Grid) -> CellSize {
 		self.font_of(id).1
 	}
@@ -309,24 +309,24 @@ impl Editor {
 		self.stale |= self.places.insert(win, place) != Some(place);
 	}
 
-	/// Sets how many rows the command line takes at the bottom of the screen (`'cmdheight'`)
+	/// Sets how many rows the command line takes at the bottom of the screen (`'cmdheight'`).
 	pub fn set_command_rows(&mut self, rows: u32) {
 		self.stale |= self.command_rows != rows;
 		self.command_rows = rows;
 	}
 
-	/// How floating or external window `win` looks besides its cells, until it closes
+	/// How floating or external window `win` looks besides its cells, until it closes.
 	pub fn set_float_style(&mut self, win: Window, style: FloatStyle) {
 		self.stale |= self.floats.get(&win) != Some(&style);
 		self.floats.insert(win, style);
 	}
 
-	/// How floating or external window `win` looks besides its cells: its own style, or the default one until it has one
+	/// How floating or external window `win` looks besides its cells: its own style, or the default one until it has one.
 	fn style_of(&self, win: Window) -> &FloatStyle {
 		self.floats.get(&win).unwrap_or(&self.default_float)
 	}
 
-	/// The shadow floating or external window `win` casts, if any, in physical pixels
+	/// The shadow floating or external window `win` casts, if any, in physical pixels.
 	fn shadow_of(&self, win: Window) -> Option<Shadow> {
 		let shadow = self.style_of(win).shadow?;
 		let scale = self.scale;
@@ -334,7 +334,7 @@ impl Editor {
 	}
 
 	/// The outline of external window `win`, if it has one, in physical pixels: in the highlight group's
-	/// text color
+	/// text color.
 	fn outline_of(&self, win: Window) -> Option<Outline> {
 		let outline = self.style_of(win).outline.as_ref()?;
 		let group = || self.highlights.resolve(self.highlights.group(&outline.highlight)).foreground;
@@ -342,30 +342,30 @@ impl Editor {
 		Some(Outline { width: outline.width * self.scale, color })
 	}
 
-	/// The radius of external window `win`'s corners, in physical pixels: 0 for square ones
+	/// The radius of external window `win`'s corners, in physical pixels: 0 for square ones.
 	fn corners_of(&self, win: Window) -> f32 {
 		self.style_of(win).corners.map_or(0.0, |radius| radius * self.scale)
 	}
 
-	/// The width of external window `win`'s outline in whole physical pixels, 0 without one
+	/// The width of external window `win`'s outline in whole physical pixels, 0 without one.
 	fn outline_width(&self, win: Window) -> u32 {
 		self.outline_of(win).map_or(0, |outline| outline.width.round().max(0.0) as u32)
 	}
 
-	/// External window `win`'s padding, in whole physical pixels
+	/// External window `win`'s padding, in whole physical pixels.
 	fn padding_of(&self, win: Window) -> Edges<u32> {
 		let padding = self.style_of(win).padding.unwrap_or_default();
 		padding.map(|size| (size * self.scale).round().max(0.0) as u32)
 	}
 
-	/// How wide external window `win`'s frame is on each side, in pixels: its padding and outline
+	/// How wide external window `win`'s frame is on each side, in pixels: its padding and outline.
 	fn frame_of(&self, win: Window) -> Edges<u32> {
 		let outline = self.outline_width(win);
 		self.padding_of(win).map(|padding| padding + outline)
 	}
 
 	/// What casts external window `win`'s shadow, from its cells at `rect` in pixels: its outer edge, its outline's
-	/// around its padding
+	/// around its padding.
 	fn shadow_area(&self, win: Window, rect: Rect<u32>) -> Rect<u32> {
 		rect.outset(self.frame_of(win))
 	}
@@ -377,12 +377,12 @@ impl Editor {
 		if radius > 0.0 { radius + self.outline_width(win) as f32 } else { 0.0 }
 	}
 
-	/// A `guifont` value the way [`Editor::guifont`] gives it: empty if it's Neovim's default
+	/// A `guifont` value the way [`Editor::guifont`] gives it: empty if it's Neovim's default.
 	pub fn strip_default_guifont<'a>(&self, value: &'a str) -> &'a str {
 		if self.default_guifont.as_deref() == Some(value) { "" } else { value }
 	}
 
-	/// A `guifont` value to set, from one the way [`Editor::guifont`] gives it: Neovim's default if empty
+	/// A `guifont` value to set, from one the way [`Editor::guifont`] gives it: Neovim's default if empty.
 	pub fn with_default_guifont(&self, value: String) -> String {
 		match &self.default_guifont {
 			Some(default) if value.is_empty() => default.clone(),
@@ -390,17 +390,17 @@ impl Editor {
 		}
 	}
 
-	/// The `linespace` option (`:help 'linespace'`): logical pixels added between rows, or taken away if negative
+	/// The `linespace` option (`:help 'linespace'`): logical pixels added between rows, or taken away if negative.
 	pub fn linespace(&self) -> i64 {
 		self.linespace
 	}
 
-	/// Whether mouse input is on in the current mode, as the `mouse` option says (`mouse_on`, `mouse_off`)
+	/// Whether mouse input is on in the current mode, as the `mouse` option says (`mouse_on`, `mouse_off`).
 	pub fn mouse(&self) -> bool {
 		self.mouse
 	}
 
-	/// Whether Neovim wants mouse moves without a button held (the `mousemoveevent` option)
+	/// Whether Neovim wants mouse moves without a button held (the `mousemoveevent` option).
 	pub fn mouse_move_events(&self) -> bool {
 		self.mouse_move_events
 	}

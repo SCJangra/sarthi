@@ -93,20 +93,20 @@ window can have its own values in its `w:sarthi`.
 
 WINDOW.SCROLL_ANIMATION                         *sarthi-window.scroll_animation*
 
-How text that scrolled moves to its new place
+How text that scrolled moves to its new place.
 
 window.scroll_animation.enabled         *sarthi-window.scroll_animation.enabled*
 
 `boolean`, default `true` · global, or per window
 
-Whether text that scrolled slides to its new place, or jumps there
+Whether text that scrolled slides to its new place, or jumps there.
 
 window.scroll_animation.curve             *sarthi-window.scroll_animation.curve*
 
 `sarthi.Animation`, default
 `{ type = "spring", stiffness = 400, damping = 32 }` · global, or per window
 
-How it moves to its new place
+How it moves to its new place.
 
 window.scroll_animation.overrides     *sarthi-window.scroll_animation.overrides*
 
@@ -114,7 +114,7 @@ window.scroll_animation.overrides     *sarthi-window.scroll_animation.overrides*
 
 Other values for some scrolls (overrides |sarthi.ScrollOverride|): each one
 that applies to a scroll in place of `curve`, later ones winning,
-e.g. `{ { lines = { min = 40 }, curve = { type = 'none' } } }` for big jumps
+e.g. `{ { lines = { min = 40 }, curve = { type = 'none' } } }` for big jumps.
 
 window.scroll_animation.exclude_filetypes *sarthi-window.scroll_animation.exclude_filetypes*
 
@@ -126,32 +126,32 @@ patterns, e.g. `cmp_*`.
 
 WINDOW.SHADOW                                             *sarthi-window.shadow*
 
-The shadow under floating and external windows, in logical pixels
+The shadow under floating and external windows, in logical pixels.
 
 window.shadow.enabled                             *sarthi-window.shadow.enabled*
 
 `boolean`, default `true` · global, or per window
 
-Whether windows cast one
+Whether windows cast one.
 
 window.shadow.blur                                   *sarthi-window.shadow.blur*
 
 `number`, default `8` · global, or per window
 
-How far the edge fades out, like CSS's blur radius
+How far the edge fades out, like CSS's blur radius.
 
 window.shadow.offset                               *sarthi-window.shadow.offset*
 
 `number[]`, default `{ 0, 2 }` · global, or per window
 
 How far the shadow is moved from the window: right and down, or left and up if
-negative
+negative.
 
 window.shadow.opacity                             *sarthi-window.shadow.opacity*
 
 `number`, default `1` · global, or per window
 
-From 0, invisible, to 1, black where fully shadowed
+From 0, invisible, to 1, black where fully shadowed.
 
 window.shadow.exclude_filetypes         *sarthi-window.shadow.exclude_filetypes*
 
@@ -179,13 +179,13 @@ window.outline.width                               *sarthi-window.outline.width*
 
 `number`, default `1` · global, or per window
 
-How thick the line is
+How thick the line is.
 
 window.outline.highlight                       *sarthi-window.outline.highlight*
 
 `string`, default `"FloatBorder"` · global, or per window
 
-The highlight group whose text color the line has
+The highlight group whose text color the line has.
 
 window.outline.exclude_filetypes       *sarthi-window.outline.exclude_filetypes*
 
@@ -235,14 +235,14 @@ window.padding.enabled                           *sarthi-window.padding.enabled*
 
 `boolean`, default `false` · global, or per window
 
-Whether windows have it
+Whether windows have it.
 
 window.padding.size                                 *sarthi-window.padding.size*
 
 `number|sarthi.PaddingSides`, default `4` · global, or per window
 
 In logical pixels: the same on every side, or each side's as numbers, those
-left out 0, e.g. `{ top = 2, left = 8, right = 8 }`
+left out 0, e.g. `{ top = 2, left = 8, right = 8 }`.
 
 window.padding.exclude_filetypes       *sarthi-window.padding.exclude_filetypes*
 
@@ -256,27 +256,27 @@ cursor_animation                                       *sarthi-cursor_animation*
 
 How the cursor moves to a new place: its corners each on their way, the
 leading ones faster, so it stretches towards where it goes and shrinks back as
-it arrives
+it arrives.
 
 cursor_animation.enabled                       *sarthi-cursor_animation.enabled*
 
 `boolean`, default `true` · global only
 
-Whether the cursor moves to its new place, or jumps there
+Whether the cursor moves to its new place, or jumps there.
 
 cursor_animation.curve                           *sarthi-cursor_animation.curve*
 
 `sarthi.Animation`, default
 `{ type = "spring", stiffness = 700, damping = 53 }` · global only
 
-How it moves to its new place
+How it moves to its new place.
 
 cursor_animation.trail                           *sarthi-cursor_animation.trail*
 
 `number`, default `1` · global only
 
 How much the trailing corners lag behind the leading ones: from 0, where the
-cursor moves as it is, to 1, where its leading edge is there at once
+cursor moves as it is, to 1, where its leading edge is there at once.
 
 cursor_animation.overrides                   *sarthi-cursor_animation.overrides*
 
@@ -291,52 +291,52 @@ default, short moves along a row, like typing, are quick.
 ------------------------------------------------------------------------------
 underline                                                     *sarthi-underline*
 
-How underlines are drawn, as adjustments to the font's own, in logical pixels
+How underlines are drawn, as adjustments to the font's own, in logical pixels.
 
 underline.offset                                       *sarthi-underline.offset*
 
 `number`, default `0` · global only
 
-Moves underlines down from the font's position, or up if negative
+Moves underlines down from the font's position, or up if negative.
 
 underline.thickness                                 *sarthi-underline.thickness*
 
 `number|false`, default `false` · global only
 
 Thickness of every line (underlines, overlines, strikethroughs), or `false`
-for the font's
+for the font's.
 
 underline.wave_height                             *sarthi-underline.wave_height*
 
 `number`, default `2` · global only
 
-Height of an undercurl's wave, in line thicknesses
+Height of an undercurl's wave, in line thicknesses.
 
 underline.ink_gaps                                   *sarthi-underline.ink_gaps*
 
 `number|false`, default `false` · global only
 
 Space kept between underlines and the text's ink where it crosses them, or
-`false` to draw through it
+`false` to draw through it.
 
 ------------------------------------------------------------------------------
 touchpad                                                       *sarthi-touchpad*
 
-Scrolling with a touchpad
+Scrolling with a touchpad.
 
 touchpad.scroll_speed                             *sarthi-touchpad.scroll_speed*
 
 `number`, default `3` · global only
 
 Lines scrolled per row of finger movement: 1 follows the fingers, more scrolls
-faster
+faster.
 
 ------------------------------------------------------------------------------
 ime                                                                 *sarthi-ime*
 
 Typing through an input method (IME), e.g. fcitx5 or IBus, for languages a
 keyboard can't type directly: the text it composes shows underlined at the
-cursor until it's committed
+cursor until it's committed.
 
 ime.enabled                                                 *sarthi-ime.enabled*
 
@@ -350,7 +350,7 @@ method doesn't take its keys.
 background                                                   *sarthi-background*
 
 The editor's background in the OS window: how see-through it is, and whether
-the desktop behind it is blurred
+the desktop behind it is blurred.
 
 background.opacity                                   *sarthi-background.opacity*
 
@@ -378,61 +378,61 @@ milliseconds; a value left out has its default.
 
 type = "none"                                            *sarthi.Animation.none*
 
-No animation: it's in its new place at once
+No animation: it's in its new place at once.
 
 type = "spring"                                        *sarthi.Animation.spring*
 
 Like a weight on a spring: pulled by `stiffness`, slowed by `damping`. With
 less damping than 2 × √stiffness it overshoots and bounces back.
 
-- `stiffness`: `number`, default `400`. How hard the spring pulls
-- `damping`: `number`, default `32`. How much the spring slows it down
+- `stiffness`: `number`, default `400`. How hard the spring pulls.
+- `damping`: `number`, default `32`. How much the spring slows it down.
 
 type = "linear"                                        *sarthi.Animation.linear*
 
-At an even speed over `duration`
+At an even speed over `duration`.
 
-- `duration`: `number`, default `150`. How long it takes, in milliseconds
+- `duration`: `number`, default `150`. How long it takes, in milliseconds.
 
 type = "ease_out"                                    *sarthi.Animation.ease_out*
 
-Fast at first, then slowing down, over `duration`
+Fast at first, then slowing down, over `duration`.
 
-- `duration`: `number`, default `150`. How long it takes, in milliseconds
+- `duration`: `number`, default `150`. How long it takes, in milliseconds.
 
 type = "ease_in_out"                              *sarthi.Animation.ease_in_out*
 
-Speeding up, then slowing down, over `duration`
+Speeding up, then slowing down, over `duration`.
 
-- `duration`: `number`, default `150`. How long it takes, in milliseconds
+- `duration`: `number`, default `150`. How long it takes, in milliseconds.
 
 type = "cubic_bezier"                            *sarthi.Animation.cubic_bezier*
 
-Like CSS's `cubic-bezier()` over `duration`
+Like CSS's `cubic-bezier()` over `duration`.
 
 - `points`: `number[]`, required. The curve's control points: x1, y1, x2, y2,
-  with the x values from 0 to 1, e.g. `{ 0.25, 0.1, 0.25, 1 }`
-- `duration`: `number`, default `150`. How long it takes, in milliseconds
+  with the x values from 0 to 1, e.g. `{ 0.25, 0.1, 0.25, 1 }`.
+- `duration`: `number`, default `150`. How long it takes, in milliseconds.
 
 ------------------------------------------------------------------------------
 Cursor animation overrides                               *sarthi.CursorOverride*
 
 Values of `cursor_animation` for the moves it applies to,
 e.g. `{ modes = 'i', curve = { type = 'none' } }`: all its conditions must
-hold, and those it leaves out always do
+hold, and those it leaves out always do.
 
 cursor_animation.overrides[n].rows                  *sarthi.CursorOverride.rows*
 
 `integer|{ min: integer?, max: integer? }`
 
 For moves across this many rows: a number, or `{ min = …, max = … }`, either
-left out for no bound
+left out for no bound.
 
 cursor_animation.overrides[n].columns            *sarthi.CursorOverride.columns*
 
 `integer|{ min: integer?, max: integer? }`
 
-For moves across this many columns, like `rows`
+For moves across this many columns, like `rows`.
 
 cursor_animation.overrides[n].modes                *sarthi.CursorOverride.modes*
 
@@ -446,31 +446,31 @@ cursor_animation.overrides[n].curve                *sarthi.CursorOverride.curve*
 
 `sarthi.Animation`
 
-How the cursor moves to its new place
+How the cursor moves to its new place.
 
 cursor_animation.overrides[n].trail                *sarthi.CursorOverride.trail*
 
 `number`
 
-How much the trailing corners lag behind the leading ones
+How much the trailing corners lag behind the leading ones.
 
 ------------------------------------------------------------------------------
 Scroll animation overrides                               *sarthi.ScrollOverride*
 
-A value of `scroll_animation` for the scrolls it applies to
+A value of `scroll_animation` for the scrolls it applies to.
 
 window.scroll_animation.overrides[n].lines         *sarthi.ScrollOverride.lines*
 
 `integer|{ min: integer?, max: integer? }`
 
 For scrolls of this many lines: a number, or `{ min = …, max = … }`, either
-left out for no bound
+left out for no bound.
 
 window.scroll_animation.overrides[n].curve         *sarthi.ScrollOverride.curve*
 
 `sarthi.Animation`
 
-How text that scrolled that far moves to its new place
+How text that scrolled that far moves to its new place.
 
 ==============================================================================
 Lua module                                                              *sarthi*
@@ -488,7 +488,7 @@ e.g. from a keymap. A mistake is an error at the call.
 Parameters:
 
 - `{settings}` (`sarthi.Settings?`): The settings (Settings
-  |sarthi-settings|); left out, all the defaults
+  |sarthi-settings|); left out, all the defaults.
 
 sarthi.settings()                                              *sarthi.settings*
 
@@ -505,7 +505,7 @@ fonts with a size of their own keep it.
 
 Parameters:
 
-- `{points}` (`number`): Size in points
+- `{points}` (`number`): Size in points.
 
 sarthi.change_font_size({delta})                       *sarthi.change_font_size*
 
@@ -515,7 +515,7 @@ too. Sizes stay within 4 to 96 points.
 
 Parameters:
 
-- `{delta}` (`number`): Points to add, or to take away if negative
+- `{delta}` (`number`): Points to add, or to take away if negative.
 
 ==============================================================================
 Window functions                                                    *sarthi.api*
@@ -553,10 +553,10 @@ the window again, so the call does nothing but fail.
 
 Parameters:
 
-- `{buf}` (`integer`): The buffer it shows
-- `{enter}` (`boolean`): Whether it becomes the current window
+- `{buf}` (`integer`): The buffer it shows.
+- `{enter}` (`boolean`): Whether it becomes the current window.
 - `{config}` (`vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig }`):
-  Neovim's window config, with a `sarthi` table in it
+  Neovim's window config, with a `sarthi` table in it.
 
 Returns: `integer`
 
@@ -568,9 +568,9 @@ key by key too.
 
 Parameters:
 
-- `{win}` (`integer`): The window, or 0 for the current one
+- `{win}` (`integer`): The window, or 0 for the current one.
 - `{config}` (`vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig }`):
-  Neovim's window config, with a `sarthi` table in it
+  Neovim's window config, with a `sarthi` table in it.
 
 sarthi.api.nvim_win_get_config({win})           *sarthi.api.nvim_win_get_config*
 
@@ -579,7 +579,7 @@ Like `vim.api.nvim_win_get_config()`, with the window's `sarthi` table: its
 
 Parameters:
 
-- `{win}` (`integer`): The window, or 0 for the current one
+- `{win}` (`integer`): The window, or 0 for the current one.
 
 Returns: `vim.api.keyset.win_config|{ sarthi?: sarthi.WindowConfig }`
 
@@ -608,7 +608,7 @@ sarthi.shadow                                       *sarthi.WindowConfig.shadow*
 
 `sarthi.ShadowOptions`
 
-Its own shadow |sarthi-window.shadow| values
+Its own shadow |sarthi-window.shadow| values.
 
 sarthi.outline                                     *sarthi.WindowConfig.outline*
 
@@ -633,7 +633,7 @@ sarthi.scroll_animation                   *sarthi.WindowConfig.scroll_animation*
 
 `sarthi.ScrollAnimationOptions`
 
-Its own scroll animation |sarthi-window.scroll_animation| values
+Its own scroll animation |sarthi-window.scroll_animation| values.
 
 ------------------------------------------------------------------------------
 sarthi.place                                                *sarthi.WindowPlace*
@@ -656,52 +656,52 @@ place.center                                         *sarthi.WindowPlace.center*
 
 `boolean`
 
-Centered over the screen
+Centered over the screen.
 
 place.relative                                     *sarthi.WindowPlace.relative*
 
 `"editor"|"win"|"cursor"`
 
-What `row` and `col` count from
+What `row` and `col` count from.
 
 place.win                                               *sarthi.WindowPlace.win*
 
 `integer`
 
 The window it's relative to, for `relative = 'win'`; the current window if
-left out, like for floats
+left out, like for floats.
 
 place.anchor                                         *sarthi.WindowPlace.anchor*
 
 `"NW"|"NE"|"SW"|"SE"`
 
-The corner at `row`, `col`
+The corner at `row`, `col`.
 
 place.row                                               *sarthi.WindowPlace.row*
 
 `number`
 
-Rows from what it's relative to
+Rows from what it's relative to.
 
 place.col                                               *sarthi.WindowPlace.col*
 
 `number`
 
-Columns from what it's relative to
+Columns from what it's relative to.
 
 place.offset                                         *sarthi.WindowPlace.offset*
 
 `sarthi.PlaceOffset`
 
 Moves it further, in logical pixels, e.g. past another window's padding:
-`{ x = …, y = … }`
+`{ x = …, y = … }`.
 
 place.fixed                                           *sarthi.WindowPlace.fixed*
 
 `boolean`
 
 Not moved sideways to stay on the screen, unless anchored on the right, like a
-float's `fixed`
+float's `fixed`.
 
 ------------------------------------------------------------------------------
 sarthi.font                                                        *sarthi.Font*
@@ -720,6 +720,6 @@ font.size                                                     *sarthi.Font.size*
 
 `number`
 
-In points, like `guifont`'s `:h`; `guifont`'s size if left out
+In points, like `guifont`'s `:h`; `guifont`'s size if left out.
 
  vim:tw=78:sw=4:ts=4:ft=help:norl:et:

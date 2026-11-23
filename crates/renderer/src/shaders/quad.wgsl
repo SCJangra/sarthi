@@ -1,33 +1,33 @@
 // Rectangles with optional rounded corners and border, patterned lines (curly, dotted and dashed underlines), or soft
 // shadows, one instance per quad. Positions are in physical pixels from the top-left corner of the surface.
 
-// Surface size in pixels (xy); zw is padding
+// Surface size in pixels (xy); zw is padding.
 @group(0) @binding(0) var<uniform> viewport: vec4<f32>;
 
-// Rectangles shadows leave out, under what casts them: left, top, width, height in pixels
+// Rectangles shadows leave out, under what casts them: left, top, width, height in pixels.
 @group(0) @binding(1) var<storage, read> holes: array<vec4<f32>>;
 
 struct Quad {
-	// Left, top, width, height
+	// Left, top, width, height.
 	@location(0) rect: vec4<f32>,
 	@location(1) color: vec4<f32>,
 	@location(2) border_color: vec4<f32>,
-	// Corner radius, border width
+	// Corner radius, border width.
 	@location(3) radius_border: vec2<f32>,
 	// Kind (0: none, 1: wave, 2: dots, 3: dashes), period and line thickness in pixels, unused; or for a shadow
-	// (kind 4), its blur radius in pixels, its holes' corner radius, and 1 for the union of the rectangles after its holes
+	// (kind 4), its blur radius in pixels, its holes' corner radius, and 1 for the union of the rectangles after its holes.
 	@location(4) pattern: vec4<f32>,
-	// For a shadow: the first of its holes, and how many
+	// For a shadow: the first of its holes, and how many.
 	@location(5) holes: vec2<u32>,
-	// A rounded rectangle what's drawn is cut to: left, top, width, height in pixels
+	// A rounded rectangle what's drawn is cut to: left, top, width, height in pixels.
 	@location(6) clip: vec4<f32>,
-	// Its corner radius (0 for no clip), unused
+	// Its corner radius (0 for no clip), unused.
 	@location(7) clip_radius: vec2<f32>,
 }
 
 struct VertexOutput {
 	@builtin(position) position: vec4<f32>,
-	// Pixel position relative to the quad's center
+	// Pixel position relative to the quad's center.
 	@location(0) local: vec2<f32>,
 	@location(1) @interpolate(flat) half_size: vec2<f32>,
 	@location(2) @interpolate(flat) color: vec4<f32>,
@@ -41,7 +41,7 @@ struct VertexOutput {
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertex: u32, quad: Quad) -> VertexOutput {
-	// Corners (0, 0), (1, 0), (0, 1), (1, 1), drawn as a triangle strip
+	// Corners (0, 0), (1, 0), (0, 1), (1, 1), drawn as a triangle strip.
 	let corner = vec2<f32>(f32(vertex & 1u), f32(vertex >> 1u));
 	let pixel = quad.rect.xy + corner * quad.rect.zw;
 
@@ -60,13 +60,13 @@ fn vs_main(@builtin(vertex_index) vertex: u32, quad: Quad) -> VertexOutput {
 }
 
 // Signed distance from `p` to a box of `half_size` centered on the origin, with corners rounded by `radius`:
-// negative inside, positive outside
+// negative inside, positive outside.
 fn rounded_box(p: vec2<f32>, half_size: vec2<f32>, radius: f32) -> f32 {
 	let q = abs(p) - half_size + radius;
 	return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - radius;
 }
 
-// How much of this pixel the quad's clip leaves, a ramp across its rounded edge; all of it without a clip
+// How much of this pixel the quad's clip leaves, a ramp across its rounded edge; all of it without a clip.
 fn clip_coverage(in: VertexOutput) -> f32 {
 	if in.clip_radius.x <= 0.0 {
 		return 1.0;
@@ -84,16 +84,16 @@ fn pattern_coverage(in: VertexOutput) -> f32 {
 	let x = in.position.x;
 
 	switch u32(in.pattern.x + 0.5) {
-		// A sine wave as high as the quad
+		// A sine wave as high as the quad.
 		case 1u: {
 			let amplitude = max(in.half_size.y - thickness * 0.5, 0.0);
 			let phase = 6.2831853 * x / period;
 			let slope = amplitude * 6.2831853 / period * cos(phase);
-			// Roughly the distance to the curve: the vertical distance, shortened where the curve is steep
+			// Roughly the distance to the curve: the vertical distance, shortened where the curve is steep.
 			let distance = abs(in.local.y - amplitude * sin(phase)) / sqrt(1.0 + slope * slope);
 			return clamp(thickness * 0.5 + 0.5 - distance, 0.0, 1.0);
 		}
-		// Dots and dashes: on for the first half of each period
+		// Dots and dashes: on for the first half of each period.
 		case 2u, 3u: {
 			return select(0.0, 1.0, fract(x / period) < 0.5);
 		}
@@ -103,7 +103,7 @@ fn pattern_coverage(in: VertexOutput) -> f32 {
 	}
 }
 
-// The error function, to within 5e-4 (Abramowitz and Stegun 7.1.27), for both values of `x`
+// The error function, to within 5e-4 (Abramowitz and Stegun 7.1.27), for both values of `x`.
 fn erf(x: vec2<f32>) -> vec2<f32> {
 	let s = sign(x);
 	let a = abs(x);
@@ -145,7 +145,7 @@ fn union_coverage(in: VertexOutput, sigma: f32, radius: f32) -> f32 {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	if u32(in.pattern.x + 0.5) == 4u {
-		// Only outside what casts it, like CSS's box-shadow: its holes, with corners rounded like the window's
+		// Only outside what casts it, like CSS's box-shadow: its holes, with corners rounded like the window's.
 		for (var i = in.holes.x; i < in.holes.x + in.holes.y; i++) {
 			let hole = holes[i];
 			let half = hole.zw * 0.5;
@@ -178,11 +178,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 		color = mix(in.color, in.border_color, clamp(0.5 + inner, 0.0, 1.0));
 	}
 
-	// Premultiplied alpha
+	// Premultiplied alpha.
 	return vec4<f32>(color.rgb * color.a, color.a) * coverage * clip_coverage(in);
 }
 
-// For the stencil (see `stencil.rs`): the quad's pixels whose centers are in its rounded rectangle, and no color
+// For the stencil (see `stencil.rs`): the quad's pixels whose centers are in its rounded rectangle, and no color.
 @fragment
 fn fs_mask(in: VertexOutput) -> @location(0) vec4<f32> {
 	let radius = min(in.radius_border.x, min(in.half_size.x, in.half_size.y));

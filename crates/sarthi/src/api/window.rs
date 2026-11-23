@@ -14,13 +14,13 @@ use rpc::sarthi::{Font, PlaceRelative, WindowOptions, WindowPlace};
 use super::{Ctx, neovim_error};
 use crate::place;
 
-/// A Lua table, as msgpack carries it: its keys and values
+/// A Lua table, as msgpack carries it: its keys and values.
 type Table = Vec<(Value, Value)>;
 
-/// The sections of the settings a window can have its own values of, kept in `w:sarthi`
+/// The sections of the settings a window can have its own values of, kept in `w:sarthi`.
 const OPTIONS: [&str; 5] = ["shadow", "outline", "rounded_corners", "padding", "scroll_animation"];
 
-/// What only external windows take, and why
+/// What only external windows take, and why.
 const EXTERNAL_ONLY: [(&str, &str); 5] = [
 	("place", "floating windows are placed by Neovim"),
 	("font", "floating windows share the main grid's cells"),
@@ -29,7 +29,7 @@ const EXTERNAL_ONLY: [(&str, &str); 5] = [
 	("padding", "Neovim places floating windows without room for it"),
 ];
 
-/// `sarthi.place` and `sarthi.font` as a window was last given them, as Lua gave them
+/// `sarthi.place` and `sarthi.font` as a window was last given them, as Lua gave them.
 #[derive(Debug, Clone, Default)]
 pub(super) struct Given {
 	place: Option<Value>,
@@ -45,7 +45,7 @@ pub(super) fn open(ctx: &Ctx, buf: Buffer, enter: bool, config: Value) -> Result
 	let sarthi = sarthi.unwrap_or_else(|| Value::Map(Vec::new()));
 	let options = check(ctx, Some(&sarthi), Vec::new(), external)?;
 	let given = Given { place: field(&sarthi, "place"), font: field(&sarthi, "font") };
-	// What it's placed relative to, before entering it makes it the current window
+	// What it's placed relative to, before entering it makes it the current window.
 	let place = resolve(ctx, given.place.as_ref())?;
 
 	let win = ctx.nvim.open_win(buf, enter, Value::Map(neovim)).map_err(neovim_error)?;
@@ -61,7 +61,7 @@ pub(super) fn open(ctx: &Ctx, buf: Buffer, enter: bool, config: Value) -> Result
 pub(super) fn set_config(ctx: &Ctx, win: Window, config: Value) -> Result<(), String> {
 	let win = or_current(ctx, win)?;
 	let (neovim, sarthi) = split(config)?;
-	// External after this call: as given, or a float if given `relative`, or as it is
+	// External after this call: as given, or a float if given `relative`, or as it is.
 	let external = match (get(&neovim, "external"), get(&neovim, "relative")) {
 		(Some(external), _) => truthy(external),
 		(None, None) => is_external(ctx, win)?,
@@ -86,12 +86,12 @@ pub(super) fn set_config(ctx: &Ctx, win: Window, config: Value) -> Result<(), St
 	apply(ctx, win, given, place, options)
 }
 
-/// A window's config like `nvim_win_get_config()`, with its `sarthi` table: its `w:sarthi`, and what else was given
+/// A window's config like `nvim_win_get_config()`, with its `sarthi` table: its `w:sarthi`, and what else was given.
 pub(super) fn get_config(ctx: &Ctx, win: Window) -> Result<Value, String> {
 	let win = or_current(ctx, win)?;
 	let mut config = map(ctx.nvim.win_get_config(win).map_err(neovim_error)?);
 	let mut sarthi = map(ctx.nvim.win_get_var(win, "sarthi").map_err(neovim_error)?);
-	// Not something to give back: the API sets it
+	// Not something to give back: the API sets it.
 	sarthi.retain(|(key, _)| key.as_str() != Some("managed"));
 	let given = ctx.given().get(&win).cloned().unwrap_or_default();
 	for (key, value) in [("place", given.place), ("font", given.font)] {
@@ -106,10 +106,10 @@ pub(super) fn get_config(ctx: &Ctx, win: Window) -> Result<Value, String> {
 }
 
 /// Gives `win` its `w:sarthi`, `options`, and the place and fonts `given`, the place resolved to `place`; or what's
-/// wrong with them
+/// wrong with them.
 fn apply(ctx: &Ctx, win: Window, given: Given, place: Option<WindowPlace>, options: Value) -> Result<(), String> {
 	ctx.nvim.win_set_var(win, "sarthi", options).map_err(neovim_error)?;
-	// At once, so sarthi has the window's style before Neovim draws it
+	// At once, so sarthi has the window's style before Neovim draws it.
 	ctx.nvim
 		.exec_lua::<()>("require('sarthi.floats').send(...)", (win.0,))
 		.map_err(neovim_error)?;
@@ -175,7 +175,7 @@ fn check(ctx: &Ctx, sarthi: Option<&Value>, options: Table, external: bool) -> R
 }
 
 /// `place` with what it's relative to as it is now, before a window is opened and maybe entered: the current window
-/// for `'win'` without one, and the cursor for `'cursor'`
+/// for `'win'` without one, and the cursor for `'cursor'`.
 fn resolve(ctx: &Ctx, place: Option<&Value>) -> Result<Option<WindowPlace>, String> {
 	let Some(place) = place.filter(|place| !place.is_nil()) else { return Ok(None) };
 	let mut place: WindowPlace = decode(place.clone()).map_err(|mistake| format!("`sarthi.place`: {mistake}"))?;
@@ -184,7 +184,7 @@ fn resolve(ctx: &Ctx, place: Option<&Value>) -> Result<Option<WindowPlace>, Stri
 			place.win = Some(ctx.nvim.current_win().map_err(neovim_error)?);
 		},
 		// By the cursor where it is now, which sarthi only learns with Neovim's next redraw: relative to the current
-		// window, at the cursor's cell of it, so in its own cells if it's an external window with fonts of its own
+		// window, at the cursor's cell of it, so in its own cells if it's an external window with fonts of its own.
 		Some(PlaceRelative::Cursor) => {
 			let win = ctx.nvim.current_win().map_err(neovim_error)?;
 			let line: f64 = ctx.nvim.call_function("winline", Vec::new()).map_err(neovim_error)?;
@@ -199,18 +199,18 @@ fn resolve(ctx: &Ctx, place: Option<&Value>) -> Result<Option<WindowPlace>, Stri
 	Ok(Some(place))
 }
 
-/// `win`, or the current window for 0
+/// `win`, or the current window for 0.
 fn or_current(ctx: &Ctx, win: Window) -> Result<Window, String> {
 	if win.0 == 0 { ctx.nvim.current_win().map_err(neovim_error) } else { Ok(win) }
 }
 
-/// Whether `win` is an external window now
+/// Whether `win` is an external window now.
 fn is_external(ctx: &Ctx, win: Window) -> Result<bool, String> {
 	let config = map(ctx.nvim.win_get_config(win).map_err(neovim_error)?);
 	Ok(get(&config, "external").is_some_and(truthy))
 }
 
-/// `config` without its `sarthi` table, for Neovim, and the table
+/// `config` without its `sarthi` table, for Neovim, and the table.
 fn split(config: Value) -> Result<(Table, Option<Value>), String> {
 	let Some(mut config) = into_map(config.clone()) else {
 		return Err(format!("the config takes a table, not a {}", lua_type(&config)));
@@ -222,7 +222,7 @@ fn split(config: Value) -> Result<(Table, Option<Value>), String> {
 	Ok((config, sarthi.filter(|sarthi| !sarthi.is_nil())))
 }
 
-/// A field of table `value`, unless it's left out or nil
+/// A field of table `value`, unless it's left out or nil.
 fn field(value: &Value, key: &str) -> Option<Value> {
 	as_map(value)
 		.and_then(|map| get(map, key))
@@ -238,7 +238,7 @@ fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, String> {
 	rmp_serde::from_slice(&bytes).map_err(|error| match error {
 		rmp_serde::decode::Error::Syntax(message) => message,
 		// Decoded again, through a value, for serde's message, e.g. "invalid type: string, expected f32", rather than
-		// rmp_serde's about msgpack markers, like the reader does for requests
+		// rmp_serde's about msgpack markers, like the reader does for requests.
 		error => match rmpv::ext::from_value::<T>(value) {
 			Err(rmpv::ext::Error::Syntax(message)) => message,
 			Ok(_) => error.to_string(),
@@ -256,7 +256,7 @@ fn as_map(value: &Value) -> Option<&Table> {
 	}
 }
 
-/// Like [`as_map`], owned
+/// Like [`as_map`], owned.
 fn into_map(value: Value) -> Option<Table> {
 	match value {
 		Value::Map(map) => Some(map),
@@ -265,7 +265,7 @@ fn into_map(value: Value) -> Option<Table> {
 	}
 }
 
-/// A table that Neovim returned, or an empty one for nil (e.g. a window without `w:sarthi`)
+/// A table that Neovim returned, or an empty one for nil (e.g. a window without `w:sarthi`).
 fn map(value: Value) -> Table {
 	into_map(value).unwrap_or_default()
 }
@@ -274,7 +274,7 @@ fn get<'a>(map: &'a [(Value, Value)], key: &str) -> Option<&'a Value> {
 	map.iter().find(|(name, _)| name.as_str() == Some(key)).map(|(_, value)| value)
 }
 
-/// Sets `key` of `map` to `value`, in place of its value if it has one
+/// Sets `key` of `map` to `value`, in place of its value if it has one.
 fn insert(map: &mut Table, key: &str, value: Value) {
 	match map.iter_mut().find(|(name, _)| name.as_str() == Some(key)) {
 		Some((_, old)) => *old = value,
@@ -282,12 +282,12 @@ fn insert(map: &mut Table, key: &str, value: Value) {
 	}
 }
 
-/// Whether Lua takes `value` as true: anything but `false` and nil
+/// Whether Lua takes `value` as true: anything but `false` and nil.
 fn truthy(value: &Value) -> bool {
 	!matches!(value, Value::Boolean(false) | Value::Nil)
 }
 
-/// The Lua type of `value`, for messages
+/// The Lua type of `value`, for messages.
 fn lua_type(value: &Value) -> &'static str {
 	match value {
 		Value::Nil => "nil",

@@ -1,4 +1,4 @@
-//! `sarthi.place` from `require('sarthi').api`, checked and turned into where the editor puts an external window
+//! `sarthi.place` from `require('sarthi').api`, checked and turned into where the editor puts an external window.
 
 use editor::{Anchor, Place, Relative};
 use rpc::sarthi::{PlaceAnchor, PlaceRelative, WindowPlace};
@@ -58,7 +58,7 @@ mod tests {
 		let centered = WindowPlace { center: Some(true), ..WindowPlace::default() };
 		assert_eq!(place(Some(&centered)), Ok(Place::Center));
 
-		// Like a float: by default its top-left corner at the top-left of what it's relative to
+		// Like a float: by default its top-left corner at the top-left of what it's relative to.
 		let editor = WindowPlace { relative: Some(PlaceRelative::Editor), ..WindowPlace::default() };
 		let expected = Place::Relative {
 			relative: Relative::Editor,

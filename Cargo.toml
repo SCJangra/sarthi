@@ -22,33 +22,33 @@ rmp = "0.8"
 rmp-serde = "1"
 rmpv = { version = "1", features = ["with-serde"] }
 serde = { version = "1", features = ["derive"] }
-# Filetype patterns, e.g. `exclude_filetypes = { "cmp_*" }`
+# Filetype patterns, e.g. `exclude_filetypes = { "cmp_*" }`.
 glob = "0.3"
 thiserror = "2"
 flume = "0.12"
 winit = "0.30"
 # Blur behind the window on Wayland compositors that offer ext-background-effect (see `sarthi::blur`); the versions and
-# features winit uses, so it's the same build of them
+# features winit uses, so it's the same build of them.
 wayland-backend = { version = "0.3", features = ["client_system"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wgpu = "30"
 glyphon = "0.12"
-# The cells the input method's text takes (`editor::preedit`); the version the fonts already use
+# The cells the input method's text takes (`editor::preedit`); the version the fonts already use.
 unicode-width = "0.1"
 rustc-hash = "2"
 bytemuck = { version = "1", features = ["derive"] }
-# Path rasterizer swash uses; draws the characters sarthi shapes itself (box drawing, blocks, powerline)
+# Path rasterizer swash uses; draws the characters sarthi shapes itself (box drawing, blocks, powerline).
 zeno = "0.3"
 # glyphon's cosmic-text, with the shaping cache: without it, laying out a full screen takes ~20× longer.
 cosmic-text = { version = "0.19", features = ["shape-run-cache"] }
 smol = "2"
 tracing = "0.1"
-# sarthi's command line
+# sarthi's command line.
 clap = { version = "4", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Clipboard access through the window's display: on Wayland it uses the window's connection, which works on every
-# compositor
+# compositor.
 window_clipboard = "0.5"
 
 [workspace.package]
@@ -56,7 +56,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace.lints.clippy]
-# Docs: a short summary first, code in backticks, and when a function fails or panics
+# Docs: a short summary first, code in backticks, and when a function fails or panics.
 doc_markdown = "warn"
 too_long_first_doc_paragraph = "warn"
 missing_errors_doc = "warn"

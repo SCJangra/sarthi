@@ -1,4 +1,4 @@
-//! Text, laid out a row at a time with glyphon in the layers' fonts, and only again when a row changes
+//! Text, laid out a row at a time with glyphon in the layers' fonts, and only again when a row changes.
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -17,18 +17,18 @@ use crate::quad::underline_band;
 use crate::renderer::{Piece, PieceKind};
 use crate::{CellSize, FontId, Fonts, Layer, RenderCell, RendererError, TextStyle};
 
-/// Draws the text of cell layers with glyphon
+/// Draws the text of cell layers with glyphon.
 pub(crate) struct TextPipeline {
 	atlas: TextAtlas,
 
 	/// One per piece, by its index in the frame: glyphon prepares and draws each separately, so pieces can be drawn
-	/// one after another
+	/// one after another.
 	renderers: Vec<TextRenderer>,
 
 	viewport: Viewport,
 	swash_cache: SwashCache,
 
-	/// Laid-out rows of each piece, by layer id and which part of the layer it is
+	/// Laid-out rows of each piece, by layer id and which part of the layer it is.
 	layers: HashMap<(u64, PieceKind), LaidOut>,
 
 	/// Text areas need a buffer; this empty one carries a row's custom glyphs.
@@ -36,14 +36,14 @@ pub(crate) struct TextPipeline {
 }
 
 /// The rows of a piece, and the fonts they were laid out with: the set and its generation, so they're laid out again when
-/// the piece's fonts or their size change
+/// the piece's fonts or their size change.
 #[derive(Default)]
 struct LaidOut {
 	fonts: (FontId, u32),
 	rows: Vec<Row>,
 }
 
-/// One row of a cell layer: its cells as last drawn, and how they're drawn
+/// One row of a cell layer: its cells as last drawn, and how they're drawn.
 #[derive(Default)]
 struct Row {
 	cells: Vec<RenderCell>,
@@ -51,13 +51,13 @@ struct Row {
 }
 
 /// How a row's cells are drawn: segments of text by starting column, and custom glyphs for the cells sarthi draws
-/// itself (box drawing, blocks, powerline), positioned relative to the row
+/// itself (box drawing, blocks, powerline), positioned relative to the row.
 #[derive(Default)]
 struct RowLayout {
 	buffers: Vec<(u32, Buffer)>,
 	glyphs: Vec<CustomGlyph>,
 
-	/// Where underlines break around the text's ink, as sorted x ranges in pixels from the row's left
+	/// Where underlines break around the text's ink, as sorted x ranges in pixels from the row's left.
 	ink: Vec<Range<f32>>,
 }
 
@@ -132,7 +132,7 @@ impl TextPipeline {
 		Ok(())
 	}
 
-	/// Where underlines in row `row` of `piece` break around the text's ink, as of the last prepare (see [`ink`])
+	/// Where underlines in row `row` of `piece` break around the text's ink, as of the last prepare (see [`ink`]).
 	pub(crate) fn ink(&self, piece: &Piece, row: usize) -> &[Range<f32>] {
 		let rows = self.layers.get(&key_of(piece));
 		rows.and_then(|laid_out| laid_out.rows.get(row))
@@ -147,23 +147,23 @@ impl TextPipeline {
 		Ok(())
 	}
 
-	/// Frees atlas space of glyphs the last frame didn't use
+	/// Frees atlas space of glyphs the last frame didn't use.
 	pub(crate) fn trim(&mut self) {
 		self.atlas.trim();
 	}
 }
 
-/// Identifies the laid-out rows of `piece` across frames
+/// Identifies the laid-out rows of `piece` across frames.
 fn key_of(piece: &Piece) -> (u64, PieceKind) {
 	(piece.layer.id, piece.kind)
 }
 
 /// The text areas of `piece`, whose rows are laid out in `rows`: a segment of text each, and the custom glyphs of
-/// each row in an `empty` buffer
+/// each row in an `empty` buffer.
 fn text_areas<'a>(rows: &'a [Row], piece: &Piece, empty: &'a Buffer) -> impl Iterator<Item = TextArea<'a>> {
 	let cell = piece.layer.cell;
 	let (left, top) = (piece.layer.x as f32, piece.layer.y as f32 + piece.offset);
-	// Clipped like the rest of the piece, so e.g. a wide fallback glyph can't spill out of a floating window
+	// Clipped like the rest of the piece, so e.g. a wide fallback glyph can't spill out of a floating window.
 	let clip = piece.clip;
 	let bounds = TextBounds {
 		left: clip.x as i32,
@@ -263,7 +263,7 @@ fn ink(
 				let (left, top) = (physical.x + placement.left, physical.y - placement.top);
 				let channels = if image.content == SwashContent::Mask { 1 } else { 4 };
 
-				// The image's rows inside the underline's band
+				// The image's rows inside the underline's band.
 				let first = (band_top.floor() as i32 - top).clamp(0, height as i32) as usize;
 				let last = (band_bottom.ceil() as i32 - top).clamp(0, height as i32) as usize;
 				let inked = |x: usize| {
@@ -290,7 +290,7 @@ fn ink(
 		}
 	}
 
-	// Sorted, with overlapping gaps merged
+	// Sorted, with overlapping gaps merged.
 	gaps.sort_by(|a, b| a.start.total_cmp(&b.start));
 	gaps.into_iter().fold(Vec::new(), |mut merged: Vec<Range<f32>>, gap| {
 		match merged.last_mut() {
@@ -301,7 +301,7 @@ fn ink(
 	})
 }
 
-/// A custom glyph, relative to the row, for each cell sarthi draws itself, in the cell's text color
+/// A custom glyph, relative to the row, for each cell sarthi draws itself, in the cell's text color.
 fn builtin_glyphs(cells: &[RenderCell], cell: CellSize) -> Vec<CustomGlyph> {
 	(0..)
 		.zip(cells)
@@ -322,7 +322,7 @@ fn builtin_glyphs(cells: &[RenderCell], cell: CellSize) -> Vec<CustomGlyph> {
 		.collect()
 }
 
-/// A run of cells laid out together, starting at column `col`, in chosen font `face` (see `FontSet::face_of`)
+/// A run of cells laid out together, starting at column `col`, in chosen font `face` (see `FontSet::face_of`).
 #[derive(Debug, PartialEq)]
 struct Segment {
 	col: u32,
@@ -361,7 +361,7 @@ impl Segment {
 fn segments(cells: &[RenderCell], mut run_of: impl FnMut(&str) -> Run) -> Vec<Segment> {
 	let mut segments = Vec::new();
 	let mut current: Option<Segment> = None;
-	// Spaces after the current segment's text, added once more text follows
+	// Spaces after the current segment's text, added once more text follows.
 	let mut spaces = 0;
 
 	for (col, cell) in (0..).zip(cells) {
@@ -408,7 +408,7 @@ fn segments(cells: &[RenderCell], mut run_of: impl FnMut(&str) -> Run) -> Vec<Se
 /// draws over the cells after it.
 fn layout(fonts: &mut Fonts, font: FontId, segment: &Segment) -> Buffer {
 	let family = fonts.family(font, segment.face).to_owned();
-	// The face of the segment's font each span is drawn with
+	// The face of the segment's font each span is drawn with.
 	let variants: Vec<(Weight, Style)> = segment
 		.spans
 		.iter()
@@ -458,22 +458,22 @@ mod tests {
 			.collect()
 	}
 
-	/// A segment in the main font
+	/// A segment in the main font.
 	fn segment(col: u32, text: &str, spans: &[(std::ops::Range<usize>, TextStyle)]) -> Segment {
 		Segment { col, face: Some(0), text: text.to_owned(), spans: spans.to_vec() }
 	}
 
-	/// A main font with ASCII only, and no other chosen fonts
+	/// A main font with ASCII only, and no other chosen fonts.
 	fn ascii_only(text: &str) -> Run {
 		if text.is_ascii() { Run::Main } else { Run::Alone(None) }
 	}
 
-	/// Every character in the main font, one cell wide
+	/// Every character in the main font, one cell wide.
 	fn main_font(_: &str) -> Run {
 		Run::Main
 	}
 
-	/// A layer one cell wide, with one row per string
+	/// A layer one cell wide, with one row per string.
 	fn column(rows: &[&str]) -> Layer {
 		Layer {
 			id: 1,
@@ -526,7 +526,7 @@ mod tests {
 			[segment(0, "ab", &[(0..2, PLAIN)]), system, segment(3, "c", &[(0..1, PLAIN)])],
 		);
 
-		// In the second chosen font
+		// In the second chosen font.
 		let face = |text: &str| if text == "é" { Run::Alone(Some(1)) } else { Run::Main };
 		assert_eq!(segments(&row, face)[1].face, Some(1));
 	}
@@ -571,7 +571,7 @@ mod tests {
 
 	#[test]
 	fn builtin_characters_count_as_spaces() {
-		// A status line: text, a powerline separator, more text; and a box border with its contents
+		// A status line: text, a powerline separator, more text; and a box border with its contents.
 		let row = cells(&["a", "\u{E0BC}", "b", "│", " ", "c", "│"], PLAIN);
 		assert_eq!(segments(&row, ascii_only), [segment(0, "a b  c", &[(0..6, PLAIN)])]);
 		assert_eq!(segments(&cells(&["╭", "─", "╮"], PLAIN), ascii_only), []);
@@ -655,7 +655,7 @@ mod tests {
 		}
 	}
 
-	/// A one-row layer of `text`, one character per cell, underlined in style `underline`
+	/// A one-row layer of `text`, one character per cell, underlined in style `underline`.
 	fn underlined(text: &str, underline: crate::Underline) -> Layer {
 		let decoration = Decoration { underline: Some(underline), ..Decoration::default() };
 		let cells: Vec<RenderCell> = text
@@ -709,7 +709,7 @@ mod tests {
 		update_rows(&mut rows, &column(&["g"]), &mut fonts, &mut swash);
 		assert_eq!(rows[0].layout.ink, []);
 
-		// Off by default
+		// Off by default.
 		fonts.set_size(FontId::MAIN, TextSize::new(14.0));
 		update_rows(&mut rows, &underlined("agey", crate::Underline::Curly), &mut fonts, &mut swash);
 		assert_eq!(rows[0].layout.ink, []);

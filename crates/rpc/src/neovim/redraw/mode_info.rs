@@ -15,9 +15,9 @@ pub enum CursorShape {
 pub struct ModeInfo {
 	pub cursor_shape: Option<CursorShape>,
 
-	/// How much of the cell a horizontal or vertical cursor covers, in percent
+	/// How much of the cell a horizontal or vertical cursor covers, in percent.
 	pub cell_percentage: Option<u32>,
 
-	/// Highlight for the cursor's colors; 0 means the cell's colors swapped
+	/// Highlight for the cursor's colors; 0 means the cell's colors swapped.
 	pub attr_id: Option<HlId>,
 }

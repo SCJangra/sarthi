@@ -1,4 +1,4 @@
-//! Where external windows go: sarthi places them itself, since Neovim leaves that to the UI (`:help ui-multigrid`)
+//! Where external windows go: sarthi places them itself, since Neovim leaves that to the UI (`:help ui-multigrid`).
 
 use renderer::{CellSize, Edges, Rect};
 use rpc::neovim::{Grid, Window};
@@ -8,61 +8,61 @@ use crate::{Editor, Placement};
 /// Where an external window goes. Rows and columns are in cells of the screen (grid 1).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Place {
-	/// Centered over the screen, until placed otherwise
+	/// Centered over the screen, until placed otherwise.
 	Center,
 
-	/// Like a floating window (`nvim_open_win()`'s `relative`, `anchor`, `row`, `col` and `fixed`), kept on the screen
+	/// Like a floating window (`nvim_open_win()`'s `relative`, `anchor`, `row`, `col` and `fixed`), kept on the screen.
 	Relative {
-		/// What `row` and `col` count from
+		/// What `row` and `col` count from.
 		relative: Relative,
 
-		/// The corner of its frame that goes at `row`, `col`
+		/// The corner of its frame that goes at `row`, `col`.
 		anchor: Anchor,
 
-		/// Rows from what it's relative to, in whole cells
+		/// Rows from what it's relative to, in whole cells.
 		row: f64,
 
-		/// Columns from what it's relative to, in whole cells
+		/// Columns from what it's relative to, in whole cells.
 		col: f64,
 
-		/// Moves it further right and down, in logical pixels
+		/// Moves it further right and down, in logical pixels.
 		offset: [f64; 2],
 
-		/// Not moved sideways to stay on the screen, unless anchored on the right
+		/// Not moved sideways to stay on the screen, unless anchored on the right.
 		fixed: bool,
 	},
 }
 
-/// What a [`Place::Relative`] window's `row` and `col` count from
+/// What a [`Place::Relative`] window's `row` and `col` count from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Relative {
-	/// The screen's top-left corner
+	/// The screen's top-left corner.
 	Editor,
 
 	/// Window `win`'s text's top-left corner, inside its frame, border and winbar, wherever the window is. While it
 	/// isn't shown, the external window is centered.
 	Win(Window),
 
-	/// The cursor, where it was when placed: the window doesn't follow it, like a floating window doesn't
+	/// The cursor, where it was when placed: the window doesn't follow it, like a floating window doesn't.
 	Cursor,
 }
 
-/// Which corner of a [`Place::Relative`] window is at its `row` and `col`
+/// Which corner of a [`Place::Relative`] window is at its `row` and `col`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Anchor {
-	/// Its top-left corner
+	/// Its top-left corner.
 	#[default]
 	NorthWest,
-	/// Its top-right corner
+	/// Its top-right corner.
 	NorthEast,
-	/// Its bottom-left corner
+	/// Its bottom-left corner.
 	SouthWest,
-	/// Its bottom-right corner
+	/// Its bottom-right corner.
 	SouthEast,
 }
 
 impl Anchor {
-	/// Whether it's on the right, and whether at the bottom
+	/// Whether it's on the right, and whether at the bottom.
 	pub(crate) fn sides(self) -> (bool, bool) {
 		match self {
 			Self::NorthWest => (false, false),
@@ -96,23 +96,23 @@ pub(crate) fn position(
 		},
 	};
 
-	// The anchor corner, in pixels: at whole cells, like Neovim, which drops a fraction
+	// The anchor corner, in pixels: at whole cells, like Neovim, which drops a fraction.
 	let x = f64::from(base_x) + col.trunc() * f64::from(cell.width) + offset[0] * scale;
 	let y = f64::from(base_y) + row.trunc() * f64::from(cell.height) + offset[1] * scale;
 	let (east, south) = anchor.sides();
 	let left = if east { x - f64::from(size[0]) } else { x };
 	let top = if south { y - f64::from(size[1]) } else { y };
 
-	// On the screen as far as it fits, like Neovim keeps floating windows on it
+	// On the screen as far as it fits, like Neovim keeps floating windows on it.
 	let keep =
 		|start: f64, size: u32, screen: u32| start.round().clamp(0.0, f64::from(screen.saturating_sub(size))) as u32;
-	// `fixed`: not moved sideways, unless anchored on the right
+	// `fixed`: not moved sideways, unless anchored on the right.
 	let left = if fixed && !east { left.round().max(0.0) as u32 } else { keep(left, size[0], screen[0]) };
 	[left, keep(top, size[1], screen[1])]
 }
 
 /// `place` with a [`Relative::Cursor`] made relative to the editor, for the cursor at `cursor` (row, column of the
-/// screen): where it is when placed
+/// screen): where it is when placed.
 pub(crate) fn at_cursor(place: Place, cursor: (u32, u32)) -> Place {
 	match place {
 		Place::Relative { relative: Relative::Cursor, anchor, row, col, offset, fixed } => Place::Relative {
@@ -128,7 +128,7 @@ pub(crate) fn at_cursor(place: Place, cursor: (u32, u32)) -> Place {
 }
 
 impl Editor {
-	/// Where external window `win`, grid `id`, is, in pixels
+	/// Where external window `win`, grid `id`, is, in pixels.
 	pub(crate) fn external_rect(&self, id: Grid, win: Window) -> Rect<u32> {
 		self.external_rect_within(id, win, 0)
 	}
@@ -138,7 +138,7 @@ impl Editor {
 	fn external_rect_within(&self, id: Grid, win: Window, depth: u32) -> Rect<u32> {
 		let (grid, cell) = (&self.grids[&id], self.cell_of(id));
 		let size = [grid.width * cell.width, grid.height * cell.height];
-		// Placed with its frame, like Neovim places a floating window with its border: its cells inside it
+		// Placed with its frame, like Neovim places a floating window with its border: its cells inside it.
 		let frame = self.frame_of(win);
 		let outer = [size[0] + frame.left + frame.right, size[1] + frame.top + frame.bottom];
 		let [x, y] = self.external_place(win, outer, depth);
@@ -149,7 +149,7 @@ impl Editor {
 	/// it's placed relative to counts from that window's text, inside its frame, border and winbar, like Neovim's
 	/// floats do.
 	fn external_place(&self, win: Window, outer: [u32; 2], depth: u32) -> [u32; 2] {
-		// Above the command line, like Neovim keeps floating windows
+		// Above the command line, like Neovim keeps floating windows.
 		let screen = self.grids.get(&Grid::GLOBAL).map_or([0, 0], |grid| {
 			let rows = (grid.height).saturating_sub(self.command_rows);
 			[grid.width * self.cell.width, rows * self.cell.height]
@@ -160,7 +160,7 @@ impl Editor {
 			let (&grid, viewport) = self.viewports.iter().find(|(_, viewport)| viewport.win == Some(win))?;
 			let Edges { top, left, .. } = viewport.margins;
 			let (corner, cell) = match self.placements.get(&grid) {
-				// In its own cells, where it's placed; past a few in a row, as if not shown
+				// In its own cells, where it's placed; past a few in a row, as if not shown.
 				Some(Placement::External { win, .. }) => {
 					let rect = (depth < 8).then(|| self.external_rect_within(grid, *win, depth + 1))?;
 					([rect.x, rect.y], self.cell_of(grid))
@@ -186,7 +186,7 @@ mod tests {
 	const CELL: CellSize = CellSize { width: 10, height: 20 };
 
 	/// A 100×200 pixel screen (10×10 cells), with window 7 at row 2, column 3, and window 8, with cells of its own
-	/// (5×10), at 15, 25 pixels
+	/// (5×10), at 15, 25 pixels.
 	fn placed(place: Place, size: [u32; 2]) -> [u32; 2] {
 		position(place, size, [100, 200], CELL, 2.0, |win| match win {
 			Window(7) => Some(([30, 40], CELL)),
@@ -202,32 +202,32 @@ mod tests {
 	#[test]
 	fn centered() {
 		assert_eq!(placed(Place::Center, [40, 60]), [30, 70]);
-		// Larger than the screen: from its top-left corner
+		// Larger than the screen: from its top-left corner.
 		assert_eq!(placed(Place::Center, [140, 260]), [0, 0]);
 	}
 
 	#[test]
 	fn relative_to_the_editor_by_each_corner() {
 		let at = |anchor| placed(relative(Relative::Editor, anchor, 5.0, 6.0), [20, 40]);
-		// The corner at (60, 100)
+		// The corner at (60, 100).
 		assert_eq!(at(Anchor::NorthWest), [60, 100]);
 		assert_eq!(at(Anchor::NorthEast), [40, 100]);
 		assert_eq!(at(Anchor::SouthWest), [60, 60]);
 		assert_eq!(at(Anchor::SouthEast), [40, 60]);
-		// Fractional cells: whole ones, like Neovim, which drops the fraction
+		// Fractional cells: whole ones, like Neovim, which drops the fraction.
 		assert_eq!(placed(relative(Relative::Editor, Anchor::NorthWest, 1.5, 2.75), [20, 40]), [20, 20]);
 	}
 
 	#[test]
 	fn kept_on_the_screen() {
-		// Past the bottom-right corner, and before the top-left one
+		// Past the bottom-right corner, and before the top-left one.
 		assert_eq!(placed(relative(Relative::Editor, Anchor::NorthWest, 9.0, 9.0), [20, 40]), [80, 160]);
 		assert_eq!(placed(relative(Relative::Editor, Anchor::SouthEast, 0.0, 0.0), [20, 40]), [0, 0]);
 	}
 
 	#[test]
 	fn moved_by_an_offset() {
-		// 3 and 5 logical pixels, at 2 physical pixels in one
+		// 3 and 5 logical pixels, at 2 physical pixels in one.
 		let offset = Place::Relative {
 			relative: Relative::Editor,
 			anchor: Anchor::NorthWest,
@@ -237,7 +237,7 @@ mod tests {
 			fixed: false,
 		};
 		assert_eq!(placed(offset, [20, 40]), [2 * 10 + 6, 20 + 10]);
-		// Still kept on the screen
+		// Still kept on the screen.
 		let far = Place::Relative {
 			relative: Relative::Editor,
 			anchor: Anchor::NorthWest,
@@ -251,11 +251,11 @@ mod tests {
 
 	#[test]
 	fn relative_to_a_window() {
-		// One row below window 7's top-left corner (2, 3)
+		// One row below window 7's top-left corner (2, 3).
 		assert_eq!(placed(relative(Relative::Win(Window(7)), Anchor::NorthWest, 1.0, 0.0), [20, 40]), [30, 60]);
-		// In window 8's own cells: 2 rows and 3 columns of 5×10
+		// In window 8's own cells: 2 rows and 3 columns of 5×10.
 		assert_eq!(placed(relative(Relative::Win(Window(8)), Anchor::NorthWest, 2.0, 3.0), [20, 40]), [30, 45]);
-		// A window that isn't shown: centered
+		// A window that isn't shown: centered.
 		assert_eq!(placed(relative(Relative::Win(Window(9)), Anchor::NorthWest, 1.0, 0.0), [20, 40]), [40, 80]);
 	}
 

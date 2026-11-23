@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::schema::{self, Schema};
 
-/// The help file as Markdown
+/// The help file as Markdown.
 pub fn markdown(root: &Path) -> String {
 	let prose = |name: &str| {
 		let path = root.join("crates/rpc/src/sarthi/doc").join(name);
@@ -53,7 +53,7 @@ pub fn markdown(root: &Path) -> String {
 	out
 }
 
-/// A heading at `level`, `title` with help tag `tag`, then `body`
+/// A heading at `level`, `title` with help tag `tag`, then `body`.
 fn section(out: &mut String, level: usize, title: &str, tag: &str, body: &str) {
 	let _ = writeln!(out, "{} {title} {{#{tag}}}\n", "#".repeat(level));
 	if !body.trim().is_empty() {
@@ -81,7 +81,7 @@ fn settings_section(out: &mut String, settings: &Schema, options: &Schema, path:
 	}
 }
 
-/// A key of a table: its name and tag, its Lua type, its default if it has one, and `note`, then its doc
+/// A key of a table: its name and tag, its Lua type, its default if it has one, and `note`, then its doc.
 fn key_entry(out: &mut String, name: &str, tag: &str, schema: &Value, default: Option<String>, note: &str) {
 	let _ = writeln!(out, "#### {name} {{#{tag}}}\n");
 	let mut line = format!("`{}`", schema::lua_type(schema));
@@ -94,7 +94,7 @@ fn key_entry(out: &mut String, name: &str, tag: &str, schema: &Value, default: O
 	let _ = writeln!(out, "{line}\n\n{}\n", schema::doc(schema));
 }
 
-/// The keys of settings section `name` that a window can have its own values of, in its `w:sarthi`
+/// The keys of settings section `name` that a window can have its own values of, in its `w:sarthi`.
 fn window_keys<'a>(options: &'a Schema, name: &str) -> Vec<&'a str> {
 	let Some((_, section)) = schema::properties(&options.root)
 		.into_iter()
@@ -108,7 +108,7 @@ fn window_keys<'a>(options: &'a Schema, name: &str) -> Vec<&'a str> {
 		.collect()
 }
 
-/// The curves an animation can have: each with its keys, their types and defaults
+/// The curves an animation can have: each with its keys, their types and defaults.
 fn animations(out: &mut String, settings: &Schema) {
 	let animation = settings.def("Animation");
 	section(out, 2, "Animations", "sarthi.Animation", &schema::doc(animation));
@@ -131,7 +131,7 @@ fn animations(out: &mut String, settings: &Schema) {
 	}
 }
 
-/// The functions of the API whose Lua names `which` takes, e.g. those of `require('sarthi').api`
+/// The functions of the API whose Lua names `which` takes, e.g. those of `require('sarthi').api`.
 fn functions(out: &mut String, api: &Schema, which: impl Fn(&str) -> bool) {
 	for function in api_functions(api).into_iter().filter(|function| which(&function.lua)) {
 		let params: Vec<String> = function.params.iter().map(|param| format!("{{{}}}", param.name)).collect();
@@ -151,7 +151,7 @@ fn functions(out: &mut String, api: &Schema, which: impl Fn(&str) -> bool) {
 	}
 }
 
-/// A table's keys, under a heading `title` with tag `tag`, from object `schema`; each key's tag is `prefix.key`
+/// A table's keys, under a heading `title` with tag `tag`, from object `schema`; each key's tag is `prefix.key`.
 fn table(out: &mut String, schemas: &Schema, tag: &str, title: &str, schema: &Value, prefix: &str) {
 	let schema = schemas.resolve(schema);
 	section(out, 2, title, tag, &schema::doc(schema));
@@ -160,21 +160,21 @@ fn table(out: &mut String, schemas: &Schema, tag: &str, title: &str, schema: &Va
 	}
 }
 
-/// A function of the API, from its request's schema
+/// A function of the API, from its request's schema.
 pub struct Function {
-	/// Its Lua name in `require('sarthi')`, e.g. `api.nvim_open_win`
+	/// Its Lua name in `require('sarthi')`, e.g. `api.nvim_open_win`.
 	pub lua: String,
 
-	/// The request's name, e.g. `nvim_open_win`
+	/// The request's name, e.g. `nvim_open_win`.
 	pub method: String,
 	pub doc: String,
 	pub params: Vec<Param>,
 
-	/// Its Lua return type, if it returns something
+	/// Its Lua return type, if it returns something.
 	pub returns: Option<String>,
 }
 
-/// A parameter of a [`Function`]
+/// A parameter of a [`Function`].
 pub struct Param {
 	pub name: String,
 	pub lua_type: String,
@@ -182,7 +182,7 @@ pub struct Param {
 	pub doc: String,
 }
 
-/// The functions of the API: the requests with a Lua name (`x-lua`), in order
+/// The functions of the API: the requests with a Lua name (`x-lua`), in order.
 pub fn api_functions(api: &Schema) -> Vec<Function> {
 	let requests = api.root.get("oneOf").and_then(Value::as_array).cloned().unwrap_or_default();
 	requests

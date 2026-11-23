@@ -7,38 +7,38 @@ use std::time::Instant;
 use crate::animation::{Approach, Motion};
 use crate::{Decoration, Layer, RenderCell, Scroll};
 
-/// The layers whose text is sliding, by layer id
+/// The layers whose text is sliding, by layer id.
 pub(crate) struct ScrollAnimations {
-	/// How scrolled text moves to its new place, if it doesn't jump there
+	/// How scrolled text moves to its new place, if it doesn't jump there.
 	motion: Option<Motion>,
 
 	layers: HashMap<u64, Animation>,
 }
 
-/// The scrolling region of a layer while its text slides
+/// The scrolling region of a layer while its text slides.
 pub(crate) struct SlidingRegion {
 	/// The region's text, from the first row that shows: the layer's text, with text from before the scroll above or
-	/// below it
+	/// below it.
 	pub layer: Layer,
 
-	/// Rows below the region's top to draw `layer`, or above if negative
+	/// Rows below the region's top to draw `layer`, or above if negative.
 	pub offset: f32,
 
 	/// The region's height in rows. What's drawn of `layer` outside it is cut off.
 	pub height: u32,
 
-	/// Where the region starts in its layer, in cells
+	/// Where the region starts in its layer, in cells.
 	pub top: u32,
 	pub left: u32,
 }
 
-/// Text of a layer sliding to its place
+/// Text of a layer sliding to its place.
 struct Animation {
-	/// The layer's size and scrolling region; the animation ends if they change
+	/// The layer's size and scrolling region; the animation ends if they change.
 	size: (u32, u32),
 	region: Scroll,
 
-	/// Rows the text is drawn below its place, or above if negative, moving towards 0
+	/// Rows the text is drawn below its place, or above if negative, moving towards 0.
 	offset: Approach,
 
 	/// Text from before the scroll that left the region but is still drawn while sliding out, by row relative to the
@@ -51,7 +51,7 @@ impl ScrollAnimations {
 		Self { motion, layers: HashMap::new() }
 	}
 
-	/// Sets how scrolled text moves from the next scroll on
+	/// Sets how scrolled text moves from the next scroll on.
 	pub(crate) fn set_motion(&mut self, motion: Option<Motion>) {
 		self.motion = motion;
 	}
@@ -95,12 +95,12 @@ impl ScrollAnimations {
 		}
 	}
 
-	/// Whether any text is still sliding
+	/// Whether any text is still sliding.
 	pub(crate) fn is_animating(&self, now: Instant) -> bool {
 		self.layers.values().any(|animation| animation.offset(now) != 0.0)
 	}
 
-	/// The scrolling region of `layer` while its text slides, or `None` if nothing slides
+	/// The scrolling region of `layer` while its text slides, or `None` if nothing slides.
 	pub(crate) fn region(&self, layer: &Layer, now: Instant) -> Option<SlidingRegion> {
 		let animation = self.layers.get(&layer.id)?;
 		let offset = animation.offset(now);
@@ -109,13 +109,13 @@ impl ScrollAnimations {
 }
 
 impl Animation {
-	/// Whether this animation still fits `layer`, which scrolled within `scroll` if it did
+	/// Whether this animation still fits `layer`, which scrolled within `scroll` if it did.
 	fn fits(&self, layer: &Layer, scroll: Option<&Scroll>) -> bool {
 		let region = |scroll: &Scroll| (scroll.top, scroll.bottom, scroll.left, scroll.right);
 		self.size == (layer.width, layer.height) && scroll.is_none_or(|scroll| region(scroll) == region(&self.region))
 	}
 
-	/// Rows the text is drawn below its place at `now`, or above if negative
+	/// Rows the text is drawn below its place at `now`, or above if negative.
 	fn offset(&self, now: Instant) -> f32 {
 		self.offset.value(now)
 	}
@@ -146,13 +146,13 @@ impl Animation {
 	}
 
 	/// The rows outside the region that show while the text is drawn `offset` rows below its place, relative to the
-	/// region's top
+	/// region's top.
 	fn hidden_rows(&self, offset: f32) -> Range<i32> {
 		let rows = offset.abs().ceil() as i32;
 		if offset > 0.0 { -rows..0 } else { self.height()..self.height() + rows }
 	}
 
-	/// The region of `layer` while its text is drawn `offset` rows below its place
+	/// The region of `layer` while its text is drawn `offset` rows below its place.
 	fn region_layer(&self, layer: &Layer, offset: f32) -> SlidingRegion {
 		let region = &self.region;
 		let hidden = self.hidden_rows(offset);
@@ -197,7 +197,7 @@ impl Animation {
 	}
 }
 
-/// A row like `cells`, with nothing but their backgrounds
+/// A row like `cells`, with nothing but their backgrounds.
 fn blank(cells: &[RenderCell]) -> Vec<RenderCell> {
 	let space = arrayvec::ArrayString::from(" ").expect("a space fits in a cell");
 	cells
@@ -206,7 +206,7 @@ fn blank(cells: &[RenderCell]) -> Vec<RenderCell> {
 		.collect()
 }
 
-/// The rows of `layer` in the scrolling region of `scroll`
+/// The rows of `layer` in the scrolling region of `scroll`.
 fn region_rows<'a>(layer: &'a Layer, scroll: &Scroll) -> impl Iterator<Item = &'a [RenderCell]> {
 	let (left, right) = (scroll.left as usize, scroll.right as usize);
 	layer
@@ -229,12 +229,12 @@ mod tests {
 	const DURATION: Duration = Duration::from_millis(150);
 	const CELL: CellSize = CellSize { width: 8, height: 16 };
 
-	/// Animations that ease out over [`DURATION`]
+	/// Animations that ease out over [`DURATION`].
 	fn animations() -> ScrollAnimations {
 		ScrollAnimations::new(Some(Motion::Ease { easing: Easing::EaseOut, duration: DURATION }))
 	}
 
-	/// A layer one character per cell and one row per string, scrolled by `rows` within rows `top..bottom` if not 0
+	/// A layer one character per cell and one row per string, scrolled by `rows` within rows `top..bottom` if not 0.
 	fn layer(rows: &[&str], scroll: i32, top: u32, bottom: u32) -> Layer {
 		let style = TextStyle { foreground: 0xFFFFFF, bold: false, italic: false };
 		let cells = rows
@@ -269,7 +269,7 @@ mod tests {
 		}
 	}
 
-	/// The rows of the sliding region of `layer` at `now`, and the rows it's drawn below the region's top
+	/// The rows of the sliding region of `layer` at `now`, and the rows it's drawn below the region's top.
 	fn region(scrolls: &ScrollAnimations, layer: &Layer, now: Instant) -> Option<(Vec<String>, f32)> {
 		let region = scrolls.region(layer, now)?;
 		let rows = region.layer.cells.chunks(region.layer.width as usize);
@@ -358,7 +358,7 @@ mod tests {
 	#[test]
 	fn rows_outside_the_region_stay() {
 		let (mut scrolls, now) = (animations(), Instant::now());
-		// A winbar above the text
+		// A winbar above the text.
 		let shown = [layer(&["w", "a", "b", "c"], 0, 1, 4)];
 		let mut scrolled = layer(&["w", "b", "c", "d"], 1, 1, 4);
 		let shape = CursorShape::Bar { orientation: BarOrientation::Vertical, percentage: 25 };
@@ -391,7 +391,7 @@ mod tests {
 	#[test]
 	fn overshooting_shows_blank_rows() {
 		let now = Instant::now();
-		// Like CSS's back-out: past the target, then back
+		// Like CSS's back-out: past the target, then back.
 		let motion = Motion::Ease { easing: Easing::CubicBezier(0.3, 1.6, 0.6, 1.0), duration: DURATION };
 		let mut scrolls = ScrollAnimations::new(Some(motion));
 		let shown = [layer(&["a", "b", "c"], 0, 0, 3)];
@@ -414,7 +414,7 @@ mod tests {
 		scrolled.scroll = scrolled.scroll.map(|scroll| Scroll { motion: Some(linear), ..scroll });
 		scrolls.update(&shown, std::slice::from_ref(&scrolled), now);
 
-		// Linearly over twice the duration: half a row from its place at the duration the others take
+		// Linearly over twice the duration: half a row from its place at the duration the others take.
 		let (_, offset) = region(&scrolls, &scrolled, now + DURATION).unwrap();
 		assert!((offset + 0.5).abs() < 0.01, "{offset}");
 	}

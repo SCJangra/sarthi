@@ -1,5 +1,5 @@
 //! Fonts: the main one from `guifont`, and an external window's own, as `require('sarthi').api` takes it in
-//! `sarthi.font`
+//! `sarthi.font`.
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -13,16 +13,16 @@ pub struct Font {
 	#[schemars(with = "Vec<String>")]
 	pub family: FontFamily,
 
-	/// In points, like `guifont`'s `:h`; `guifont`'s size if left out
+	/// In points, like `guifont`'s `:h`; `guifont`'s size if left out.
 	#[schemars(with = "f32")]
 	pub size: FontSize,
 }
 
-/// A font's families
+/// A font's families.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(untagged, expecting = "a list of font families")]
 pub enum FontFamily {
-	/// The main font's, from `guifont`
+	/// The main font's, from `guifont`.
 	#[default]
 	Main,
 	/// These, in order: the first draws all text it has the characters for, the others, in order, the characters it
@@ -31,7 +31,7 @@ pub enum FontFamily {
 }
 
 impl FontFamily {
-	/// These families, or `main` for the main font's
+	/// These families, or `main` for the main font's.
 	pub fn or<'a>(&'a self, main: &'a [String]) -> &'a [String] {
 		match self {
 			Self::Main => main,
@@ -40,19 +40,19 @@ impl FontFamily {
 	}
 }
 
-/// A font's size
+/// A font's size.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
 #[serde(untagged, expecting = "a size in points")]
 pub enum FontSize {
-	/// The main font's, from `guifont`
+	/// The main font's, from `guifont`.
 	#[default]
 	Main,
-	/// In points
+	/// In points.
 	Points(f32),
 }
 
 impl FontSize {
-	/// This size, or `main` for the main font's, in points
+	/// This size, or `main` for the main font's, in points.
 	pub fn or(self, main: f32) -> f32 {
 		match self {
 			Self::Main => main,
@@ -68,7 +68,7 @@ mod tests {
 	use super::{Font, FontFamily, FontSize};
 
 	fn decode(fields: Vec<(&str, Value)>) -> Result<Font, String> {
-		// From msgpack, like Neovim sends it
+		// From msgpack, like Neovim sends it.
 		let map = Value::Map(fields.into_iter().map(|(key, value)| (Value::from(key), value)).collect());
 		rmp_serde::from_slice(&rmp_serde::to_vec(&map).unwrap()).map_err(|error| error.to_string())
 	}
@@ -80,7 +80,7 @@ mod tests {
 		let family = FontFamily::Named(vec![String::from("A"), String::from("B")]);
 		assert_eq!(font.unwrap(), Font { family, size: FontSize::Points(11.0) });
 
-		// Left out, the main font's
+		// Left out, the main font's.
 		assert_eq!(decode(vec![]).unwrap(), Font { family: FontFamily::Main, size: FontSize::Main });
 	}
 

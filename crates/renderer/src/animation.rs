@@ -2,15 +2,15 @@
 
 use std::time::{Duration, Instant};
 
-/// How an animated value moves to its target
+/// How an animated value moves to its target.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Motion {
 	/// Along `easing`, taking `duration`. A new target restarts the curve from where the value is.
 	Ease {
-		/// How the value speeds up and slows down
+		/// How the value speeds up and slows down.
 		easing: Easing,
 
-		/// How long the value takes to reach its target
+		/// How long the value takes to reach its target.
 		duration: Duration,
 	},
 
@@ -18,10 +18,10 @@ pub enum Motion {
 	/// `2 * stiffness.sqrt()`, it overshoots and bounces; with more, it creeps in. A new target keeps the value's
 	/// speed, so motion stays smooth when targets change quickly, e.g. while scrolling continuously.
 	Spring {
-		/// How hard the spring pulls the value to its target
+		/// How hard the spring pulls the value to its target.
 		stiffness: f32,
 
-		/// How much the spring slows the value down
+		/// How much the spring slows the value down.
 		damping: f32,
 	},
 }
@@ -40,16 +40,16 @@ impl Motion {
 	}
 }
 
-/// The shape of a [`Motion::Ease`]: how far along the way the value is at each point in time
+/// The shape of a [`Motion::Ease`]: how far along the way the value is at each point in time.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Easing {
-	/// At constant speed
+	/// At constant speed.
 	Linear,
 
-	/// Fast at first, slowing down at the end (cubic)
+	/// Fast at first, slowing down at the end (cubic).
 	EaseOut,
 
-	/// Speeding up, then slowing down (cubic)
+	/// Speeding up, then slowing down (cubic).
 	EaseInOut,
 
 	/// A cubic Bézier curve from (0, 0) to (1, 1) with control points (x1, y1) and (x2, y2), like CSS's
@@ -58,7 +58,7 @@ pub enum Easing {
 }
 
 impl Easing {
-	/// Progress at `time`, both from 0 to 1
+	/// Progress at `time`, both from 0 to 1.
 	fn progress(self, time: f32) -> f32 {
 		match self {
 			Easing::Linear => time,
@@ -73,7 +73,7 @@ impl Easing {
 	}
 }
 
-/// One coordinate of a cubic Bézier curve from 0 to 1 with control points `p1` and `p2`, at parameter `t`
+/// One coordinate of a cubic Bézier curve from 0 to 1 with control points `p1` and `p2`, at parameter `t`.
 fn bezier(t: f32, p1: f32, p2: f32) -> f32 {
 	let u = 1.0 - t;
 	3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t
@@ -84,7 +84,7 @@ fn bezier(t: f32, p1: f32, p2: f32) -> f32 {
 fn bezier_parameter(x: f32, x1: f32, x2: f32) -> f32 {
 	let (x1, x2) = (x1.clamp(0.0, 1.0), x2.clamp(0.0, 1.0));
 	let (mut low, mut high) = (0.0, 1.0);
-	// 20 halvings: within a millionth, far below a pixel
+	// 20 halvings: within a millionth, far below a pixel.
 	for _ in 0..20 {
 		let middle = (low + high) / 2.0;
 		if bezier(middle, x1, x2) < x {
@@ -100,24 +100,24 @@ fn bezier_parameter(x: f32, x1: f32, x2: f32) -> f32 {
 const REST_DISTANCE: f32 = 0.01;
 const REST_SPEED: f32 = 0.1;
 
-/// A value moving towards 0
+/// A value moving towards 0.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Approach {
 	motion: Motion,
 
-	/// The value and its speed (units per second) when it started moving
+	/// The value and its speed (units per second) when it started moving.
 	from: f32,
 	speed: f32,
 	started: Instant,
 }
 
 impl Approach {
-	/// A value at rest at 0
+	/// A value at rest at 0.
 	pub(crate) fn new(motion: Motion, now: Instant) -> Self {
 		Self { motion, from: 0.0, speed: 0.0, started: now }
 	}
 
-	/// The value at `now`; exactly 0 once it got there
+	/// The value at `now`; exactly 0 once it got there.
 	pub(crate) fn value(&self, now: Instant) -> f32 {
 		let elapsed = now.saturating_duration_since(self.started).as_secs_f32();
 		match self.motion {
@@ -138,7 +138,7 @@ impl Approach {
 		self.add_with(amount, self.motion, now);
 	}
 
-	/// Like [`Approach::add`], moving on with `motion` from then on
+	/// Like [`Approach::add`], moving on with `motion` from then on.
 	pub(crate) fn add_with(&mut self, amount: f32, motion: Motion, now: Instant) {
 		let elapsed = now.saturating_duration_since(self.started).as_secs_f32();
 		let (value, speed) = match self.motion {
@@ -149,7 +149,7 @@ impl Approach {
 		self.motion = motion;
 	}
 
-	/// The value and speed of a spring `elapsed` seconds after it started: the solution of x'' = -k·x - c·x'
+	/// The value and speed of a spring `elapsed` seconds after it started: the solution of x'' = -k·x - c·x'.
 	fn spring(&self, elapsed: f32) -> (f32, f32) {
 		let Motion::Spring { stiffness, damping } = self.motion else { return (0.0, 0.0) };
 		let (x0, v0, t) = (self.from, self.speed, elapsed);
@@ -157,7 +157,7 @@ impl Approach {
 		let zeta = damping / (2.0 * omega);
 
 		if zeta < 1.0 {
-			// Underdamped: an oscillation dying out
+			// Underdamped: an oscillation dying out.
 			let omega_d = omega * (1.0 - zeta * zeta).sqrt();
 			let (a, b) = (x0, (v0 + zeta * omega * x0) / omega_d);
 			let (sin, cos) = (omega_d * t).sin_cos();
@@ -166,12 +166,12 @@ impl Approach {
 			let speed = decay * ((b * omega_d - zeta * omega * a) * cos - (a * omega_d + zeta * omega * b) * sin);
 			(value, speed)
 		} else if zeta == 1.0 {
-			// Critically damped: the fastest approach without overshooting
+			// Critically damped: the fastest approach without overshooting.
 			let b = v0 + omega * x0;
 			let decay = (-omega * t).exp();
 			(decay * (x0 + b * t), decay * (b - omega * (x0 + b * t)))
 		} else {
-			// Overdamped: two decaying terms
+			// Overdamped: two decaying terms.
 			let root = omega * (zeta * zeta - 1.0).sqrt();
 			let (r1, r2) = (-zeta * omega + root, -zeta * omega - root);
 			let c1 = (v0 - r2 * x0) / (r1 - r2);
@@ -234,7 +234,7 @@ mod tests {
 	#[test]
 	fn springs_settle_at_0() {
 		let now = Instant::now();
-		// Under-, critically and overdamped
+		// Under-, critically and overdamped.
 		for damping in [10.0, 40.0, 80.0] {
 			let mut value = Approach::new(Motion::Spring { stiffness: 400.0, damping }, now);
 			value.add(10.0, now);

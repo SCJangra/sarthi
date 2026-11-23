@@ -9,7 +9,7 @@ use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use winit::window::Window;
 
 /// Blur behind a window: through `ext-background-effect` where the compositor offers it, otherwise winit's `set_blur`
-/// (older KDE, macOS)
+/// (older KDE, macOS).
 pub struct Blur {
 	window: Arc<Window>,
 
@@ -28,7 +28,7 @@ impl Blur {
 		}
 	}
 
-	/// How the window is blurred, or `None` where it can't be: X11, which winit can't blur on
+	/// How the window is blurred, or `None` where it can't be: X11, which winit can't blur on.
 	pub fn method(&self) -> Option<&'static str> {
 		#[cfg(all(unix, not(target_os = "macos")))]
 		if self.effect.is_some() {
@@ -41,7 +41,7 @@ impl Blur {
 		}
 	}
 
-	/// Turns the blur behind the window on or off, from its next frame on
+	/// Turns the blur behind the window on or off, from its next frame on.
 	pub fn set(&mut self, blurred: bool) {
 		#[cfg(all(unix, not(target_os = "macos")))]
 		if let Some(effect) = &mut self.effect {
@@ -67,18 +67,18 @@ mod wayland {
 	use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 	use winit::window::Window;
 
-	/// The compositor's background effects for one window
+	/// The compositor's background effects for one window.
 	pub(super) struct BackgroundEffect {
 		connection: Connection,
 
-		/// Where the protocol's events go; nothing reads them, and they're few
+		/// Where the protocol's events go; nothing reads them, and they're few.
 		_queue: EventQueue<State>,
 		handle: QueueHandle<State>,
 		manager: ExtBackgroundEffectManagerV1,
 		compositor: WlCompositor,
 		surface: WlSurface,
 
-		/// The blur, while it's on
+		/// The blur, while it's on.
 		effect: Option<ExtBackgroundEffectSurfaceV1>,
 	}
 
@@ -102,12 +102,12 @@ mod wayland {
 			Some(Self { connection, _queue: queue, handle, manager, compositor, surface, effect: None })
 		}
 
-		/// Turns the blur behind the whole window on or off, from the window's next frame on
+		/// Turns the blur behind the whole window on or off, from the window's next frame on.
 		pub(super) fn set(&mut self, blurred: bool) {
 			match (blurred, self.effect.take()) {
 				(true, None) => {
 					let effect = self.manager.get_background_effect(&self.surface, &self.handle, ());
-					// Clipped by the compositor to the window, whatever its size
+					// Clipped by the compositor to the window, whatever its size.
 					let region = self.compositor.create_region(&self.handle, ());
 					region.add(0, 0, i32::MAX, i32::MAX);
 					effect.set_blur_region(Some(&region));
@@ -131,7 +131,7 @@ mod wayland {
 		}
 	}
 
-	/// The protocol objects' events, which nothing needs
+	/// The protocol objects' events, which nothing needs.
 	struct State;
 
 	impl Dispatch<WlRegistry, GlobalListContents> for State {
